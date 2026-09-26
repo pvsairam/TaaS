@@ -7,6 +7,7 @@ flows, ADF partial-page-render waits, ESS job polling via REST, REST calls with 
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ class PlaywrightDriver:
         self._headless = headless
         self._evidence = Path(evidence_dir)
         self._environ = environ
+        # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
+        self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
         self._pw: Any = None
         self._browser: Any = None
@@ -37,7 +40,7 @@ class PlaywrightDriver:
 
         self._url = env.url
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=self._headless)
+        self._browser = self._pw.chromium.launch(headless=self._headless, executable_path=self._executable)
         self.login_as(persona)
 
     def login_as(self, persona: str) -> None:

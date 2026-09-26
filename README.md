@@ -73,5 +73,15 @@ Credentials are read from environment variables and never go in specs or Git:
 | `QM_FUSION_URL` | Non-prod pod URL, e.g. `https://xxxx-test.fa.us2.oraclecloud.com` |
 | `QM_FUSION_USER` / `QM_FUSION_PASSWORD` | Default test user |
 | `QM_FUSION_USER_<PERSONA>` / `QM_FUSION_PASSWORD_<PERSONA>` | Per-persona user, e.g. `QM_FUSION_USER_LINE_MANAGER` |
+| `QM_FUSION_KIND` | `DEV`, `TEST` or `STAGE` (default `DEV`) |
+| `QM_CHROMIUM_PATH` | Optional path to a preinstalled Chromium |
+
+Then run the login smoke test, followed by the HCM suite:
+
+```bash
+pip install -e ".[browser]"
+qm run examples/smoke/login.yaml
+qm run examples/tests/hcm --report results.json   # failure screenshots go to ./evidence
+```
 
 The runner refuses production pods. Use dedicated test users, not real employees' accounts.
