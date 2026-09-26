@@ -4,27 +4,47 @@ from conftest import EXAMPLES
 
 from quartermaster.domain.models import ChangeType, Feature, Release
 from quartermaster.dsl.loader import load_release, load_tests
-from quartermaster.impact.analyzer import analyze, match, plan, severity
+from quartermaster.impact.analyzer import COVERAGE_THRESHOLD, analyze, match, plan, severity
 
 
 def _data() -> tuple[Release, list]:
     return load_release(EXAMPLES / "releases" / "26D_sample.json"), load_tests(EXAMPLES / "tests")
 
 
-def test_payables_feature_ranks_invoice_test_first() -> None:
+def test_each_feature_is_covered_by_its_own_module() -> None:
     release, tests = _data()
-    impacts = analyze(release, tests)
-    assert impacts[0].test.id == "ap.create-invoice-po-match"
-    assert "FIN-AP-001" in impacts[0].features
-    assert any("same product (Payables)" in r for r in impacts[0].reasons)
+    covers = {i.test.id: i.features for i in analyze(release, tests)}
+    assert covers == {
+        "hcm.hire-employee": ["HCM-CORE-005"],
+        "hcm.promote-employee": ["HCM-CORE-005", "HCM-CMP-006"],
+        "hcm.absence-request-approval": ["HCM-ABS-004", "HCM-CMP-006"],
+        "ap.create-invoice-po-match": ["FIN-AP-001"],
+        "gl.manual-journal-approval": ["FIN-GL-002"],
+        "po.create-standard-order": ["PRC-PO-003"],
+    }
 
 
-def test_unrelated_feature_does_not_match() -> None:
+def test_reasons_explain_the_match() -> None:
     release, tests = _data()
-    hcm = next(f for f in release.features if f.id == "HCM-ABS-004")
-    for t in tests:
-        score, _ = match(hcm, t)
-        assert score < 0.15
+    hire = next(i for i in analyze(release, tests) if i.test.id == "hcm.hire-employee")
+    assert any("same product (Global Human Resources)" in r and "shared tags: hire, redwood" in r for r in hire.reasons)
+
+
+def test_shared_word_across_modules_is_weak_evidence() -> None:
+    release, tests = _data()
+    sales_order = next(f for f in release.features if f.id == "SCM-OM-007")
+    purchase_order = next(t for t in tests if t.id == "po.create-standard-order")
+    score, reasons = match(sales_order, purchase_order)
+    assert 0 < score < COVERAGE_THRESHOLD
+    assert any("different module" in r for r in reasons)
+
+
+def test_generic_tag_across_modules_does_not_cover() -> None:
+    release, tests = _data()
+    redwood_invoice = next(f for f in release.features if f.id == "FIN-AP-001")
+    hire = next(t for t in tests if t.id == "hcm.hire-employee")
+    score, _ = match(redwood_invoice, hire)  # both tagged "redwood"
+    assert score < COVERAGE_THRESHOLD
 
 
 def test_risk_bounded_and_sorted() -> None:
@@ -53,13 +73,25 @@ def test_empty_release_has_zero_risk() -> None:
 def test_plan_respects_budget_but_keeps_critical() -> None:
     release, tests = _data()
     p = plan(analyze(release, tests), budget_minutes=1)
-    ids = [i.test.id for i in p.selected]
-    assert ids == ["ap.create-invoice-po-match"]  # critical, kept despite 6 min > 1 min budget
-    assert len(p.deferred) == 2
+    # Both critical tests are kept even though together they need 14 min.
+    assert [i.test.id for i in p.selected] == ["hcm.hire-employee", "ap.create-invoice-po-match"]
+    assert len(p.deferred) == 4
 
 
-def test_plan_without_budget_selects_all_risky() -> None:
+def test_plan_fills_budget_by_priority() -> None:
+    release, tests = _data()
+    p = plan(analyze(release, tests), budget_minutes=25)
+    assert [i.test.id for i in p.selected] == [
+        "hcm.hire-employee",
+        "ap.create-invoice-po-match",
+        "hcm.promote-employee",
+        "gl.manual-journal-approval",
+    ]
+    assert p.total_minutes <= 25
+
+
+def test_plan_without_budget_reports_uncovered_features() -> None:
     release, tests = _data()
     p = plan(analyze(release, tests))
-    assert len(p.selected) == 3
-    assert [f.id for f in p.uncovered_features(release)] == ["HCM-ABS-004"]
+    assert len(p.selected) == 6
+    assert [f.id for f in p.uncovered_features(release)] == ["SCM-OM-007"]

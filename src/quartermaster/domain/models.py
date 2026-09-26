@@ -101,11 +101,20 @@ class Action(StrEnum):
     ASSERT_VISIBLE = "assert_visible"
     ASSERT_TEXT = "assert_text"
     WAIT_JOB = "wait_job"  # ESS scheduled process
+    LOGIN_AS = "login_as"  # switch persona mid-test, e.g. employee submits, manager approves
     API_CALL = "api_call"
 
 
 _TARGETED = {Action.CLICK, Action.FILL, Action.SELECT, Action.ASSERT_VISIBLE, Action.ASSERT_TEXT}
-_VALUED = {Action.NAVIGATE, Action.FILL, Action.SELECT, Action.ASSERT_TEXT, Action.WAIT_JOB, Action.API_CALL}
+_VALUED = {
+    Action.NAVIGATE,
+    Action.FILL,
+    Action.SELECT,
+    Action.ASSERT_TEXT,
+    Action.WAIT_JOB,
+    Action.API_CALL,
+    Action.LOGIN_AS,
+}
 
 
 class Step(_Strict):

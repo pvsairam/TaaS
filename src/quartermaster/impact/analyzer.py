@@ -62,6 +62,13 @@ _WORD = re.compile(r"[a-z0-9]+")
 
 # Below this, a feature/test pairing is treated as noise and not reported.
 MATCH_THRESHOLD = 0.15
+# At or above this, the test is considered to *cover* the feature. Weaker matches still add
+# risk, but a feature with only weak matches is reported as uncovered.
+COVERAGE_THRESHOLD = 0.5
+# Tags and vocabulary shared across modules are weak evidence: "sales order" and "purchase
+# order" share a word, and "redwood"/"approval" tags appear in every pillar. Matches from a
+# different module are scaled down so they add some risk but never count as coverage.
+CROSS_MODULE_DAMPING = 0.5
 
 
 def _tokens(text: str) -> set[str]:
@@ -85,11 +92,12 @@ def match(feature: Feature, test: TestCase) -> tuple[float, list[str]]:
     """How strongly a feature relates to a test, in [0, 1], with reasons."""
     reasons: list[str] = []
     scores: list[float] = [0.0]
+    same_module = feature.module.lower() == test.module.lower()
 
     if feature.product.lower() == test.product.lower():
         scores.append(0.7)
         reasons.append(f"same product ({test.product})")
-    elif feature.module.lower() == test.module.lower():
+    elif same_module:
         scores.append(0.3)
         reasons.append(f"same module ({test.module})")
 
@@ -113,6 +121,9 @@ def match(feature: Feature, test: TestCase) -> tuple[float, list[str]]:
     best = max(scores)
     if len(scores) > 2:
         best = min(1.0, best + 0.1 * (len(scores) - 2))
+    if best and not same_module:
+        best *= CROSS_MODULE_DAMPING
+        reasons.append(f"different module ({feature.module} vs {test.module}): weak evidence")
     return best, reasons
 
 
@@ -122,7 +133,7 @@ class TestImpact:
     risk: float
     priority: float
     reasons: list[str] = field(default_factory=list)
-    features: list[str] = field(default_factory=list)
+    features: list[str] = field(default_factory=list)  # features this test covers
 
 
 def analyze(
@@ -140,7 +151,8 @@ def analyze(
                 continue
             p = m * severity(f, enabled_opt_ins)
             survive *= 1 - p
-            feats.append(f.id)
+            if m >= COVERAGE_THRESHOLD:
+                feats.append(f.id)
             reasons.append(f"{f.id} '{f.title}' (p={p:.2f}): {'; '.join(why)}")
         risk = 1 - survive
         impacts.append(

@@ -69,7 +69,8 @@ def _check_placeholders(test: TestCase, path: Path) -> None:
             if name not in RUNTIME_VARS:
                 raise SpecError(f"{path}: data '{key}' may only reference runtime variables, not ${{{name}}}")
     for i, step in enumerate(test.steps):
-        for name in _PLACEHOLDER.findall(step.value or ""):
+        texts = [step.value or ""] + [v for _, v in (step.target.ordered() if step.target else [])]
+        for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):
             if name not in known:
                 raise SpecError(f"{path}: step {i} uses undefined data placeholder ${{{name}}}")
 

@@ -16,6 +16,7 @@ from quartermaster.domain.models import (
     Action,
     Environment,
     HealingProposal,
+    Locator,
     LocatorStrategy,
     RunResult,
     Step,
@@ -29,7 +30,8 @@ from quartermaster.safety.guards import assert_safe_target
 
 
 class Driver(Protocol):
-    def open(self, env: Environment) -> None: ...
+    def open(self, env: Environment, persona: str) -> None: ...
+    def login_as(self, persona: str) -> None: ...
     def close(self) -> None: ...
     def count(self, strategy: LocatorStrategy, value: str) -> int: ...
     def navigate(self, path: str) -> None: ...
@@ -64,7 +66,7 @@ def run_test(
     results: list[StepResult] = []
     healing: list[HealingProposal] = []
 
-    driver.open(env)
+    driver.open(env, test.persona)
     try:
         failed = False
         for i, step in enumerate(test.steps):
@@ -81,8 +83,9 @@ def run_test(
                         HealingProposal(
                             step_index=i,
                             intent=step.intent,
+                            # Template values (not rendered data), so the patch applies to the spec.
                             old=step.target.ordered()[0],  # type: ignore[union-attr]
-                            new=(res.strategy, res.value),
+                            new=step.target.ordered()[res.index],  # type: ignore[union-attr]
                             confidence=res.confidence,
                         )
                     )
@@ -120,6 +123,9 @@ def _execute(step: Step, data: dict[str, str], runtime: dict[str, str], driver: 
     value = render_value(step.value, data, runtime)
     a = step.action
 
+    if a is Action.LOGIN_AS:
+        driver.login_as(value)  # type: ignore[arg-type]
+        return None
     if a is Action.NAVIGATE:
         driver.navigate(value)  # type: ignore[arg-type]
         return None
@@ -137,7 +143,11 @@ def _execute(step: Step, data: dict[str, str], runtime: dict[str, str], driver: 
         return None
 
     assert step.target is not None  # guaranteed by Step validation
-    res = resolve(step.target, driver)
+    target = Locator(
+        strategies=[{s: render_value(v, data, runtime) or v} for s, v in step.target.ordered()],
+        description=step.target.description,
+    )
+    res = resolve(target, driver)
     s, v = res.strategy, res.value
     if a is Action.CLICK:
         driver.click(s, v)

@@ -16,12 +16,15 @@ def test_example_specs_load() -> None:
         "ap.create-invoice-po-match",
         "gl.manual-journal-approval",
         "po.create-standard-order",
+        "hcm.hire-employee",
+        "hcm.absence-request-approval",
+        "hcm.promote-employee",
     }
 
 
 def test_example_release_loads() -> None:
     r = load_release(EXAMPLES / "releases" / "26D_sample.json")
-    assert r.id == "26D" and len(r.features) == 4
+    assert r.id == "26D" and len(r.features) == 7
 
 
 def test_release_id_format_enforced() -> None:
@@ -92,3 +95,18 @@ def test_render_value_nested_runtime() -> None:
     data = {"inv": "QM-${RUN_ID}"}
     assert render_value("${inv}", data, {"RUN_ID": "AB12"}) == "QM-AB12"
     assert render_value(None, data) is None
+
+
+def test_undefined_placeholder_in_locator_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "id: x\ntitle: t\nmodule: m\nproduct: p\nsteps:\n"
+        "  - {action: click, intent: open, target: {strategies: [{text: '${nope}'}]}}\n"
+    )
+    with pytest.raises(SpecError, match="undefined data placeholder"):
+        load_test(p)
+
+
+def test_login_as_requires_value() -> None:
+    with pytest.raises(ValidationError, match="requires a value"):
+        Step(action=Action.LOGIN_AS, intent="switch")

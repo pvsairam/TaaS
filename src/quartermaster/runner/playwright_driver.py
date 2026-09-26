@@ -7,52 +7,58 @@ flows, ADF partial-page-render waits, ESS job polling via REST, REST calls with 
 
 from __future__ import annotations
 
-import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from quartermaster.domain.models import Environment, LocatorStrategy
+from quartermaster.runner.credentials import persona_credentials
 
 
 class PlaywrightDriver:
-    def __init__(self, username: str, password: str, *, headless: bool = True, evidence_dir: str = "evidence"):
-        self._username = username
-        self._password = password
+    """One browser per run; one fresh browser context (clean cookies) per persona login."""
+
+    def __init__(
+        self, *, headless: bool = True, evidence_dir: str = "evidence", environ: Mapping[str, str] | None = None
+    ):
         self._headless = headless
         self._evidence = Path(evidence_dir)
+        self._environ = environ
+        self._url = ""
         self._pw: Any = None
         self._browser: Any = None
+        self._context: Any = None
         self.page: Any = None
-
-    @classmethod
-    def from_env(cls, **kw: Any) -> PlaywrightDriver:
-        """Credentials come from the environment (injected by the vault), never from specs."""
-        return cls(os.environ["QM_FUSION_USER"], os.environ["QM_FUSION_PASSWORD"], **kw)
 
     # ------------------------------------------------------------------ lifecycle
 
-    def open(self, env: Environment) -> None:
+    def open(self, env: Environment, persona: str) -> None:
         from playwright.sync_api import sync_playwright  # optional dependency
 
+        self._url = env.url
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=self._headless)
-        self.page = self._browser.new_context(viewport={"width": 1600, "height": 1000}).new_page()
-        self.page.goto(env.url, wait_until="domcontentloaded")
-        self._login()
+        self.login_as(persona)
+
+    def login_as(self, persona: str) -> None:
+        user, password = persona_credentials(persona, self._environ)
+        if self._context is not None:
+            self._context.close()
+        self._context = self._browser.new_context(viewport={"width": 1600, "height": 1000})
+        self.page = self._context.new_page()
+        self.page.goto(self._url, wait_until="domcontentloaded")
+        # Native Fusion sign-in page. SSO (IDCS/OCI IAM, Azure AD, Okta) will plug in here.
+        self.page.get_by_label("User ID").fill(user)
+        self.page.get_by_label("Password").fill(password)
+        self.page.get_by_role("button", name="Sign In").click()
+        self.page.wait_for_load_state("networkidle")
 
     def close(self) -> None:
         if self._browser is not None:
             self._browser.close()
         if self._pw is not None:
             self._pw.stop()
-        self._browser = self._pw = self.page = None
-
-    def _login(self) -> None:
-        # Native Fusion sign-in page. SSO (IDCS/OCI IAM, Azure AD, Okta) will plug in here.
-        self.page.get_by_label("User ID").fill(self._username)
-        self.page.get_by_label("Password").fill(self._password)
-        self.page.get_by_role("button", name="Sign In").click()
-        self.page.wait_for_load_state("networkidle")
+        self._browser = self._pw = self._context = self.page = None
 
     # ------------------------------------------------------------------ locators
 

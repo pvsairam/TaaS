@@ -22,8 +22,12 @@ class FakeDriver:
         self.api_status = 200
         self.opened = self.closed = False
 
-    def open(self, env: Environment) -> None:
+    def open(self, env: Environment, persona: str) -> None:
         self.opened = True
+        self.calls.append(("open", persona))
+
+    def login_as(self, persona: str) -> None:
+        self.calls.append(("login_as", persona))
 
     def close(self) -> None:
         self.closed = True

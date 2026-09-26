@@ -53,7 +53,7 @@ def test_resolver_raises_when_nothing_matches() -> None:
 
 
 def test_example_invoice_runs_end_to_end(stage_env: Environment) -> None:
-    test = load_test(EXAMPLES / "tests" / "ap_create_invoice.yaml")
+    test = load_test(EXAMPLES / "tests" / "erp" / "ap_create_invoice.yaml")
     d = FakeDriver(
         {
             ("role", "link:Create Invoice"): 1,
@@ -139,3 +139,36 @@ def test_runner_refuses_prod_before_opening_browser() -> None:
     with pytest.raises(UnsafeEnvironmentError):
         run_test(_tc(_click({"label": "x"})), prod, d)
     assert not d.opened
+
+
+def test_absence_flow_switches_persona_and_renders_locator_placeholders(stage_env: Environment) -> None:
+    test = load_test(EXAMPLES / "tests" / "hcm" / "absence_request_approval.yaml")
+    d = FakeDriver(
+        {
+            ("label", "Type"): 1,
+            ("label", "Start Date"): 1,
+            ("label", "End Date"): 1,
+            ("label", "Comments"): 1,
+            ("role", "button:Submit"): 1,
+            ("text", "QM absence R7"): 1,  # locator built from ${comment}
+            ("role", "button:Approve"): 1,
+            ("label", "Status"): 1,
+        },
+        texts={"Status": "Approved"},
+    )
+    result = run_test(test, stage_env, d, run_id="R7")
+    assert result.status is StepStatus.PASSED, [s.error for s in result.steps]
+    assert d.calls[0] == ("open", "Employee")
+    assert ("login_as", "Line Manager") in d.calls
+    assert ("click", "text", "QM absence R7") in d.calls
+
+
+def test_healing_proposal_keeps_template_value(stage_env: Environment) -> None:
+    step = Step(
+        action=Action.CLICK,
+        intent="open",
+        target=Locator(strategies=[{"label": "Gone"}, {"text": "${name}"}]),
+    )
+    d = FakeDriver({("text", "Bob"): 1})
+    result = run_test(_tc(step, data={"name": "Bob"}), stage_env, d)
+    assert result.healing[0].new == (LocatorStrategy.TEXT, "${name}")

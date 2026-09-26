@@ -4,7 +4,7 @@
 > testing service that certifies each Oracle Fusion Cloud quarterly update before it reaches
 > production.
 >
-> Status: v0.1 draft · 2026-09-26
+> Status: v0.2 draft · 2026-09-26 (owner decisions recorded in §13)
 
 ---
 
@@ -178,6 +178,8 @@ match(f,t)   = max( module/product match, tag overlap (Jaccard), keyword overlap
 severity(f)  = base(UI=0.6 | process=0.8 | both=1.0)
              + 0.2 if customer action required
              + 0.1 if opt-in enabled in tenant
+match(f,t)  ×= 0.5 if f and t are in different modules       # shared words/tags across pillars are weak
+covers(t,f)  = match(f,t) ≥ 0.5                              # only strong matches count as coverage
 risk(t)      = 1 - Π_f (1 - match(f,t) · severity(f))       # noisy-OR over features
 priority(t)  = risk(t) · business_criticality(t)
 ```
@@ -213,6 +215,21 @@ plus historical failure rate.
 - Immutable audit log of runs, approvals and heal acceptances. Signed evidence bundles.
 - Target SOC 2 Type II; data residency options (US/EU).
 
+### 9.1 AI data policy (proposed, per tenant)
+
+| Mode | Where AI requests go | For whom |
+|---|---|---|
+| **Standard** (default) | Anthropic Claude API, after PII masking | Most customers and internal use |
+| **In-region cloud** | Claude via the customer's own AWS Bedrock / Google Vertex / Azure Foundry account in their region | Customers with EU/regional data residency or cloud-procurement rules |
+| **AI off** | No AI calls. Release analysis, planning and running tests still work (all deterministic). | Highly regulated customers |
+
+In every mode, masking runs first. Screenshots and raw HCM records (salaries, national IDs) are
+never sent to an LLM.
+
+**Where test scripts live:** test specs are YAML files in a Git repository per tenant, either
+ours (SaaS) or the customer's own GitHub/GitLab (hybrid). Run results and evidence go in the
+tenant's database and object storage in their chosen region.
+
 ---
 
 ## 10. Quality strategy for *our own* tool ("defect-free" in practice)
@@ -233,15 +250,31 @@ plus historical failure rate.
 | Phase | Weeks | Scope | Exit criteria |
 |---|---|---|---|
 | **0. Foundations** *(this commit)* | 1–2 | Domain model, YAML DSL, env guard, impact analyzer + planner, locator resolver, runner with pluggable driver, AI provider interface, CLI | `pytest` green; `qm plan` produces a ranked plan from sample data |
-| **1. Oracle runner MVP** | 3–6 | Playwright driver for Fusion (login/SSO, navigator, ADF waits, Redwood waits), ESS job waiter, REST step, evidence capture | 10 golden P2P tests pass on a real pod, with less than 2% flakiness over 20 runs |
+| **1. Oracle runner MVP** | 3–6 | Playwright driver for Fusion (login/SSO, navigator, ADF waits, Redwood waits), ESS job waiter, REST step, evidence capture | 10 golden Hire-to-Retire tests pass on a real pod, with less than 2% flakiness over 20 runs |
 | **2. Release Intelligence** | 5–8 | What's New ingestion (HTML/XLSX), LLM extraction, tenant opt-in discovery | 26D feature list ingested with ≥95% field accuracy vs. manual |
 | **3. AI authoring + healing** | 7–11 | NL → spec, recorder, healing proposals + review UI | ≥70% of drafted specs run green after ≤1 human edit |
 | **4. Web app + triage** | 9–14 | Dashboard, runs, triage agent, certification report, RBAC, SSO | Pilot customer certifies one quarterly release end-to-end |
-| **5. Scale & content** | 14+ | Pre-built libraries (P2P, O2C, R2R, Hire-to-Retire), HCM/SCM, multi-tenant SaaS, SOC 2 | 3 paying tenants |
+| **5. Scale & content** | 14+ | Pre-built libraries: HCM first (Hire-to-Retire, Absence, Compensation), then ERP (P2P, R2R), then SCM (O2C, Inventory); multi-tenant SaaS, SOC 2 | 3 paying tenants |
 
-**Suggested MVP scope:** Financials (AP, GL) and Procurement (Purchasing), i.e. the
-**Procure-to-Pay** and **Record-to-Report** flows. These are the highest-risk, most commonly
-tested processes.
+**MVP scope (decided): HCM first**, then ERP, then SCM.
+
+| Order | Pillar | First business flows |
+|---|---|---|
+| 1 | **HCM** | Hire an employee, promote/transfer, change salary, submit and approve an absence, terminate. Self-service (employee/manager) and HR Specialist personas. |
+| 2 | ERP | Supplier invoice (AP), manual journal (GL), purchase order (Procurement) |
+| 3 | SCM | Sales order (Order Management), inventory transfer, receipt |
+
+Why HCM needs extra care:
+- **Most sensitive data:** names, national IDs, salaries, bank details. PII masking and the
+  AI data policy (§9.1) are MVP requirements, not later add-ons.
+- **Effective dating:** every HCM change has an effective date, and future-dated rows affect
+  what you see today. Test data must pin dates and clean up after itself.
+- **Approvals everywhere:** most HCM transactions route to a manager or HR for approval. The
+  runner needs an "act as approver" step (log in as the approver persona, then approve).
+- **Role-driven UI:** Employee, Line Manager and HR Specialist see different pages, so
+  personas are first-class in test specs.
+- **Redwood first:** Oracle moved much of HCM to Redwood early, so tests target Redwood pages
+  and fall back to classic ones.
 
 ---
 
@@ -257,14 +290,28 @@ tested processes.
 
 ---
 
-## 13. Open questions for you
+## 13. Owner decisions & remaining questions
 
-1. **Business model:** an internal tool for your own/your clients' Fusion tenants, or a
-   commercial SaaS product?
-2. **Pillars first:** ERP (Financials/Procurement), HCM, or SCM?
-3. **Environment access:** do you have a Fusion non-prod pod we can develop against?
-4. **LLM constraints:** can customer data leave their region, or do we need a private
-   deployment (Bedrock/Vertex/on-prem)?
+**Decided (2026-09-26)**
+
+1. **Business model: both.** A commercial multi-tenant SaaS product, also used internally.
+   Consequences:
+   - Strict tenant isolation (data, credentials, test repos, AI usage) from day one.
+   - Two deployment modes:
+     - **SaaS:** we host everything.
+     - **Hybrid:** we host the control plane, and the runner sits inside the customer's
+       network so their Oracle credentials never leave it.
+   - Internal use is just "tenant #1".
+2. **Pillar order:** HCM → ERP → SCM (see §11).
+3. **Test environment:** the owner has a Fusion non-prod pod for development. Credentials go
+   in environment secrets (`QM_FUSION_URL`, `QM_FUSION_USER`, `QM_FUSION_PASSWORD`), never in
+   chat, specs or Git.
+
+**Still open**
+
+4. **AI data policy.** When the AI writes or triages a test, it sees step details, error
+   messages and sometimes page content. We need to decide where that data may go. The
+   proposed default is in §9.1.
 5. **Team:** who builds the web UI? The plan assumes Next.js; the core engine is Python.
 
 ---
