@@ -27,7 +27,8 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Claude-backed test author + failure triage, with PII masking | `src/quartermaster/ai/` |
 | Per-persona credentials from environment variables; `login_as` persona switching | `src/quartermaster/runner/credentials.py` |
 | Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
-| `qm` CLI (`validate`, `plan`, `run`, `record`) | `src/quartermaster/cli.py` |
+| Evidence per run: screenshots (off / on failure / every step), video, `run.json`, Word document | `src/quartermaster/evidence/` |
+| `qm` CLI (`validate`, `plan`, `run`, `record`, `document`) | `src/quartermaster/cli.py` |
 
 ## Quick start
 
@@ -104,6 +105,41 @@ qm run my_tests/view_worker.yaml --headed
 Recording notes: sign-in and password fields are never recorded; Oracle's generated ADF ids
 (`pt1:_FOr1:...`) are never used as locators because they change between releases. Each
 recorded step keeps several locators (label, role, text) so it survives UI changes.
+
+## Proof of testing: screenshots, video and the Word evidence document
+
+Choose per run what to capture:
+
+```bash
+qm run examples/tests/hcm/create_location.yaml --screenshots every-step --video always \
+  --evidence-doc --release 26C --tester "Your Name"
+```
+
+| Option | Values |
+|---|---|
+| `--screenshots` | `off`, `on-failure` (default), `every-step` |
+| `--video` | `off` (default), `on-failure` (kept only when the run fails), `always` |
+| `--evidence-doc` | write the Word evidence document |
+| `--release`, `--tester` | shown in the evidence; tester defaults to your login name |
+
+Each run gets its own folder:
+
+```
+evidence/<test id>/<run id>/
+  run.json                              what ran, where, by whom, and every step's result
+  screenshots/step-01.png ...           the browser window after each step, element boxed in red
+  videos/*.webm                         only when video is on; never put in the document
+  <test id>_<run id>_evidence.docx      only with --evidence-doc
+```
+
+The Word document has a cover with the run details, a step summary, then one page per step
+with the description, value used, expected result (the optional `expected:` field on a step),
+actual result, time and screenshot, and a sign-off table at the end. Each screenshot and the
+test file carry a SHA-256 fingerprint in `run.json` and the document, so a reviewer can check
+nothing was swapped. Screenshots of HR screens contain personal data: store the evidence
+folders where only the right people can read them.
+
+Rebuild a document from a saved run at any time: `qm document evidence/<test id>/<run id>`.
 
 ## Connecting to a Fusion test environment
 

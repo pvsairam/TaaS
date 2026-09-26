@@ -122,6 +122,7 @@ class Step(_Strict):
     intent: str = Field(description="Human-readable purpose; used by the healer and reports")
     target: Locator | None = None
     value: str | None = None
+    expected: str = Field(default="", description="Expected result, shown in the evidence document")
     options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -190,6 +191,18 @@ class StepResult(_Strict):
     duration_ms: float = 0
     error: str | None = None
     evidence: list[str] = Field(default_factory=list)
+    # Recorded for the evidence document and run history.
+    action: str = ""
+    value: str | None = None  # rendered value, e.g. the text typed
+    expected: str = ""
+    locator: str | None = None  # the locator actually used, e.g. "role=button:Search"
+    started_at: str | None = None  # ISO 8601 with time zone
+
+
+class ScreenshotMode(StrEnum):
+    OFF = "off"
+    ON_FAILURE = "on-failure"
+    EVERY_STEP = "every-step"
 
 
 class RunResult(_Strict):
@@ -197,6 +210,14 @@ class RunResult(_Strict):
     environment: str
     steps: list[StepResult]
     healing: list[HealingProposal] = Field(default_factory=list)
+    run_id: str = ""
+    test_title: str = ""
+    persona: str = ""
+    environment_url: str = ""
+    release: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    screenshots: ScreenshotMode = ScreenshotMode.ON_FAILURE
 
     @property
     def status(self) -> StepStatus:

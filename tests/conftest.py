@@ -14,9 +14,16 @@ EXAMPLES = ROOT / "examples"
 class FakeDriver:
     """In-memory page: `elements` maps (strategy, value) -> match count."""
 
-    def __init__(self, elements: dict[tuple[str, str], int] | None = None, texts: dict[str, str] | None = None):
+    def __init__(
+        self,
+        elements: dict[tuple[str, str], int] | None = None,
+        texts: dict[str, str] | None = None,
+        evidence_dir: Path | None = None,
+    ):
         self.elements = {(LocatorStrategy(s), v): n for (s, v), n in (elements or {}).items()}
         self.texts = texts or {}
+        self.evidence_dir = evidence_dir  # when set, screenshots are written there as real PNGs
+        self.highlights: list[tuple[str, tuple[LocatorStrategy, str] | None]] = []
         self.calls: list[tuple[Any, ...]] = []
         self.job_status = "SUCCEEDED"
         self.api_status = 200
@@ -58,8 +65,16 @@ class FakeDriver:
         self.calls.append(("api_call", request))
         return self.api_status
 
-    def screenshot(self, name: str) -> str | None:
-        return f"evidence/{name}.png"
+    def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None:
+        self.highlights.append((name, highlight))
+        if self.evidence_dir is None:
+            return f"evidence/{name}.png"
+        from test_evidence_document import tiny_png
+
+        path = self.evidence_dir / "screenshots" / f"{name}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(tiny_png())
+        return str(path)
 
 
 @pytest.fixture

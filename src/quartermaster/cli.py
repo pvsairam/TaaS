@@ -9,22 +9,24 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from quartermaster.domain.models import Environment, EnvironmentKind, RunResult, StepStatus, TestCase
+from quartermaster.domain.models import Environment, EnvironmentKind, RunResult, ScreenshotMode, StepStatus, TestCase
 from quartermaster.dsl.loader import SpecError, load_release, load_test, load_tests
+from quartermaster.evidence.document import write_evidence_document
+from quartermaster.evidence.run_record import build_record, new_run_id, run_folder, write_record
 from quartermaster.impact.analyzer import analyze, plan
 from quartermaster.runner.credentials import MissingCredentialsError
 from quartermaster.runner.engine import Driver, run_test
 from quartermaster.safety.guards import UnsafeEnvironmentError, assert_safe_target
 
 
-def _playwright_driver(args: argparse.Namespace) -> Driver:
+def _playwright_driver(args: argparse.Namespace, run_dir: Path) -> Driver:
     from quartermaster.runner.playwright_driver import PlaywrightDriver
 
-    return PlaywrightDriver(headless=not args.headed, evidence_dir=args.evidence)
+    return PlaywrightDriver(headless=not args.headed, evidence_dir=str(run_dir), record_video=args.video != "off")
 
 
-# Replaced in tests with a fake; the real run drives a browser.
-driver_factory: Callable[[argparse.Namespace], Driver] = _playwright_driver
+# Replaced in tests with a fake; the real run drives a browser. Gets the run's evidence folder.
+driver_factory: Callable[[argparse.Namespace, Path], Driver] = _playwright_driver
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -63,14 +65,22 @@ def _run(args: argparse.Namespace) -> int:
     if not url:
         print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
         return 2
-    env = Environment(name=args.env_name, url=url, kind=EnvironmentKind(args.kind))
+    env = Environment(name=args.env_name, url=url, kind=EnvironmentKind(args.kind), release=args.release)
     target = Path(args.tests)
-    tests: list[TestCase] = load_tests(target) if target.is_dir() else [load_test(target)]
+    if target.is_dir():
+        tests: list[TestCase] = load_tests(target)  # also rejects duplicate ids
+        files: list[Path] = sorted(target.rglob("*.y*ml"))  # same order load_tests uses
+    else:
+        tests, files = [load_test(target)], [target]
+    evidence_root = Path(args.evidence)
 
     results: list[RunResult] = []
-    for t in tests:
+    for t, spec_file in zip(tests, files, strict=True):
+        run_id = new_run_id()
+        run_dir = run_folder(evidence_root, t.id, run_id)
+        driver = driver_factory(args, run_dir)
         try:
-            result = run_test(t, env, driver_factory(args))
+            result = run_test(t, env, driver, run_id=run_id, screenshots=ScreenshotMode(args.screenshots))
         except (UnsafeEnvironmentError, MissingCredentialsError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
@@ -78,7 +88,20 @@ def _run(args: argparse.Namespace) -> int:
         print(f"{result.status.value.upper():<7} {t.id}")
         for s in result.steps:
             if s.status in (StepStatus.FAILED, StepStatus.HEALED):
-                print(f"        step {s.index} [{s.status.value}] {s.intent}: {s.error or 'used fallback locator'}")
+                print(f"        step {s.index + 1} [{s.status.value}] {s.intent}: {s.error or 'used fallback locator'}")
+
+        videos: list[str] = list(getattr(driver, "videos", []))
+        if args.video == "on-failure" and result.status is not StepStatus.FAILED:
+            for v in videos:
+                Path(v).unlink(missing_ok=True)
+            videos = []
+        record = build_record(result, run_dir=run_dir, test_file=spec_file, video_mode=args.video, videos=videos,
+                              executed_by=args.tester)
+        write_record(record, run_dir)
+        print(f"        evidence: {run_dir}")
+        if args.evidence_doc:
+            doc = write_evidence_document(record, run_dir, run_dir / f"{t.id}_{run_id}_evidence.docx")
+            print(f"        document: {doc}")
 
     if args.report:
         Path(args.report).write_text(
@@ -87,6 +110,15 @@ def _run(args: argparse.Namespace) -> int:
     failed = sum(r.status is StepStatus.FAILED for r in results)
     print(f"\n{len(results) - failed}/{len(results)} passed")
     return 1 if failed else 0
+
+
+def _document(args: argparse.Namespace) -> int:
+    """Rebuild the evidence document from a saved run folder."""
+    run_dir = Path(args.run_dir)
+    record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    out = Path(args.out) if args.out else run_dir / f"{record['test_id']}_{record['run_id']}_evidence.docx"
+    print(f"Wrote {write_evidence_document(record, run_dir, out)}")
+    return 0
 
 
 def _record(args: argparse.Namespace) -> int:
@@ -148,9 +180,25 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     rn.add_argument("--env-name", default="fusion")
     rn.add_argument("--headed", action="store_true", help="show the browser window")
-    rn.add_argument("--evidence", default="evidence", help="directory for failure screenshots")
-    rn.add_argument("--report", help="write JSON results to this file")
+    rn.add_argument("--evidence", default="evidence", help="root folder for run evidence (one folder per run)")
+    rn.add_argument(
+        "--screenshots", default="on-failure", choices=[m.value for m in ScreenshotMode],
+        help="when to take screenshots (default: on-failure)",
+    )
+    rn.add_argument(
+        "--video", default="off", choices=["off", "on-failure", "always"],
+        help="record a video of the run into the run folder; never put in the document (default: off)",
+    )
+    rn.add_argument("--evidence-doc", action="store_true", help="write a Word evidence document for each run")
+    rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
+    rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")
+    rn.add_argument("--report", help="write JSON results for all runs to this file")
     rn.set_defaults(func=_run)
+
+    dc = sub.add_parser("document", help="rebuild the Word evidence document from a saved run folder")
+    dc.add_argument("run_dir", help="run folder containing run.json")
+    dc.add_argument("--out", help="output .docx path (default: inside the run folder)")
+    dc.set_defaults(func=_document)
 
     rc = sub.add_parser("record", help="record a test by clicking through the pod in QM_FUSION_URL")
     rc.add_argument("out", help="YAML file to write")

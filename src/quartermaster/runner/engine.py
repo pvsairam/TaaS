@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, Protocol
 
 from quartermaster.domain.models import (
@@ -19,6 +20,7 @@ from quartermaster.domain.models import (
     Locator,
     LocatorStrategy,
     RunResult,
+    ScreenshotMode,
     Step,
     StepResult,
     StepStatus,
@@ -41,7 +43,7 @@ class Driver(Protocol):
     def text_of(self, strategy: LocatorStrategy, value: str) -> str: ...
     def wait_job(self, job_name: str, timeout_s: float) -> str: ...
     def api_call(self, request: str, options: dict[str, Any]) -> int: ...
-    def screenshot(self, name: str) -> str | None: ...
+    def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None: ...
 
 
 # Called when every locator strategy fails; may return an AI-proposed replacement.
@@ -60,23 +62,35 @@ def run_test(
     allowed_hosts: set[str] | None = None,
     healer: Healer | None = None,
     run_id: str | None = None,
+    screenshots: ScreenshotMode = ScreenshotMode.ON_FAILURE,
 ) -> RunResult:
     assert_safe_target(env, allowed_hosts)
-    runtime = {"RUN_ID": run_id or uuid.uuid4().hex[:8].upper()}
+    run_id = run_id or uuid.uuid4().hex[:8].upper()
+    runtime = {"RUN_ID": run_id}
     results: list[StepResult] = []
     healing: list[HealingProposal] = []
+    started_at = _now()
 
     driver.open(env, test.persona)
     try:
         failed = False
         for i, step in enumerate(test.steps):
+            base: dict[str, Any] = {
+                "index": i,
+                "intent": step.intent,
+                "action": step.action.value,
+                "value": render_value(step.value, test.data, runtime),
+                "expected": step.expected,
+            }
             if failed:
-                results.append(StepResult(index=i, intent=step.intent, status=StepStatus.SKIPPED))
+                results.append(StepResult(**base, status=StepStatus.SKIPPED))
                 continue
             start = time.perf_counter()
+            step_started = _now()
             status, error, evidence = StepStatus.PASSED, None, []
+            seen: dict[str, Resolution] = {}
             try:
-                res = _execute(step, test.data, runtime, driver)
+                res = _execute(step, test.data, runtime, driver, seen)
                 if res is not None and res.healed:
                     status = StepStatus.HEALED
                     healing.append(
@@ -98,28 +112,57 @@ def run_test(
             except Exception as e:  # driver errors, assertion failures, timeouts
                 status, error = StepStatus.FAILED, f"{type(e).__name__}: {e}"
 
+            used = seen.get("res")
             if status is StepStatus.FAILED:
                 failed = True
-                shot = driver.screenshot(f"{test.id}-step{i}")
+            if _wants_screenshot(screenshots, status):
+                # Taken after the step, with the element it used outlined when still on screen.
+                shot = driver.screenshot(f"step-{i + 1:02d}", (used.strategy, used.value) if used else None)
                 if shot:
                     evidence.append(shot)
             results.append(
                 StepResult(
-                    index=i,
-                    intent=step.intent,
+                    **base,
                     status=status,
                     duration_ms=round((time.perf_counter() - start) * 1000, 2),
                     error=error,
                     evidence=evidence,
+                    locator=f"{used.strategy.value}={used.value}" if used else None,
+                    started_at=step_started,
                 )
             )
     finally:
         driver.close()
 
-    return RunResult(test_id=test.id, environment=env.name, steps=results, healing=healing)
+    return RunResult(
+        test_id=test.id,
+        environment=env.name,
+        steps=results,
+        healing=healing,
+        run_id=run_id,
+        test_title=test.title,
+        persona=test.persona,
+        environment_url=env.url,
+        release=env.release,
+        started_at=started_at,
+        finished_at=_now(),
+        screenshots=screenshots,
+    )
 
 
-def _execute(step: Step, data: dict[str, str], runtime: dict[str, str], driver: Driver) -> Resolution | None:
+def _now() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _wants_screenshot(mode: ScreenshotMode, status: StepStatus) -> bool:
+    if mode is ScreenshotMode.EVERY_STEP:
+        return True
+    return mode is ScreenshotMode.ON_FAILURE and status is StepStatus.FAILED
+
+
+def _execute(
+    step: Step, data: dict[str, str], runtime: dict[str, str], driver: Driver, seen: dict[str, Resolution]
+) -> Resolution | None:
     value = render_value(step.value, data, runtime)
     a = step.action
 
@@ -148,6 +191,7 @@ def _execute(step: Step, data: dict[str, str], runtime: dict[str, str], driver: 
         description=step.target.description,
     )
     res = resolve(target, driver)
+    seen["res"] = res  # kept even if the action below fails, for the report and screenshot
     s, v = res.strategy, res.value
     if a is Action.CLICK:
         driver.click(s, v)

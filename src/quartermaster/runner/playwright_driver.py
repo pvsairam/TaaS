@@ -20,6 +20,27 @@ from quartermaster.domain.models import Environment, LocatorStrategy
 from quartermaster.runner.credentials import persona_credentials
 
 
+# The red box is a separate overlay on top of the page: an outline on the element itself is
+# often clipped by Redwood field wrappers. Tiny elements (e.g. hidden radio inputs) box their label.
+_DRAW_HIGHLIGHT = """el => {
+  el.scrollIntoView({block: 'center', inline: 'nearest'});
+  let r = el.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) {
+    const host = el.closest('label, [role=radiogroup], [role=group]') || el.parentElement;
+    if (host) r = host.getBoundingClientRect();
+  }
+  const box = document.createElement('div');
+  box.id = '__qm_highlight';
+  Object.assign(box.style, {
+    position: 'fixed', left: (r.left - 5) + 'px', top: (r.top - 5) + 'px',
+    width: (r.width + 10) + 'px', height: (r.height + 10) + 'px', boxSizing: 'border-box',
+    border: '3px solid #d32f2f', borderRadius: '6px', zIndex: '2147483647', pointerEvents: 'none',
+  });
+  document.body.appendChild(box);
+}"""
+_REMOVE_HIGHLIGHT = "() => document.getElementById('__qm_highlight')?.remove()"
+
+
 class PlaywrightDriver:
     """One browser per run; one fresh browser context (clean cookies) per persona login."""
 
@@ -31,12 +52,20 @@ class PlaywrightDriver:
         environ: Mapping[str, str] | None = None,
         context_hook: Callable[[Any], None] | None = None,
         settle_ms: int = 15_000,
+        record_video: bool = False,
+        action_timeout_ms: int = 60_000,
     ):
         self._headless = headless
         self._evidence = Path(evidence_dir)
         self._environ = environ
         self._context_hook = context_hook  # e.g. proxy/route setup, applied to every persona context
         self._settle_ms = settle_ms  # max wait for an element to appear, or for the network to go quiet
+        # Evidence layout inside evidence_dir: screenshots/step-01.png ... and videos/*.webm
+        self._record_video = record_video
+        # Fusion dev pods can take well over Playwright's 30 s default to answer a click that
+        # opens a new page, which shows up as random click timeouts.
+        self._action_timeout_ms = action_timeout_ms
+        self.videos: list[str] = []
         # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
         self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
@@ -60,10 +89,18 @@ class PlaywrightDriver:
         user, password = persona_credentials(persona, self._environ)
         if self._context is not None:
             self._context.close()
-        self._context = self._browser.new_context(viewport={"width": 1600, "height": 1000})
+        size = {"width": 1600, "height": 1000}
+        video: dict[str, Any] = {}
+        if self._record_video:
+            video = {"record_video_dir": str(self._evidence / "videos"), "record_video_size": size}
+        self._context = self._browser.new_context(viewport=size, **video)
         if self._context_hook is not None:
             self._context_hook(self._context)
         self.page = self._context.new_page()
+        self.page.set_default_timeout(self._action_timeout_ms)
+        if self._record_video and self.page.video is not None:
+            # One video per sign-in; a persona switch starts a new one. Written when the context closes.
+            self.videos.append(str(self.page.video.path()))
         self._track_requests(self.page)
         self.page.goto(self._url, wait_until="domcontentloaded")
         # Two sign-in pages exist: the classic Fusion one ("User ID" / "Sign In") and the
@@ -105,6 +142,9 @@ class PlaywrightDriver:
             self.page.wait_for_timeout(100)  # also lets Playwright deliver the request events
 
     def close(self) -> None:
+        if self._context is not None:
+            with suppress(Exception):
+                self._context.close()  # finishes writing any video files
         if self._browser is not None:
             self._browser.close()
         if self._pw is not None:
@@ -184,17 +224,21 @@ class PlaywrightDriver:
             loc.select_option(label=option)
         else:
             # ADF/Redwood choice lists are inputs with a dropdown. Redwood only searches on real
-            # key presses, so type the value, then click the first suggestion containing it.
+            # key presses, so type the value, then click the best matching suggestion.
             loc.click()
             loc.fill("")
             loc.press_sequentially(option, delay=100)
             self._settle()
-            suggestion = self.page.get_by_role("option").filter(has_text=option).locator("visible=true").first
+            suggestions = self.page.get_by_role("option").locator("visible=true")
             try:
-                suggestion.wait_for(timeout=self._settle_ms)
-                suggestion.click()
+                suggestions.first.wait_for(timeout=self._settle_ms)
+                best = _best_option(suggestions.all_inner_texts(), option)
             except Exception:  # playwright TimeoutError: no suggestion list, e.g. a plain ADF choice
+                best = None
+            if best is None:
                 loc.press("Enter")
+            else:
+                suggestions.nth(best).click()
         self._settle()
 
     def text_of(self, strategy: LocatorStrategy, value: str) -> str:
@@ -209,10 +253,32 @@ class PlaywrightDriver:
     def api_call(self, request: str, options: dict[str, Any]) -> int:
         raise NotImplementedError("REST steps land in Phase 1")
 
-    def screenshot(self, name: str) -> str | None:
+    def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None:
+        """Save what the user would see (the browser window) with the step's element boxed in red."""
         if self.page is None:
             return None
-        self._evidence.mkdir(parents=True, exist_ok=True)
-        path = self._evidence / f"{name}.png"
-        self.page.screenshot(path=str(path), full_page=True)
+        folder = self._evidence / "screenshots"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{name}.png"
+        if highlight is not None:
+            with suppress(Exception):  # the element may be gone, e.g. after a click that navigated
+                self._locator(*highlight).first.evaluate(_DRAW_HIGHLIGHT, timeout=2_000)
+        self.page.screenshot(path=str(path))
+        with suppress(Exception):
+            self.page.evaluate(_REMOVE_HIGHLIGHT)
         return str(path)
+
+
+def _best_option(texts: list[str], wanted: str) -> int | None:
+    """Pick a suggestion: exact text first, then one starting with the value, then one containing it.
+
+    "Common Set" must choose "Common Set (seeded)" over "BATA US GRADE COMMON SET", and
+    "Active" must not choose "Inactive".
+    """
+    norm = [" ".join(t.split()).casefold() for t in texts]
+    w = " ".join(wanted.split()).casefold()
+    for test in (lambda t: t == w, lambda t: t.startswith(w), lambda t: w in t):
+        for i, t in enumerate(norm):
+            if test(t):
+                return i
+    return None

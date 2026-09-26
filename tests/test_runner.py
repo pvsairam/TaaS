@@ -10,6 +10,7 @@ from quartermaster.domain.models import (
     HealingProposal,
     Locator,
     LocatorStrategy,
+    ScreenshotMode,
     Step,
     StepStatus,
     TestCase,
@@ -86,8 +87,50 @@ def test_failure_skips_remaining_steps_and_captures_evidence(stage_env: Environm
     nav = Step(action=Action.NAVIGATE, intent="go", value="Payables > Invoices")
     result = run_test(_tc(_click({"label": "Missing"}), nav), stage_env, FakeDriver())
     assert [s.status for s in result.steps] == [StepStatus.FAILED, StepStatus.SKIPPED]
-    assert result.steps[0].evidence == ["evidence/t-step0.png"]
+    assert result.steps[0].evidence == ["evidence/step-01.png"]
+    assert result.steps[1].evidence == []  # skipped steps get no screenshot
     assert result.status is StepStatus.FAILED
+
+
+def test_screenshot_modes(stage_env: Environment) -> None:
+    steps = (_click({"label": "Save"}), Step(action=Action.NAVIGATE, intent="go", value="A > B"))
+    page = {("label", "Save"): 1}
+
+    every = run_test(_tc(*steps), stage_env, FakeDriver(page), screenshots=ScreenshotMode.EVERY_STEP)
+    assert [s.evidence for s in every.steps] == [["evidence/step-01.png"], ["evidence/step-02.png"]]
+
+    on_failure = run_test(_tc(*steps), stage_env, FakeDriver(page))  # the default
+    assert [s.evidence for s in on_failure.steps] == [[], []]
+
+    off = run_test(_tc(_click({"label": "Missing"})), stage_env, FakeDriver(), screenshots=ScreenshotMode.OFF)
+    assert off.steps[0].status is StepStatus.FAILED and off.steps[0].evidence == []
+
+
+def test_step_results_record_what_was_done(stage_env: Environment) -> None:
+    fill = Step(
+        action=Action.FILL,
+        intent="Enter name",
+        value="QM ${RUN_ID}",
+        expected="Name accepts the value",
+        target=Locator(strategies=[{"label": "Name"}]),
+    )
+    d = FakeDriver({("label", "Name"): 1})
+    result = run_test(_tc(fill), stage_env, d, run_id="R1", screenshots=ScreenshotMode.EVERY_STEP)
+    [s] = result.steps
+    assert (s.action, s.value, s.expected, s.locator) == ("fill", "QM R1", "Name accepts the value", "label=Name")
+    assert s.started_at and result.started_at and result.finished_at
+    assert (result.run_id, result.test_title, result.environment_url) == ("R1", "t", stage_env.url)
+    # the screenshot outlines the element the step used
+    assert d.highlights == [("step-01", (LocatorStrategy.LABEL, "Name"))]
+
+
+def test_failed_check_still_reports_the_element_it_looked_at(stage_env: Environment) -> None:
+    check = Step(action=Action.ASSERT_TEXT, intent="City", value="Redwood City",
+                 target=Locator(strategies=[{"label": "City"}]))
+    d = FakeDriver({("label", "City"): 1}, texts={"City": "Menlo Park"})
+    [s] = run_test(_tc(check), stage_env, d).steps
+    assert s.status is StepStatus.FAILED and s.locator == "label=City"
+    assert d.highlights == [("step-01", (LocatorStrategy.LABEL, "City"))]
 
 
 def test_ai_healer_called_on_total_resolution_failure(stage_env: Environment) -> None:
