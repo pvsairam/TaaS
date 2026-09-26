@@ -8,7 +8,7 @@ flows, ADF partial-page-render waits, ESS job polling via REST, REST calls with 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +20,17 @@ class PlaywrightDriver:
     """One browser per run; one fresh browser context (clean cookies) per persona login."""
 
     def __init__(
-        self, *, headless: bool = True, evidence_dir: str = "evidence", environ: Mapping[str, str] | None = None
+        self,
+        *,
+        headless: bool = True,
+        evidence_dir: str = "evidence",
+        environ: Mapping[str, str] | None = None,
+        context_hook: Callable[[Any], None] | None = None,
     ):
         self._headless = headless
         self._evidence = Path(evidence_dir)
         self._environ = environ
+        self._context_hook = context_hook  # e.g. proxy/route setup, applied to every persona context
         # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
         self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
@@ -48,6 +54,8 @@ class PlaywrightDriver:
         if self._context is not None:
             self._context.close()
         self._context = self._browser.new_context(viewport={"width": 1600, "height": 1000})
+        if self._context_hook is not None:
+            self._context_hook(self._context)
         self.page = self._context.new_page()
         self.page.goto(self._url, wait_until="domcontentloaded")
         # Native Fusion sign-in page. SSO (IDCS/OCI IAM, Azure AD, Okta) will plug in here.
@@ -90,7 +98,8 @@ class PlaywrightDriver:
 
     def navigate(self, path: str) -> None:
         """Open a page via the Navigator, e.g. 'Payables > Invoices'."""
-        self.page.get_by_role("link", name="Navigator").click()
+        # Classic pages show the Navigator as the ☰ icon with a "Navigator" title.
+        self.page.get_by_role("link", name="Navigator").first.click()
         for part in (p.strip() for p in path.split(">")):
             self.page.get_by_role("link", name=part, exact=True).first.click()
         self.page.wait_for_load_state("networkidle")
@@ -102,10 +111,13 @@ class PlaywrightDriver:
         self._locator(strategy, value).fill(text)
 
     def select(self, strategy: LocatorStrategy, value: str, option: str) -> None:
-        # ADF choice lists are not native <select>s; type-ahead + Enter works for both UIs.
         loc = self._locator(strategy, value)
-        loc.fill(option)
-        loc.press("Enter")
+        if loc.evaluate("el => el.tagName.toLowerCase()") == "select":
+            loc.select_option(label=option)
+        else:
+            # ADF/Redwood choice lists are usually inputs with a dropdown: type-ahead + Enter.
+            loc.fill(option)
+            loc.press("Enter")
 
     def text_of(self, strategy: LocatorStrategy, value: str) -> str:
         return str(self._locator(strategy, value).inner_text())

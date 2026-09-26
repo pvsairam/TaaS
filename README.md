@@ -26,7 +26,8 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Production guard (blocks PROD kind and prod-looking pod hosts) | `src/quartermaster/safety/guards.py` |
 | Claude-backed test author + failure triage, with PII masking | `src/quartermaster/ai/` |
 | Per-persona credentials from environment variables; `login_as` persona switching | `src/quartermaster/runner/credentials.py` |
-| `qm` CLI (`validate`, `plan`) | `src/quartermaster/cli.py` |
+| Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
+| `qm` CLI (`validate`, `plan`, `run`, `record`) | `src/quartermaster/cli.py` |
 
 ## Quick start
 
@@ -63,6 +64,46 @@ steps:
 
 See `examples/tests/hcm/` and `examples/tests/erp/` for complete specs. The absence example shows
 an employee submitting a request and switching to the line manager (`login_as`) to approve it.
+
+## Run it on your own computer (fastest way to reach your pod)
+
+If your laptop can open the pod in a browser, it can run Quartermaster. You need Python 3.11+
+and Git.
+
+```bash
+git clone https://github.com/pvsairam/TaaS.git && cd TaaS
+git checkout claude/awesome-bardeen-r668wx
+python -m venv .venv
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+pip install -e ".[browser]"
+python -m playwright install chromium
+```
+
+Set the connection details for this terminal only (don't save them in the repo):
+
+```bash
+# Windows PowerShell                                        # macOS/Linux
+$env:QM_FUSION_URL="https://<pod>.fa.us6.oraclecloud.com"   # export QM_FUSION_URL=...
+$env:QM_FUSION_USER="<user>"                                # export QM_FUSION_USER=...
+$env:QM_FUSION_PASSWORD="<password>"                        # export QM_FUSION_PASSWORD=...
+```
+
+Then:
+
+```bash
+qm run examples/smoke/login.yaml --headed        # 1. can we sign in?
+qm run examples/tests/hcm/view_worker.yaml --headed
+
+# Record your own test: a browser opens already signed in; click through the flow,
+# then press Enter in the terminal. Replay it any time (e.g. every quarterly update).
+qm record my_tests/view_worker.yaml --id hcm.view-worker --title "View a worker" \
+  --module HCM --product "Global Human Resources"
+qm run my_tests/view_worker.yaml --headed
+```
+
+Recording notes: sign-in and password fields are never recorded; Oracle's generated ADF ids
+(`pt1:_FOr1:...`) are never used as locators because they change between releases. Each
+recorded step keeps several locators (label, role, text) so it survives UI changes.
 
 ## Connecting to a Fusion test environment
 

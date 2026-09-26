@@ -19,6 +19,7 @@ def test_example_specs_load() -> None:
         "hcm.hire-employee",
         "hcm.absence-request-approval",
         "hcm.promote-employee",
+        "hcm.view-worker",
     }
 
 

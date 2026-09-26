@@ -8,7 +8,7 @@ from quartermaster.cli import main
 
 def test_cli_validate(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["validate", str(EXAMPLES / "tests")]) == 0
-    assert "6 test spec(s) valid" in capsys.readouterr().out
+    assert "7 test spec(s) valid" in capsys.readouterr().out
 
 
 def test_cli_plan(capsys: pytest.CaptureFixture[str]) -> None:
@@ -44,12 +44,13 @@ def test_cli_run_uses_driver_and_reports(
     from quartermaster import cli
 
     monkeypatch.setenv("QM_FUSION_URL", "https://abcd-dev2.fa.us6.oraclecloud.com")
-    monkeypatch.setattr(cli, "driver_factory", lambda args: FakeDriver({("text", "Navigator"): 1}))
+    page = {("css", "a[title='Navigator']"): 1, ("xpath", "//*[starts-with(normalize-space(text()), 'Welcome,')]"): 1}
+    monkeypatch.setattr(cli, "driver_factory", lambda args: FakeDriver(page))
     report = tmp_path / "r.json"
     rc = main(["run", str(EXAMPLES / "smoke" / "login.yaml"), "--report", str(report)])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "HEALED  smoke.login" in out  # role locator missing on fake page, text fallback used
+    assert "HEALED  smoke.login" in out  # role locator missing on fake page, css fallback used
     assert json.loads(report.read_text())[0]["test_id"] == "smoke.login"
 
 

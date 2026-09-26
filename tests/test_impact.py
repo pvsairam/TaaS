@@ -21,6 +21,7 @@ def test_each_feature_is_covered_by_its_own_module() -> None:
         "ap.create-invoice-po-match": ["FIN-AP-001"],
         "gl.manual-journal-approval": ["FIN-GL-002"],
         "po.create-standard-order": ["PRC-PO-003"],
+        "hcm.view-worker": ["HCM-CORE-005"],
     }
 
 
@@ -75,7 +76,7 @@ def test_plan_respects_budget_but_keeps_critical() -> None:
     p = plan(analyze(release, tests), budget_minutes=1)
     # Both critical tests are kept even though together they need 14 min.
     assert [i.test.id for i in p.selected] == ["hcm.hire-employee", "ap.create-invoice-po-match"]
-    assert len(p.deferred) == 4
+    assert len(p.deferred) == 5
 
 
 def test_plan_fills_budget_by_priority() -> None:
@@ -93,5 +94,5 @@ def test_plan_fills_budget_by_priority() -> None:
 def test_plan_without_budget_reports_uncovered_features() -> None:
     release, tests = _data()
     p = plan(analyze(release, tests))
-    assert len(p.selected) == 6
+    assert len(p.selected) == 7
     assert [f.id for f in p.uncovered_features(release)] == ["SCM-OM-007"]

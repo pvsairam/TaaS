@@ -14,7 +14,7 @@ from quartermaster.dsl.loader import SpecError, load_release, load_test, load_te
 from quartermaster.impact.analyzer import analyze, plan
 from quartermaster.runner.credentials import MissingCredentialsError
 from quartermaster.runner.engine import Driver, run_test
-from quartermaster.safety.guards import UnsafeEnvironmentError
+from quartermaster.safety.guards import UnsafeEnvironmentError, assert_safe_target
 
 
 def _playwright_driver(args: argparse.Namespace) -> Driver:
@@ -89,6 +89,43 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _record(args: argparse.Namespace) -> int:
+    from quartermaster.recorder.recorder import Recorder, events_to_test, to_yaml
+    from quartermaster.runner.playwright_driver import PlaywrightDriver
+
+    url = os.environ.get("QM_FUSION_URL")
+    if not url:
+        print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
+        return 2
+    env = Environment(name=args.env_name, url=url, kind=EnvironmentKind(args.kind))
+    assert_safe_target(env)
+
+    driver = PlaywrightDriver(headless=False, evidence_dir=args.evidence)
+    recorder = Recorder()
+    driver.open(env, args.persona)  # sign-in is done for you and never recorded
+    try:
+        recorder.attach(driver.page)
+        print("Recording. Do the business flow in the browser window.")
+        input("Press Enter here when you are finished... ")
+    finally:
+        driver.close()
+
+    test = events_to_test(
+        recorder.events,
+        test_id=args.id,
+        title=args.title,
+        module=args.module,
+        product=args.product,
+        persona=args.persona,
+    )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(to_yaml(test), encoding="utf-8")
+    load_test(out)  # the saved file must pass the same validation as hand-written specs
+    print(f"Saved {len(test.steps)} step(s) to {out}. Replay with: qm run {out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="qm", description="Quartermaster: Oracle Fusion release regression")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -115,10 +152,22 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--report", help="write JSON results to this file")
     rn.set_defaults(func=_run)
 
+    rc = sub.add_parser("record", help="record a test by clicking through the pod in QM_FUSION_URL")
+    rc.add_argument("out", help="YAML file to write")
+    rc.add_argument("--id", required=True, help="test id, e.g. hcm.view-worker")
+    rc.add_argument("--title", required=True)
+    rc.add_argument("--module", required=True, help="e.g. HCM")
+    rc.add_argument("--product", required=True, help="e.g. Global Human Resources")
+    rc.add_argument("--persona", default="")
+    rc.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
+    rc.add_argument("--env-name", default="fusion")
+    rc.add_argument("--evidence", default="evidence")
+    rc.set_defaults(func=_record)
+
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except SpecError as e:
+    except (SpecError, UnsafeEnvironmentError, MissingCredentialsError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

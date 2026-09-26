@@ -1,0 +1,36 @@
+# First live HCM test. Labels are from the classic Person Management page; the first run on
+# the pod will confirm them (or use `qm record` to capture the exact ones).
+id: hcm.view-worker
+title: Search for a worker in Person Management and open their record
+module: HCM
+product: Global Human Resources
+process: Hire-to-Retire
+persona: HR Specialist
+priority: high
+tags: [person management, core hr, smoke]
+estimated_minutes: 2
+data:
+  # Change to a worker that exists in your pod.
+  person_number: "10"
+steps:
+  - action: navigate
+    intent: Open Person Management
+    value: My Client Groups > Person Management
+  - action: fill
+    intent: Enter person number
+    value: ${person_number}
+    target:
+      strategies:
+        - label: Person Number
+        - role: "textbox:Person Number"
+  - action: click
+    intent: Search
+    target:
+      strategies:
+        - role: "button:Search"
+        - text: Search
+  - action: assert_visible
+    intent: Search returns the worker
+    target:
+      strategies:
+        - xpath: "//table//*[normalize-space(text())='${person_number}']"
