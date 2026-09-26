@@ -51,8 +51,8 @@ class FakeDriver:
     def fill(self, strategy: LocatorStrategy, value: str, text: str) -> None:
         self.calls.append(("fill", strategy.value, value, text))
 
-    def select(self, strategy: LocatorStrategy, value: str, option: str) -> None:
-        self.calls.append(("select", strategy.value, value, option))
+    def select(self, strategy: LocatorStrategy, value: str, option: str, pick: str | None = None) -> None:
+        self.calls.append(("select", strategy.value, value, option) + ((pick,) if pick else ()))
 
     def text_of(self, strategy: LocatorStrategy, value: str) -> str:
         return self.texts.get(value, "")

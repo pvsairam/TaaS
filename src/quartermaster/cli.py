@@ -6,8 +6,10 @@ import argparse
 import json
 import os
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from quartermaster.domain.models import Environment, EnvironmentKind, RunResult, ScreenshotMode, StepStatus, TestCase
 from quartermaster.dsl.loader import SpecError, load_release, load_test, load_tests
@@ -138,7 +140,9 @@ def _record(args: argparse.Namespace) -> int:
     try:
         recorder.attach(driver.page)
         print("Recording. Do the business flow in the browser window.")
-        input("Press Enter here when you are finished... ")
+        print("Use 'Add check' in the page toolbar to record what must be true, e.g. a value on screen.")
+        print("Finish with 'Stop recording' in the browser, or press Enter here.")
+        _wait_for_stop(recorder, driver.page)
     finally:
         driver.close()
 
@@ -156,6 +160,21 @@ def _record(args: argparse.Namespace) -> int:
     load_test(out)  # the saved file must pass the same validation as hand-written specs
     print(f"Saved {len(test.steps)} step(s) to {out}. Replay with: qm run {out}")
     return 0
+
+
+def _wait_for_stop(recorder: Any, page: Any) -> None:
+    """Return when Stop recording is pressed in the browser, Enter is pressed here, or the window closes.
+
+    Playwright's sync API may only be used from this thread, so the terminal is read in a helper
+    thread while this one keeps the browser responsive.
+    """
+    entered = threading.Event()
+    threading.Thread(target=lambda: (sys.stdin.readline(), entered.set()), daemon=True).start()
+    while not (recorder.stopped or entered.is_set()):
+        try:
+            page.wait_for_timeout(200)  # also delivers the page's events to the recorder
+        except Exception:  # the browser window was closed
+            return
 
 
 def main(argv: list[str] | None = None) -> int:

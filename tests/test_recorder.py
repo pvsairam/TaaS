@@ -51,6 +51,41 @@ def test_nothing_recorded_is_an_error() -> None:
         events_to_test([], **META)
 
 
+def test_recorded_pick_round_trips_and_is_used_on_replay(tmp_path: Path) -> None:
+    from conftest import FakeDriver
+
+    from quartermaster.runner.engine import run_test
+
+    events = [
+        {"kind": "navigate", "value": "My Client Groups > Workforce Structures"},
+        _ev("select", "Postal Code", ("role", "combobox:Postal Code"), value="94065"),
+        {**_ev("assert_text", "City", ("label", "City"), value="Redwood Shores")},
+    ]
+    events[1]["pick"] = "94065 Redwood Shores, San Mateo, CA"
+    test = events_to_test(events, **META)
+    p = tmp_path / "t.yaml"
+    p.write_text(to_yaml(test))
+    saved = load_test(p)
+    assert [s.action for s in saved.steps] == [Action.NAVIGATE, Action.SELECT, Action.ASSERT_TEXT]
+    assert saved.steps[1].options == {"pick": "94065 Redwood Shores, San Mateo, CA"}
+
+    env = Environment(name="t", url="https://abcd-test.fa.us2.oraclecloud.com", kind=EnvironmentKind.TEST)
+    d = FakeDriver({("role", "combobox:Postal Code"): 1, ("label", "City"): 1}, texts={"City": " Redwood\tShores "})
+    result = run_test(saved, env, d)
+    assert result.status is StepStatus.PASSED, [s.error for s in result.steps]  # whitespace is collapsed
+    assert ("navigate", "My Client Groups > Workforce Structures") in d.calls
+    assert ("select", "role", "combobox:Postal Code", "94065", "94065 Redwood Shores, San Mateo, CA") in d.calls
+
+
+def test_stop_from_the_browser_ends_recording_without_a_step() -> None:
+    from quartermaster.recorder.recorder import Recorder
+
+    r = Recorder()
+    r._receive(_ev("click", "Save", ("role", "button:Save")))
+    r._receive({"kind": "stop"})
+    assert r.stopped and [e["kind"] for e in r.events] == ["click"]
+
+
 def test_yaml_round_trip(tmp_path: Path) -> None:
     test = events_to_test([_ev("select", "Legal Employer", ("label", "Legal Employer"), value="US1")], **META)
     p = tmp_path / "t.yaml"

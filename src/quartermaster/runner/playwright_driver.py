@@ -220,10 +220,11 @@ class PlaywrightDriver:
             loc.fill(text)
         self._settle()
 
-    def select(self, strategy: LocatorStrategy, value: str, option: str) -> None:
+    def select(self, strategy: LocatorStrategy, value: str, option: str, pick: str | None = None) -> None:
+        """Choose `option`; in type-ahead lists, type `option` and choose the suggestion `pick` (default: option)."""
         loc = self._locator(strategy, value)
         if loc.evaluate("el => el.tagName.toLowerCase()") == "select":
-            loc.select_option(label=option)
+            loc.select_option(label=pick or option)
         else:
             # ADF/Redwood choice lists are inputs with a dropdown. Redwood only searches on real
             # key presses, so type the value, then click the best matching suggestion.
@@ -231,17 +232,33 @@ class PlaywrightDriver:
             loc.fill("")
             loc.press_sequentially(option, delay=100)
             self._settle()
-            suggestions = self.page.get_by_role("option").locator("visible=true")
+            suggestions = self._suggestions(loc)
             try:
                 suggestions.first.wait_for(timeout=self._settle_ms)
-                best = _best_option(suggestions.all_inner_texts(), option)
             except Exception:  # playwright TimeoutError: no suggestion list, e.g. a plain ADF choice
-                best = None
-            if best is None:
                 loc.press("Enter")
-            else:
-                suggestions.nth(best).click()
+                self._settle()
+                return
+            texts = suggestions.all_inner_texts()
+            best = _best_option(texts, pick or option)
+            if best is None:
+                # Never fall back to the first suggestion: that silently picks a wrong value.
+                offered = "; ".join(" ".join(t.split()) for t in texts[:5])
+                raise ValueError(f"no suggestion matches {pick or option!r}; offered: {offered}")
+            suggestions.nth(best).click()
         self._settle()
+
+    def _suggestions(self, field: Any) -> Any:
+        """Visible suggestions of a type-ahead list.
+
+        Redwood lists show suggestions as rows of a grid in the dropdown named by the field's
+        aria-controls; other lists use role=option.
+        """
+        controls = field.get_attribute("aria-controls")
+        if controls:
+            drop = self.page.locator(f'[id="{controls}"]')
+            return drop.locator("[role=row], [role=option], tbody tr").locator("visible=true")
+        return self.page.get_by_role("option").locator("visible=true")
 
     def text_of(self, strategy: LocatorStrategy, value: str) -> str:
         loc = self._locator(strategy, value)

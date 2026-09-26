@@ -95,16 +95,39 @@ Then:
 qm run examples/smoke/login.yaml --headed        # 1. can we sign in?
 qm run examples/tests/hcm/view_worker.yaml --headed
 
-# Record your own test: a browser opens already signed in; click through the flow,
-# then press Enter in the terminal. Replay it any time (e.g. every quarterly update).
+# Record your own test: a browser opens already signed in; click through the flow, then press
+# "Stop recording" in the page (or Enter in the terminal). Replay it any time, e.g. every quarter.
 qm record my_tests/view_worker.yaml --id hcm.view-worker --title "View a worker" \
   --module HCM --product "Global Human Resources"
 qm run my_tests/view_worker.yaml --headed
 ```
 
-Recording notes: sign-in and password fields are never recorded; Oracle's generated ADF ids
-(`pt1:_FOr1:...`) are never used as locators because they change between releases. Each
-recorded step keeps several locators (label, role, text) so it survives UI changes.
+While recording, a small toolbar sits at the bottom right of the page:
+
+- **Add check**: the next click records a check instead of an action. Click a value (for example
+  the City a postal code filled in) and the replay will fail if that value is different. Add at
+  least one check at the end of every flow, so a replay proves the outcome, not only the clicks.
+- **Stop recording**: saves the test file and closes the browser.
+
+What gets recorded, and how it replays:
+
+| You do | Saved as |
+|---|---|
+| Open a page from the Navigator (☰, expand a group, click an item) | one step: `navigate: My Client Groups > Workforce Structures` |
+| Click a button, link or tile | `click` |
+| Type in a field, or type a Redwood date | `fill` (dates as `01/01/1951`) |
+| Type in a list and click a suggestion | `select`, with the exact suggestion kept as `pick` |
+| Add check, then click a value | `assert_text` (or `assert_visible` for long text) |
+
+Typed and checked values go into the file's `data` block (`value1`, `value2`...), so you can change
+test data without touching the steps; rename them to something meaningful. Sign-in and password
+fields are never recorded, and Oracle's generated ids are not used as locators because they change.
+When a label appears more than once on a page (City in the address and again in tax details), the
+step is anchored to the section heading above it.
+
+Keep recorded tests in one folder under version control (for example `my_tests/`) and re-run the
+folder after each quarterly update: `qm run my_tests --evidence-doc`. Only keep tests there that
+are safe to repeat.
 
 ## Proof of testing: screenshots, video and the Word evidence document
 
