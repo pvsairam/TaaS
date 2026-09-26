@@ -1,3 +1,5 @@
+# NOT YET CHECKED AGAINST A POD: navigation paths, labels and data are unverified examples.
+# This test submits a real transaction; run it only on a pod where that is acceptable.
 id: hcm.promote-employee
 title: Line manager promotes a direct report with a salary change
 module: HCM

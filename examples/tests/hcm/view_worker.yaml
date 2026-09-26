@@ -14,6 +14,10 @@ data:
   # Employee Number; the results list the name as "Last, First".
   employee_number: "20258"
   worker_name: "Smith, John"
+  # What the record should show for that worker. Update these with the worker.
+  legal_employer: Lookahead US Corp.
+  job: Account Manager
+  department: Demo Department
 steps:
   - action: navigate
     intent: Open Person Management
@@ -51,3 +55,22 @@ steps:
     target:
       strategies:
         - text: ${employee_number}
+  # Read-only values have no accessible label, so each is found next to its label.
+  - action: assert_text
+    intent: Legal employer is shown
+    value: ${legal_employer}
+    target:
+      strategies:
+        - xpath: "//*[*/label[normalize-space(.)='Legal Employer']]/*[2]"
+  - action: assert_text
+    intent: Job is shown
+    value: ${job}
+    target:
+      strategies:
+        - xpath: "//*[*/label[normalize-space(.)='Job']]/*[2]"
+  - action: assert_text
+    intent: Department is shown
+    value: ${department}
+    target:
+      strategies:
+        - xpath: "//*[*/label[normalize-space(.)='Department']]/*[2]"
