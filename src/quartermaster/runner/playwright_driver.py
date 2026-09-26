@@ -8,6 +8,8 @@ flows, ADF partial-page-render waits, ESS job polling via REST, REST calls with 
 from __future__ import annotations
 
 import os
+import re
+import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -34,7 +36,7 @@ class PlaywrightDriver:
         self._evidence = Path(evidence_dir)
         self._environ = environ
         self._context_hook = context_hook  # e.g. proxy/route setup, applied to every persona context
-        self._settle_ms = settle_ms  # how long a locator may take to appear before it counts as 0
+        self._settle_ms = settle_ms  # max wait for an element to appear, or for the network to go quiet
         # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
         self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
@@ -42,6 +44,7 @@ class PlaywrightDriver:
         self._browser: Any = None
         self._context: Any = None
         self.page: Any = None
+        self._inflight: set[Any] = set()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -61,6 +64,7 @@ class PlaywrightDriver:
         if self._context_hook is not None:
             self._context_hook(self._context)
         self.page = self._context.new_page()
+        self._track_requests(self.page)
         self.page.goto(self._url, wait_until="domcontentloaded")
         # Two sign-in pages exist: the classic Fusion one ("User ID" / "Sign In") and the
         # OCI IAM (IDCS) one ("Username" / "Next"). Federated SSO (Azure AD, Okta) will plug in here.
@@ -74,7 +78,31 @@ class PlaywrightDriver:
         # IDCS posts back to the pod through redirects; wait until we are on the pod again.
         pod_host = urlparse(self._url).hostname
         p.wait_for_url(lambda u: urlparse(u).hostname == pod_host, timeout=120_000)
-        p.wait_for_load_state("networkidle")
+        self._settle()
+
+    def _track_requests(self, page: Any) -> None:
+        self._inflight = set()
+        page.on("request", lambda r: self._inflight.add(r) if r.url.startswith("http") else None)
+        page.on("requestfinished", self._inflight.discard)
+        page.on("requestfailed", self._inflight.discard)
+
+    def _settle(self, quiet_ms: int = 500) -> None:
+        """Wait until no http(s) request has been in flight for `quiet_ms`, up to the settle time.
+
+        Playwright's "networkidle" never fires on Redwood pages: they start blob: requests
+        (web workers) that never finish. Those are ignored here, and a page that stays busy
+        (e.g. long polling) just costs the settle time instead of failing the step.
+        """
+        deadline = time.monotonic() + self._settle_ms / 1000
+        quiet_since: float | None = None
+        while time.monotonic() < deadline:
+            if self._inflight:
+                quiet_since = None
+            else:
+                quiet_since = quiet_since or time.monotonic()
+                if time.monotonic() - quiet_since >= quiet_ms / 1000:
+                    return
+            self.page.wait_for_timeout(100)  # also lets Playwright deliver the request events
 
     def close(self) -> None:
         if self._browser is not None:
@@ -132,26 +160,48 @@ class PlaywrightDriver:
             else:
                 p.get_by_role("link", name=part, exact=True).locator("visible=true").first.click()
         p.get_by_role("link", name=parts[-1], exact=True).locator("visible=true").first.click()
-        p.wait_for_load_state("networkidle")
+        self._settle()
 
     def click(self, strategy: LocatorStrategy, value: str) -> None:
         self._locator(strategy, value).click()
-        self.page.wait_for_load_state("networkidle")
+        self._settle()
 
     def fill(self, strategy: LocatorStrategy, value: str, text: str) -> None:
-        self._locator(strategy, value).fill(text)
+        loc = self._locator(strategy, value)
+        if loc.get_attribute("role") == "group" and loc.get_by_role("spinbutton").count():
+            # Redwood date fields are month/day/year spinbuttons: typing digits from the first
+            # one fills each part in turn, so "01/01/1951" is typed as 01011951.
+            loc.get_by_role("spinbutton").first.focus()
+            self.page.keyboard.type(re.sub(r"\D", "", text), delay=50)
+            self.page.keyboard.press("Tab")
+        else:
+            loc.fill(text)
+        self._settle()
 
     def select(self, strategy: LocatorStrategy, value: str, option: str) -> None:
         loc = self._locator(strategy, value)
         if loc.evaluate("el => el.tagName.toLowerCase()") == "select":
             loc.select_option(label=option)
         else:
-            # ADF/Redwood choice lists are usually inputs with a dropdown: type-ahead + Enter.
-            loc.fill(option)
-            loc.press("Enter")
+            # ADF/Redwood choice lists are inputs with a dropdown. Redwood only searches on real
+            # key presses, so type the value, then click the first suggestion containing it.
+            loc.click()
+            loc.fill("")
+            loc.press_sequentially(option, delay=100)
+            self._settle()
+            suggestion = self.page.get_by_role("option").filter(has_text=option).locator("visible=true").first
+            try:
+                suggestion.wait_for(timeout=self._settle_ms)
+                suggestion.click()
+            except Exception:  # playwright TimeoutError: no suggestion list, e.g. a plain ADF choice
+                loc.press("Enter")
+        self._settle()
 
     def text_of(self, strategy: LocatorStrategy, value: str) -> str:
-        return str(self._locator(strategy, value).inner_text())
+        loc = self._locator(strategy, value)
+        if loc.evaluate("el => ['input', 'textarea'].includes(el.tagName.toLowerCase())"):
+            return str(loc.input_value())  # e.g. a field filled in automatically
+        return str(loc.inner_text())
 
     def wait_job(self, job_name: str, timeout_s: float) -> str:
         raise NotImplementedError("ESS job polling lands in Phase 1")

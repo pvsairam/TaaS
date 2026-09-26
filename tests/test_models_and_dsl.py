@@ -22,6 +22,7 @@ def test_example_specs_load() -> None:
         "hcm.view-worker",
         "hcm.view-my-personal-info",
         "hcm.hire-page-opens",
+        "hcm.create-location",
     }
 
 
