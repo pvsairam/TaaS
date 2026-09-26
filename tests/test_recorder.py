@@ -62,6 +62,7 @@ def test_yaml_round_trip(tmp_path: Path) -> None:
 # ------------------------------------------------------------------ real browser, end to end
 
 _PREINSTALLED = Path("/opt/pw-browsers/chromium")
+# A pinned Chromium if there is one; otherwise Playwright's own (`python -m playwright install chromium`).
 CHROMIUM = os.environ.get("QM_CHROMIUM_PATH") or (str(_PREINSTALLED) if _PREINSTALLED.exists() else "")
 MOCK = (Path(__file__).parent / "fixtures" / "mock_fusion.html").read_text()
 POD = "https://mock-dev1.fa.us1.oraclecloud.com/"
@@ -71,14 +72,15 @@ def _serve_mock(context: Any) -> None:
     context.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=MOCK))
 
 
-@pytest.mark.skipif(not CHROMIUM, reason="no Chromium available (set QM_CHROMIUM_PATH)")
 def test_record_then_replay_in_real_browser(tmp_path: Path) -> None:
     pytest.importorskip("playwright")
     from quartermaster.recorder.recorder import Recorder
     from quartermaster.runner.engine import run_test
     from quartermaster.runner.playwright_driver import PlaywrightDriver
 
-    environ = {"QM_FUSION_USER": "Mock User", "QM_FUSION_PASSWORD": "not-a-real-secret", "QM_CHROMIUM_PATH": CHROMIUM}
+    environ = {"QM_FUSION_USER": "Mock User", "QM_FUSION_PASSWORD": "not-a-real-secret"}
+    if CHROMIUM:
+        environ["QM_CHROMIUM_PATH"] = CHROMIUM
     env = Environment(name="mock", url=POD, kind=EnvironmentKind.DEV)
 
     # Record: a person drives the browser (simulated here with Playwright input events).

@@ -119,9 +119,11 @@ class PlaywrightDriver:
 
     def _track_requests(self, page: Any) -> None:
         self._inflight = set()
+        # Handlers must be plain functions: Playwright sets an attribute on each one, which
+        # built-ins like set.discard and bound methods do not allow.
         page.on("request", lambda r: self._inflight.add(r) if r.url.startswith("http") else None)
-        page.on("requestfinished", self._inflight.discard)
-        page.on("requestfailed", self._inflight.discard)
+        page.on("requestfinished", lambda r: self._inflight.discard(r))
+        page.on("requestfailed", lambda r: self._inflight.discard(r))
 
     def _settle(self, quiet_ms: int = 500) -> None:
         """Wait until no http(s) request has been in flight for `quiet_ms`, up to the settle time.
