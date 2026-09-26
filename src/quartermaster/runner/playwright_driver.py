@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from quartermaster.domain.models import Environment, LocatorStrategy
 from quartermaster.runner.credentials import persona_credentials
@@ -26,11 +28,13 @@ class PlaywrightDriver:
         evidence_dir: str = "evidence",
         environ: Mapping[str, str] | None = None,
         context_hook: Callable[[Any], None] | None = None,
+        settle_ms: int = 15_000,
     ):
         self._headless = headless
         self._evidence = Path(evidence_dir)
         self._environ = environ
         self._context_hook = context_hook  # e.g. proxy/route setup, applied to every persona context
+        self._settle_ms = settle_ms  # how long a locator may take to appear before it counts as 0
         # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
         self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
@@ -58,11 +62,19 @@ class PlaywrightDriver:
             self._context_hook(self._context)
         self.page = self._context.new_page()
         self.page.goto(self._url, wait_until="domcontentloaded")
-        # Native Fusion sign-in page. SSO (IDCS/OCI IAM, Azure AD, Okta) will plug in here.
-        self.page.get_by_label("User ID").fill(user)
-        self.page.get_by_label("Password").fill(password)
-        self.page.get_by_role("button", name="Sign In").click()
-        self.page.wait_for_load_state("networkidle")
+        # Two sign-in pages exist: the classic Fusion one ("User ID" / "Sign In") and the
+        # OCI IAM (IDCS) one ("Username" / "Next"). Federated SSO (Azure AD, Okta) will plug in here.
+        p = self.page
+        user_box = p.get_by_label("User ID", exact=True).or_(p.get_by_label("Username", exact=True))
+        user_box.wait_for()
+        user_box.fill(user)
+        p.get_by_label("Password", exact=True).fill(password)
+        sign_in = p.get_by_role("button", name="Sign In", exact=True)
+        sign_in.or_(p.get_by_role("button", name="Next", exact=True)).click()
+        # IDCS posts back to the pod through redirects; wait until we are on the pod again.
+        pod_host = urlparse(self._url).hostname
+        p.wait_for_url(lambda u: urlparse(u).hostname == pod_host, timeout=120_000)
+        p.wait_for_load_state("networkidle")
 
     def close(self) -> None:
         if self._browser is not None:
@@ -92,20 +104,39 @@ class PlaywrightDriver:
         raise ValueError(f"unsupported strategy {strategy}")
 
     def count(self, strategy: LocatorStrategy, value: str) -> int:
-        return int(self._locator(strategy, value).count())
+        loc = self._locator(strategy, value)
+        # ADF pages render after the load event (partial page rendering), so give the element a
+        # moment to appear before counting. Zero matches still falls through to the next strategy.
+        with suppress(Exception):  # playwright TimeoutError; the count below reports the 0
+            loc.first.wait_for(state="attached", timeout=self._settle_ms)
+        return int(loc.count())
 
     # ------------------------------------------------------------------ actions
 
     def navigate(self, path: str) -> None:
         """Open a page via the Navigator, e.g. 'Payables > Invoices'."""
         # Classic pages show the Navigator as the ☰ icon with a "Navigator" title.
-        self.page.get_by_role("link", name="Navigator").first.click()
-        for part in (p.strip() for p in path.split(">")):
-            self.page.get_by_role("link", name=part, exact=True).first.click()
-        self.page.wait_for_load_state("networkidle")
+        p = self.page
+        p.get_by_role("link", name="Navigator", exact=True).first.click()
+        with suppress(Exception):  # playwright TimeoutError: no grouped Navigator on this page
+            p.locator("div.navmenu-header").first.wait_for(timeout=self._settle_ms)
+        parts = [part.strip() for part in path.split(">")]
+        for part, child in zip(parts, parts[1:], strict=False):
+            # Groups are headers that expand in place, and the Navigator remembers which are
+            # open. Home-page springboard links with the same names sit underneath the panel.
+            child_link = p.get_by_role("link", name=child, exact=True).locator("visible=true")
+            header = p.locator(f"div.navmenu-header[title='{part}']")
+            if header.count() == 1:
+                if child_link.count() == 0:
+                    header.click()
+            else:
+                p.get_by_role("link", name=part, exact=True).locator("visible=true").first.click()
+        p.get_by_role("link", name=parts[-1], exact=True).locator("visible=true").first.click()
+        p.wait_for_load_state("networkidle")
 
     def click(self, strategy: LocatorStrategy, value: str) -> None:
         self._locator(strategy, value).click()
+        self.page.wait_for_load_state("networkidle")
 
     def fill(self, strategy: LocatorStrategy, value: str, text: str) -> None:
         self._locator(strategy, value).fill(text)
