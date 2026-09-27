@@ -249,6 +249,33 @@ def _wait_for_stop(recorder: Any, page: Any) -> None:
             return
 
 
+def _serve(args: argparse.Namespace) -> int:
+    import webbrowser
+
+    from quartermaster.service.api import App, make_server, port_of
+
+    tests = Path(args.tests)
+    if not tests.is_dir():
+        print(f"error: no tests folder at {tests}", file=sys.stderr)
+        return 2
+    app = App(tests_root=tests, evidence_root=Path(args.evidence), data_dir=Path(args.data))
+    server = make_server(app, port=args.port)
+    address = f"http://127.0.0.1:{port_of(server)}"
+    app.start()
+    print(f"Quartermaster is running at {address}  (tests: {tests}, evidence: {args.evidence})")
+    print("Keep this window open while you use it. Press Ctrl+C to stop.")
+    if not args.no_browser:
+        webbrowser.open(address)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Stopping.")
+    finally:
+        server.server_close()
+        app.stop()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="qm", description="Quartermaster: Oracle Fusion release regression")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -311,6 +338,14 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--env-name", default="fusion")
     rc.add_argument("--evidence", default="evidence")
     rc.set_defaults(func=_record)
+
+    sv = sub.add_parser("serve", help="start the web UI on this computer")
+    sv.add_argument("--tests", default="examples/tests", help="folder holding the test files")
+    sv.add_argument("--evidence", default="evidence", help="root folder for run evidence")
+    sv.add_argument("--data", default=".qm", help="folder for the run history and run logs")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--no-browser", action="store_true", help="do not open the web browser")
+    sv.set_defaults(func=_serve)
 
     args = parser.parse_args(argv)
     try:

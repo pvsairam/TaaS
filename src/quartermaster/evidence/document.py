@@ -542,7 +542,7 @@ def _clock(iso: str | None) -> str:
 
 
 def plain_error(error: str | None) -> str:
-    """Say what went wrong in everyday words. The original message stays in Technical details."""
+    """Say what went wrong in everyday words. The original message stays in run.json."""
     if not error:
         return ""
     text = " ".join(error.split())

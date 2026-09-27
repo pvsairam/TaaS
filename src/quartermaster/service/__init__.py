@@ -1,1 +1,1 @@
-"""Local web service: a run queue, run history and (later) the HTTP API for the web UI."""
+"""Local web service (`qm serve`): run queue, run history, recording, and the HTTP API and pages of the web UI."""

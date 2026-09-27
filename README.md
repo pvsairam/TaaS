@@ -28,7 +28,8 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Per-persona credentials from environment variables; `login_as` persona switching | `src/quartermaster/runner/credentials.py` |
 | Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
 | Evidence per run: screenshots (off / on failure / every step), video, `run.json`, Word document | `src/quartermaster/evidence/` |
-| `qm` CLI (`validate`, `plan`, `run`, `record`, `document`) | `src/quartermaster/cli.py` |
+| `qm` CLI (`validate`, `plan`, `run`, `record`, `document`, `serve`) | `src/quartermaster/cli.py` |
+| Web UI on your own computer (`qm serve`): start runs, follow them live, record, open evidence | `src/quartermaster/service/` |
 
 ## Quick start
 
@@ -128,6 +129,28 @@ step is anchored to the section heading above it.
 Keep recorded tests in one folder under version control (for example `my_tests/`) and re-run the
 folder after each quarterly update: `qm run my_tests --evidence-doc`. Only keep tests there that
 are safe to repeat.
+
+## The web UI
+
+Everything above can also be done from web pages on your own computer. In the same terminal where
+you set `QM_FUSION_URL`, `QM_FUSION_USER` and `QM_FUSION_PASSWORD`:
+
+```bash
+qm serve --tests my_tests          # or --tests examples/tests
+```
+
+Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use it; Ctrl+C stops it.
+
+| Page | What you do there |
+|---|---|
+| **Runs** | Choose all tests, a folder or one test; choose pictures and video; start. Runs wait in line and go one at a time. Open a run to watch each step as it happens, then download the evidence documents and the summary, or open the folder. |
+| **Tests** | See every test file, its last result, and run one with a click. |
+| **Record** | Fill in the test name and start. A browser opens already signed in; do the steps, then press Stop (in the page or in that browser). The new test appears under Tests. |
+| **Settings** | Check which pod and user are in use (the password is never shown) and where tests and evidence are kept. |
+
+Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
+as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
+(127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
 
 ## Proof of testing: screenshots, video and the Word evidence document
 
