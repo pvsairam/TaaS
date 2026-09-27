@@ -7,6 +7,7 @@ the rest.
 
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -128,7 +129,14 @@ def run_test(
                 failed = True
             if _wants_screenshot(screenshots, status):
                 # Taken after the step, with the element it used outlined when still on screen.
-                shot = driver.screenshot(f"step-{i + 1:02d}", (used.strategy, used.value) if used else None)
+                try:
+                    shot = driver.screenshot(f"step-{i + 1:02d}", (used.strategy, used.value) if used else None)
+                except Exception as e:  # a page too busy to capture must not end the run; the step keeps its result
+                    shot = None
+                    print(
+                        f"warning: step {i + 1}: no screenshot ({type(e).__name__}: {e})".splitlines()[0],
+                        file=sys.stderr,
+                    )
                 if shot:
                     evidence.append(shot)
             results.append(

@@ -281,9 +281,11 @@ class PlaywrightDriver:
         if highlight is not None:
             with suppress(Exception):  # the element may be gone, e.g. after a click that navigated
                 self._locator(*highlight).first.evaluate(_DRAW_HIGHLIGHT, timeout=2_000)
-        self.page.screenshot(path=str(path))
-        with suppress(Exception):
-            self.page.evaluate(_REMOVE_HIGHLIGHT)
+        try:
+            self.page.screenshot(path=str(path), timeout=30_000)  # a busy page gives up sooner than an action
+        finally:
+            with suppress(Exception):  # never leave the red box behind for the next screenshot
+                self.page.evaluate(_REMOVE_HIGHLIGHT)
         return str(path)
 
 

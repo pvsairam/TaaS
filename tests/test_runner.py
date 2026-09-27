@@ -106,6 +106,19 @@ def test_screenshot_modes(stage_env: Environment) -> None:
     assert off.steps[0].status is StepStatus.FAILED and off.steps[0].evidence == []
 
 
+def test_a_screenshot_that_fails_does_not_end_the_run(stage_env: Environment) -> None:
+    class SlowPage(FakeDriver):
+        def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None:
+            if name == "step-01":
+                raise TimeoutError("Page.screenshot: Timeout 30000ms exceeded.")
+            return super().screenshot(name, highlight)
+
+    steps = (_click({"label": "Save"}), Step(action=Action.NAVIGATE, intent="go", value="A > B"))
+    result = run_test(_tc(*steps), stage_env, SlowPage({("label", "Save"): 1}), screenshots=ScreenshotMode.EVERY_STEP)
+    assert [s.status for s in result.steps] == [StepStatus.PASSED, StepStatus.PASSED]  # the run went on
+    assert [s.evidence for s in result.steps] == [[], ["evidence/step-02.png"]]
+
+
 def test_step_results_record_what_was_done(stage_env: Environment) -> None:
     fill = Step(
         action=Action.FILL,
