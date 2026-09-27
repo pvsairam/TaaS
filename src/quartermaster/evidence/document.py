@@ -51,18 +51,52 @@ def write_evidence_document(run: dict[str, Any], run_dir: Path, out: Path) -> Pa
     """Write the evidence document for `run` (the parsed run.json) to `out`."""
     doc = _Doc(run_dir)
     body = doc.build(run)
+    return write_package(
+        out,
+        doc,
+        body,
+        title=f"Test evidence: {run.get('test_title') or run.get('test_id', '')} ({run.get('run_id', '')})",
+        creator=str(run.get("executed_by", "")),
+        subject=str(run.get("test_id", "")),
+        created=run.get("finished_at") or run.get("started_at"),
+        footer_left=f"{run.get('test_id', '')}  |  Run {run.get('run_id', '')}",
+    )
+
+
+def write_package(
+    out: Path, doc: _Doc, body: str, *, title: str, creator: str, subject: str, created: str | None, footer_left: str
+) -> Path:
+    """Zip a document body, its images and the fixed parts into a .docx file."""
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _content_types())
         z.writestr("_rels/.rels", _root_rels())
-        z.writestr("docProps/core.xml", _core(run))
+        z.writestr("docProps/core.xml", _core(title, creator, subject, created))
         z.writestr("word/document.xml", body)
         z.writestr("word/styles.xml", _styles())
-        z.writestr("word/footer1.xml", _footer(run))
+        z.writestr("word/footer1.xml", _footer(footer_left))
         z.writestr("word/_rels/document.xml.rels", doc.rels())
         for name, data in doc.media:
             z.writestr(f"word/media/{name}", data)
     return out
+
+
+def document_xml(parts: list[str]) -> str:
+    """Wrap body parts in the document element with the page setup (US Letter) and footer."""
+    sect = (
+        f'<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/>'
+        f'<w:pgSz w:w="{_PAGE_W}" w:h="{_PAGE_H}"/>'
+        f'<w:pgMar w:top="{_MARGIN}" w:right="{_MARGIN}" w:bottom="{_MARGIN}" w:left="{_MARGIN}" '
+        f'w:header="720" w:footer="500" w:gutter="0"/></w:sectPr>'
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W}" xmlns:r="{_R}" '
+        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        f'<w:body>{"".join(parts)}{sect}</w:body></w:document>'
+    )
 
 
 # --------------------------------------------------------------------------- document body
@@ -197,22 +231,9 @@ class _Doc:
             sign.append([_cell(role, sw[0], bold=True), _cell(name, sw[1]), _cell("", sw[2]), _cell("", sw[3])])
         add(_table(sign, sw, row_height=620))
 
-        sect = (
-            f'<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/>'
-            f'<w:pgSz w:w="{_PAGE_W}" w:h="{_PAGE_H}"/>'
-            f'<w:pgMar w:top="{_MARGIN}" w:right="{_MARGIN}" w:bottom="{_MARGIN}" w:left="{_MARGIN}" '
-            f'w:header="720" w:footer="500" w:gutter="0"/></w:sectPr>'
-        )
-        return (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            f'<w:document xmlns:w="{_W}" xmlns:r="{_R}" '
-            'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
-            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
-            'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-            f'<w:body>{"".join(parts)}{sect}</w:body></w:document>'
-        )
+        return document_xml(parts)
 
-    def _image(self, rel: str, step_no: int, sha256: str) -> str:
+    def _image(self, rel: str, step_no: int, sha256: str, caption: str | None = None) -> str:
         path = self.run_dir / rel
         try:
             data = path.read_bytes()
@@ -242,7 +263,7 @@ class _Doc:
             f'<a:ln w="9525"><a:solidFill><a:srgbClr val="B8C3C9"/></a:solidFill></a:ln></pic:spPr>'
             f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
         )
-        caption = f"Figure {step_no}. Screen after step {step_no}. File {rel}"
+        caption = caption or f"Figure {step_no}. Screen after step {step_no}. File {rel}"
         if sha256:
             caption += f", SHA-256 {sha256}"
         return f'<w:p><w:pPr><w:spacing w:before="200" w:after="60"/></w:pPr>{drawing}</w:p>' + _p(
@@ -380,27 +401,28 @@ def _root_rels() -> str:
     )
 
 
-def _core(run: dict[str, Any]) -> str:
-    created = run.get("finished_at") or run.get("started_at") or datetime.now().astimezone().isoformat()
+def _core(title: str, creator: str, subject: str, created: str | None) -> str:
+    created = created or datetime.now().astimezone().isoformat()
     try:
         created_utc = datetime.fromisoformat(created).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
         created_utc = created_utc[:-2] + ":" + created_utc[-2:]
     except ValueError:
-        created_utc = created
-    title = escape(f"Test evidence: {run.get('test_title') or run.get('test_id', '')} ({run.get('run_id', '')})")
+        pass
+    else:
+        created = created_utc
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        f"<dc:title>{title}</dc:title><dc:creator>{escape(str(run.get('executed_by', '')))}</dc:creator>"
-        f"<dc:subject>{escape(str(run.get('test_id', '')))}</dc:subject>"
-        f'<dcterms:created xsi:type="dcterms:W3CDTF">{escape(created_utc)}</dcterms:created>'
+        f"<dc:title>{escape(title)}</dc:title><dc:creator>{escape(creator)}</dc:creator>"
+        f"<dc:subject>{escape(subject)}</dc:subject>"
+        f'<dcterms:created xsi:type="dcterms:W3CDTF">{escape(created)}</dcterms:created>'
         "</cp:coreProperties>"
     )
 
 
-def _footer(run: dict[str, Any]) -> str:
+def _footer(left_text: str) -> str:
     def field(code: str) -> str:
         return (
             '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
@@ -409,7 +431,7 @@ def _footer(run: dict[str, Any]) -> str:
             '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
         )
 
-    left = escape(f"{run.get('test_id', '')}  |  Run {run.get('run_id', '')}")
+    left = escape(left_text)
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<w:ftr xmlns:w="{_W}" xmlns:r="{_R}"><w:p><w:pPr><w:pStyle w:val="Footer"/>'

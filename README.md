@@ -162,7 +162,19 @@ test file carry a SHA-256 fingerprint in `run.json` and the document, so a revie
 nothing was swapped. Screenshots of HR screens contain personal data: store the evidence
 folders where only the right people can read them.
 
-Rebuild a document from a saved run at any time: `qm document evidence/<test id>/<run id>`.
+Running a folder of tests also writes one record for the whole run, and with `--evidence-doc`
+a summary document for sign-off: overall result, every test with its result and step count, each
+failure with the failing step, error and screenshot, locator changes to review, and where each
+test's own document is.
+
+```
+evidence/_suites/<suite id>/
+  suite.json                          every test's result and evidence location
+  suite_<suite id>_summary.docx       only with --evidence-doc and two or more tests
+```
+
+Rebuild a document at any time from a saved run folder or suite folder:
+`qm document evidence/<test id>/<run id>` or `qm document evidence/_suites/<suite id>`.
 
 ## Connecting to a Fusion test environment
 

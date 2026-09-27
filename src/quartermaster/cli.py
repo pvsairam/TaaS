@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from quartermaster.domain.models import Environment, EnvironmentKind, RunResult,
 from quartermaster.dsl.loader import SpecError, load_release, load_test, load_tests
 from quartermaster.evidence.document import write_evidence_document
 from quartermaster.evidence.run_record import build_record, new_run_id, run_folder, write_record
+from quartermaster.evidence.suite import build_suite_record, suite_folder, write_suite_document, write_suite_record
 from quartermaster.impact.analyzer import analyze, plan
 from quartermaster.runner.credentials import MissingCredentialsError
 from quartermaster.runner.engine import Driver, run_test
@@ -75,8 +77,10 @@ def _run(args: argparse.Namespace) -> int:
     else:
         tests, files = [load_test(target)], [target]
     evidence_root = Path(args.evidence)
+    suite_started = datetime.now().astimezone().isoformat(timespec="seconds")
 
     results: list[RunResult] = []
+    suite_runs: list[tuple[dict[str, Any], Path, Path | None]] = []
     for t, spec_file in zip(tests, files, strict=True):
         run_id = new_run_id()
         run_dir = run_folder(evidence_root, t.id, run_id)
@@ -101,22 +105,46 @@ def _run(args: argparse.Namespace) -> int:
                               executed_by=args.tester)
         write_record(record, run_dir)
         print(f"        evidence: {run_dir}")
+        doc: Path | None = None
         if args.evidence_doc:
             doc = write_evidence_document(record, run_dir, run_dir / f"{t.id}_{run_id}_evidence.docx")
             print(f"        document: {doc}")
+        suite_runs.append((record, run_dir, doc))
+
+    suite_id = new_run_id()
+    suite = build_suite_record(
+        suite_runs,
+        suite_id=suite_id,
+        evidence_root=evidence_root,
+        target=str(target),
+        started_at=suite_started,
+        finished_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+    )
+    suite_dir = suite_folder(evidence_root, suite_id)
+    write_suite_record(suite, suite_dir)
+    print(f"\nSuite record: {suite_dir / 'suite.json'}")
+    if args.evidence_doc and len(suite_runs) > 1:
+        summary = write_suite_document(suite, evidence_root, suite_dir / f"suite_{suite_id}_summary.docx")
+        print(f"Summary document: {summary}")
 
     if args.report:
         Path(args.report).write_text(
             json.dumps([r.model_dump(mode="json") for r in results], indent=2), encoding="utf-8"
         )
     failed = sum(r.status is StepStatus.FAILED for r in results)
-    print(f"\n{len(results) - failed}/{len(results)} passed")
+    print(f"{len(results) - failed}/{len(results)} passed")
     return 1 if failed else 0
 
 
 def _document(args: argparse.Namespace) -> int:
-    """Rebuild the evidence document from a saved run folder."""
+    """Rebuild the evidence document from a saved run folder, or the summary from a suite folder."""
     run_dir = Path(args.run_dir)
+    if (run_dir / "suite.json").is_file():
+        suite = json.loads((run_dir / "suite.json").read_text(encoding="utf-8"))
+        # Suite folders live at <evidence root>/_suites/<suite id>/.
+        out = Path(args.out) if args.out else run_dir / f"suite_{suite['suite_id']}_summary.docx"
+        print(f"Wrote {write_suite_document(suite, run_dir.parent.parent, out)}")
+        return 0
     record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     out = Path(args.out) if args.out else run_dir / f"{record['test_id']}_{record['run_id']}_evidence.docx"
     print(f"Wrote {write_evidence_document(record, run_dir, out)}")
@@ -208,14 +236,17 @@ def main(argv: list[str] | None = None) -> int:
         "--video", default="off", choices=["off", "on-failure", "always"],
         help="record a video of the run into the run folder; never put in the document (default: off)",
     )
-    rn.add_argument("--evidence-doc", action="store_true", help="write a Word evidence document for each run")
+    rn.add_argument(
+        "--evidence-doc", action="store_true",
+        help="write a Word evidence document for each test, plus a summary document when 2+ tests run",
+    )
     rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
     rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")
     rn.add_argument("--report", help="write JSON results for all runs to this file")
     rn.set_defaults(func=_run)
 
-    dc = sub.add_parser("document", help="rebuild the Word evidence document from a saved run folder")
-    dc.add_argument("run_dir", help="run folder containing run.json")
+    dc = sub.add_parser("document", help="rebuild a Word document from a saved run or suite folder")
+    dc.add_argument("run_dir", help="run folder (run.json) or suite folder (suite.json)")
     dc.add_argument("--out", help="output .docx path (default: inside the run folder)")
     dc.set_defaults(func=_document)
 

@@ -123,3 +123,39 @@ def test_cli_run_writes_run_folder_record_and_word_document(
     assert main(["document", str(run_dir), "--out", str(rebuilt)]) == 0
     assert rebuilt.exists()
 
+
+
+def test_cli_run_of_a_folder_writes_suite_record_and_summary(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    import zipfile
+
+    from conftest import FakeDriver
+
+    from quartermaster import cli
+
+    specs = tmp_path / "suite"
+    specs.mkdir()
+    login = (EXAMPLES / "smoke" / "login.yaml").read_text()
+    (specs / "a.yaml").write_text(login)
+    (specs / "b.yaml").write_text(login.replace("id: smoke.login", "id: smoke.login-again"))
+
+    monkeypatch.setenv("QM_FUSION_URL", "https://abcd-dev2.fa.us6.oraclecloud.com")
+    page = {("role", "link:Navigator"): 1, ("xpath", "//*[starts-with(normalize-space(text()), 'Welcome,')]"): 1}
+    monkeypatch.setattr(cli, "driver_factory", lambda args, run_dir: FakeDriver(page, evidence_dir=run_dir))
+    evidence = tmp_path / "evidence"
+    assert main(["run", str(specs), "--evidence", str(evidence), "--evidence-doc", "--release", "26D"]) == 0
+    out = capsys.readouterr().out
+
+    [suite_dir] = list((evidence / "_suites").iterdir())
+    suite = json.loads((suite_dir / "suite.json").read_text())
+    assert suite["status"] == "passed" and suite["release"] == "26D"
+    assert [r["test_id"] for r in suite["runs"]] == ["smoke.login", "smoke.login-again"]
+    assert all(r["document"] and (evidence / r["document"]).is_file() for r in suite["runs"])
+    [summary] = list(suite_dir.glob("suite_*_summary.docx"))
+    assert "Summary document:" in out and zipfile.is_zipfile(summary)
+
+    rebuilt = tmp_path / "again.docx"
+    assert main(["document", str(suite_dir), "--out", str(rebuilt)]) == 0
+    assert zipfile.is_zipfile(rebuilt)
