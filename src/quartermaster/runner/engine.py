@@ -127,12 +127,14 @@ def run_test(
             used = seen.get("res")
             if status is StepStatus.FAILED:
                 failed = True
+            screenshot_note = None
             if _wants_screenshot(screenshots, status):
                 # Taken after the step, with the element it used outlined when still on screen.
                 try:
                     shot = driver.screenshot(f"step-{i + 1:02d}", (used.strategy, used.value) if used else None)
                 except Exception as e:  # a page too busy to capture must not end the run; the step keeps its result
                     shot = None
+                    screenshot_note = "The screen could not be captured: the page was still loading."
                     print(
                         f"warning: step {i + 1}: no screenshot ({type(e).__name__}: {e})".splitlines()[0],
                         file=sys.stderr,
@@ -148,6 +150,7 @@ def run_test(
                     evidence=evidence,
                     locator=f"{used.strategy.value}={used.value}" if used else None,
                     started_at=step_started,
+                    screenshot_note=screenshot_note,
                 )
             )
             emit("step_end", index=i, intent=step.intent, status=status.value, error=error, evidence=evidence)

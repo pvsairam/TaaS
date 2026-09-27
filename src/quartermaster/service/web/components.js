@@ -279,6 +279,7 @@ export function stepResult(st, {pictures = [], context = ""} = {}) {
     st.compare ? h("div", {class: "compare"},
       h("div", {}, h("span", {class: "caption"}, "Expected"), st.compare.expected || "(empty)"),
       h("div", {}, h("span", {class: "caption"}, "Observed"), st.compare.observed || "(empty)")) : null,
+    !shots.length && st.screenshot_note ? h("div", {class: "meta row", style: "gap:6px"}, icon("image"), st.screenshot_note) : null,
     shots.length ? h("div", {class: "row"}, shots.map((src) => h("img", {class: "shot", src, loading: "lazy", alt: `Screenshot after step ${st.number}${context}`,
       onclick: () => openShot(src)}))) : null,
     technical.length ? disclose("Technical details", h("div", {class: "stack", style: "gap:6px;margin-top:8px"}, technical)) : null);

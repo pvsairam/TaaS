@@ -282,7 +282,13 @@ class PlaywrightDriver:
             with suppress(Exception):  # the element may be gone, e.g. after a click that navigated
                 self._locator(*highlight).first.evaluate(_DRAW_HIGHLIGHT, timeout=2_000)
         try:
-            self.page.screenshot(path=str(path), timeout=30_000)  # a busy page gives up sooner than an action
+            try:
+                self.page.screenshot(path=str(path), timeout=30_000)  # a busy page gives up sooner than an action
+            except Exception:
+                # Usually a page still being built after a click: let it finish loading, then try once more.
+                with suppress(Exception):
+                    self._settle()
+                self.page.screenshot(path=str(path), timeout=20_000)
         finally:
             with suppress(Exception):  # never leave the red box behind for the next screenshot
                 self.page.evaluate(_REMOVE_HIGHLIGHT)

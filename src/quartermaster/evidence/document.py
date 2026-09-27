@@ -202,6 +202,8 @@ class _Doc:
             rows_kv.append(("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, "")))
             if st != "skipped":
                 rows_kv.append(("Time", _clock(s.get("started_at"))))
+            if s.get("screenshot_note") and not shots:
+                rows_kv.append(("Screen picture", s["screenshot_note"]))  # says why the picture is missing
             add(_kv_table(rows_kv, status_row=("Result", st)))
             for rel in shots:
                 add(self._image(rel, n, "", caption=f"Screen after step {n}"))

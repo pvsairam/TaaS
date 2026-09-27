@@ -197,6 +197,7 @@ class StepResult(_Strict):
     expected: str = ""
     locator: str | None = None  # the locator actually used, e.g. "role=button:Search"
     started_at: str | None = None  # ISO 8601 with time zone
+    screenshot_note: str | None = None  # why a screenshot that was asked for is missing
 
 
 class ScreenshotMode(StrEnum):

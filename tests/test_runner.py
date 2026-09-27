@@ -117,6 +117,8 @@ def test_a_screenshot_that_fails_does_not_end_the_run(stage_env: Environment) ->
     result = run_test(_tc(*steps), stage_env, SlowPage({("label", "Save"): 1}), screenshots=ScreenshotMode.EVERY_STEP)
     assert [s.status for s in result.steps] == [StepStatus.PASSED, StepStatus.PASSED]  # the run went on
     assert [s.evidence for s in result.steps] == [[], ["evidence/step-02.png"]]
+    assert result.steps[0].screenshot_note == "The screen could not be captured: the page was still loading."
+    assert result.steps[1].screenshot_note is None
 
 
 def test_step_results_record_what_was_done(stage_env: Environment) -> None:

@@ -397,6 +397,7 @@ class App:
                             "locator": st.get("locator"),
                             "started_at": st.get("started_at"),
                             "seconds": round((st.get("duration_ms") or 0) / 1000, 1),
+                            "screenshot_note": st.get("screenshot_note"),
                             "pictures": [self._url_rel(f"{entry['run_dir']}/{p}") for p in st.get("evidence") or []],
                         }
                         for st in record.get("steps", [])

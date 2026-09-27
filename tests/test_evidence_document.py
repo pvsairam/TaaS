@@ -182,3 +182,12 @@ def test_steps_without_pictures_do_not_get_their_own_page(tmp_path: Path) -> Non
     out = write_evidence_document(run, tmp_path, tmp_path / "evidence.docx")
     doc = zipfile.ZipFile(out).read("word/document.xml").decode()
     assert doc.count('w:type="page"') == 1  # only the break before sign-off
+
+
+def test_a_missing_screenshot_is_explained(tmp_path: Path) -> None:
+    run = sample_run(tmp_path)
+    run["steps"][0]["evidence"] = []
+    run["steps"][0]["screenshot_note"] = "The screen could not be captured: the page was still loading."
+    _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
+    assert "Screen picture" in text and "the page was still loading" in text
+    assert "Screen after step 1" not in text
