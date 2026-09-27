@@ -64,6 +64,23 @@
   };
   const labelRepeats = (text) => [...document.querySelectorAll("label")].filter((l) => clean(l.innerText) === text).length > 1;
 
+  const nthOfSame = (el) => {
+    const text = clean(el.innerText);
+    if (!text || text.length > 60 || text.includes("'")) return "";
+    const tag = el.tagName.toLowerCase();
+    const xp = `//${tag}[normalize-space(.)='${text}']`;
+    try {
+      const r = document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      if (r.snapshotLength < 2) return "";
+      const visible = [...Array(r.snapshotLength).keys()].filter((i) => r.snapshotItem(i).getClientRects().length);
+      if (visible.length < 2) return "";
+      for (let i = 0; i < r.snapshotLength; i++) if (r.snapshotItem(i) === el) return `(${xp})[${i + 1}]`;
+    } catch (e) {
+      /* not a usable expression */
+    }
+    return "";
+  };
+
   const candidates = (el) => {
     const out = [];
     const add = (strategy, value) => {
@@ -71,6 +88,9 @@
     };
     const isField = ["input", "select", "textarea"].includes(el.tagName.toLowerCase());
     if (isField && labelOf(el) && labelRepeats(labelOf(el))) add("xpath", scopedXPath(el));
+    // Same name more than once on the page (e.g. one worker with two work relationships gives two
+    // identical name links in the results): pin the one that was used by its position.
+    if (!isField) add("xpath", nthOfSame(el));
     const role = roleOf(el);
     const name = nameOf(el);
     // A list field's label also names its dropdown, so for lists the role is the sharper locator.
