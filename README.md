@@ -38,7 +38,7 @@ pip install -e ".[dev]"          # add ,ai for Claude, ,browser for Playwright
 pytest -q
 
 qm validate examples/tests
-qm plan --release examples/releases/26D_sample.json --tests examples/tests --budget 25 --explain
+qm plan --release examples/releases/26D_sample.json --tests examples/unverified --budget 25 --explain
 ```
 
 ## Writing a test
@@ -64,8 +64,11 @@ steps:
         - label: Invoice Number
 ```
 
-See `examples/tests/hcm/` and `examples/tests/erp/` for complete specs. The absence example shows
-an employee submitting a request and switching to the line manager (`login_as`) to approve it.
+`examples/tests/` holds tests checked against a real pod and safe to repeat (they never submit). More
+complete examples are in `examples/unverified/` (HCM and ERP): they are not yet checked against a pod
+and they submit real transactions, so they are kept out of the tests folder; see the README there. The
+absence example shows an employee submitting a request and switching to the line manager (`login_as`)
+to approve it.
 
 ## Run it on your own computer (fastest way to reach your pod)
 

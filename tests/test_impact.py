@@ -8,7 +8,8 @@ from quartermaster.impact.analyzer import COVERAGE_THRESHOLD, analyze, match, pl
 
 
 def _data() -> tuple[Release, list]:
-    return load_release(EXAMPLES / "releases" / "26D_sample.json"), load_tests(EXAMPLES / "tests")
+    tests = load_tests(EXAMPLES / "tests") + load_tests(EXAMPLES / "unverified")
+    return load_release(EXAMPLES / "releases" / "26D_sample.json"), tests
 
 
 def test_each_feature_is_covered_by_its_own_module() -> None:

@@ -8,7 +8,9 @@ from quartermaster.cli import main
 
 def test_cli_validate(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["validate", str(EXAMPLES / "tests")]) == 0
-    assert "10 test spec(s) valid" in capsys.readouterr().out
+    assert "4 test spec(s) valid" in capsys.readouterr().out  # checked against a pod
+    assert main(["validate", str(EXAMPLES / "unverified")]) == 0
+    assert "6 test spec(s) valid" in capsys.readouterr().out  # examples, not yet checked
 
 
 def test_cli_plan(capsys: pytest.CaptureFixture[str]) -> None:
@@ -18,7 +20,7 @@ def test_cli_plan(capsys: pytest.CaptureFixture[str]) -> None:
             "--release",
             str(EXAMPLES / "releases" / "26D_sample.json"),
             "--tests",
-            str(EXAMPLES / "tests"),
+            str(EXAMPLES / "unverified"),
             "--explain",
         ]
     )

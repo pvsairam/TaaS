@@ -54,7 +54,7 @@ def test_resolver_raises_when_nothing_matches() -> None:
 
 
 def test_example_invoice_runs_end_to_end(stage_env: Environment) -> None:
-    test = load_test(EXAMPLES / "tests" / "erp" / "ap_create_invoice.yaml")
+    test = load_test(EXAMPLES / "unverified" / "erp" / "ap_create_invoice.yaml")
     d = FakeDriver(
         {
             ("role", "link:Create Invoice"): 1,
@@ -199,7 +199,7 @@ def test_runner_refuses_prod_before_opening_browser() -> None:
 
 
 def test_absence_flow_switches_persona_and_renders_locator_placeholders(stage_env: Environment) -> None:
-    test = load_test(EXAMPLES / "tests" / "hcm" / "absence_request_approval.yaml")
+    test = load_test(EXAMPLES / "unverified" / "hcm" / "absence_request_approval.yaml")
     d = FakeDriver(
         {
             ("label", "Type"): 1,

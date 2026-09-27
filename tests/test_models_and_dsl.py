@@ -11,7 +11,13 @@ from quartermaster.dsl.loader import SpecError, load_release, load_test, load_te
 
 
 def test_example_specs_load() -> None:
-    tests = load_tests(EXAMPLES / "tests")
+    tests = load_tests(EXAMPLES / "tests") + load_tests(EXAMPLES / "unverified")
+    assert {t.id for t in load_tests(EXAMPLES / "tests")} == {
+        "hcm.view-worker",
+        "hcm.view-my-personal-info",
+        "hcm.hire-page-opens",
+        "hcm.create-location",
+    }
     assert {t.id for t in tests} == {
         "ap.create-invoice-po-match",
         "gl.manual-journal-approval",
