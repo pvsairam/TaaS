@@ -1,0 +1,72 @@
+"""Settings chosen in the web UI, kept in <data folder>/settings.json.
+
+Only descriptive settings live here: a name for the environment and the Oracle release it is on.
+The pod address and sign-in stay in environment variables, and the password is never stored.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+FIELDS = {"environment_name": 40, "release": 20}
+_RELEASE = re.compile(r"^[A-Za-z0-9 ._-]*$")
+
+
+class Settings:
+    def __init__(self, path: Path):
+        self.path = path
+        self._lock = threading.Lock()
+
+    def get(self) -> dict[str, str]:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        return {k: str(raw.get(k) or "") for k in FIELDS}
+
+    def update(self, changes: dict[str, Any]) -> dict[str, str]:
+        unknown = set(changes) - set(FIELDS)
+        if unknown:
+            raise ValueError(f"unknown settings: {', '.join(sorted(unknown))}")
+        clean = {k: " ".join(str(v or "").split())[: FIELDS[k]] for k, v in changes.items()}
+        if not _RELEASE.match(clean.get("release", "")):
+            raise ValueError("the release may use letters, digits, spaces, dots and dashes, e.g. 26C")
+        with self._lock:
+            current = {**self.get(), **clean}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        return current
+
+
+def check_pod(url: str, timeout: float = 15) -> dict[str, Any]:
+    """Can this computer reach the pod? Opens the sign-in page; any answer below 500 means yes."""
+    checked = datetime.now().astimezone().isoformat(timespec="seconds")
+    if not url:
+        return {"ok": False, "checked_at": checked, "message": "No pod address is set (QM_FUSION_URL)."}
+    started = time.monotonic()
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "Quartermaster pod check"})
+        with urllib.request.urlopen(req, timeout=timeout) as res:  # noqa: S310 - the pod address the user set
+            code = res.status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        reason = getattr(e, "reason", e)
+        return {"ok": False, "checked_at": checked, "message": f"Could not reach the pod: {reason}"}
+    ms = round((time.monotonic() - started) * 1000)
+    ok = code < 500
+    return {
+        "ok": ok,
+        "checked_at": checked,
+        "status_code": code,
+        "ms": ms,
+        "message": f"The pod answered in {ms} ms." if ok else f"The pod answered with an error ({code}).",
+    }

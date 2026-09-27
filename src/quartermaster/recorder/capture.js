@@ -356,6 +356,8 @@
   let setChecking = (on) => {
     checking = on;
   };
+  // Paused from the Quartermaster web page: nothing is recorded until it resumes.
+  let setPaused = () => {};
   const buildToolbar = () => {
     if (window.top !== window || document.getElementById("__qm_toolbar")) return;
     const host = document.createElement("div");
@@ -378,11 +380,21 @@
         <button class="stop" type="button">Stop recording</button></div>`;
     const msg = root.querySelector(".msg");
     const checkBtn = root.querySelector(".check");
+    const dot = root.querySelector(".dot");
+    let paused = false;
     setChecking = (on) => {
+      if (checking !== on) send({ kind: "checking", on }); // keeps the web page in step
       checking = on;
       checkBtn.classList.toggle("on", on);
       checkBtn.textContent = on ? "Cancel check" : "Add check";
-      msg.textContent = on ? "Click the value to check" : "Recording";
+      msg.textContent = on ? "Click the value to check" : paused ? "Paused" : "Recording";
+    };
+    setPaused = (on) => {
+      paused = on;
+      if (on) setChecking(false);
+      dot.style.background = on ? "#9aa3ad" : "#e53935";
+      msg.textContent = on ? "Paused" : "Recording";
+      checkBtn.disabled = on;
     };
     checkBtn.addEventListener("click", () => setChecking(!checking));
     root.querySelector(".stop").addEventListener("click", () => {
@@ -394,6 +406,8 @@
     document.addEventListener("keydown", (e) => { if (e.key === "Escape" && checking) setChecking(false); }, true);
     document.body.appendChild(host);
   };
+  window.__qmSetChecking = (on) => setChecking(!!on);
+  window.__qmSetPaused = (on) => setPaused(!!on);
   if (document.body) buildToolbar();
   else document.addEventListener("DOMContentLoaded", buildToolbar);
 })();

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from quartermaster.recorder.steps import events_to_steps
+from quartermaster.recorder.steps import events_to_steps, preview, secret_names
 
 
 def ev(kind: str, intent: str = "", *cands: tuple[str, str], **extra: Any) -> dict[str, Any]:
@@ -90,3 +90,32 @@ def test_repeated_edits_keep_the_last_value_and_order_is_kept() -> None:
 def test_events_without_usable_locators_are_dropped() -> None:
     steps, _ = events_to_steps([ev("click", "icon"), ev("click", "x", ("bogus", "y")), ev("navigate", value="")])
     assert steps == []
+
+
+def test_a_note_becomes_the_expected_result_of_the_step_before_it() -> None:
+    steps, _ = events_to_steps(
+        [
+            {"kind": "note", "value": "ignored: no step yet"},
+            ev("click", "Search", ("role", "button:Search")),
+            {"kind": "note", "value": "The results   list the worker."},
+            {"kind": "note", "value": "One row only."},
+        ]
+    )
+    assert [s["intent"] for s in steps] == ["Click Search"]
+    assert steps[0]["expected"] == "The results list the worker. One row only."
+
+
+def test_a_masked_value_is_never_saved() -> None:
+    events = [
+        ev("fill", "User", ("label", "User"), value="bob"),
+        ev("fill", "PIN", ("label", "PIN"), value="1234", sensitive=True),
+        ev("fill", "PIN", ("label", "PIN"), value="12345"),  # typed again: stays masked
+        ev("fill", "City", ("label", "City"), value="Leeds"),
+    ]
+    steps, data = events_to_steps(events, "QM_HCM_X")
+    assert data == {"value1": "bob", "secret1": "${env:QM_HCM_X_1}", "value2": "Leeds"}
+    assert [s["value"] for s in steps] == ["${value1}", "${secret1}", "${value2}"]
+    assert "1234" not in str((steps, data))
+    shown = preview(events, "QM_HCM_X")
+    assert [s["value"] for s in shown] == ["bob", "••••••", "Leeds"] and "1234" not in str(shown)
+    assert secret_names(data) == ["QM_HCM_X_1"]

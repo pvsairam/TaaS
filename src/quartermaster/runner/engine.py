@@ -26,7 +26,7 @@ from quartermaster.domain.models import (
     StepStatus,
     TestCase,
 )
-from quartermaster.dsl.loader import render_value
+from quartermaster.dsl.loader import display_value, render_value
 from quartermaster.locators.resolver import Resolution, ResolutionError, resolve
 from quartermaster.safety.guards import assert_safe_target
 
@@ -88,7 +88,7 @@ def run_test(
                 "index": i,
                 "intent": step.intent,
                 "action": step.action.value,
-                "value": render_value(step.value, test.data, runtime),
+                "value": display_value(step.value, test.data, runtime),  # masked values stay hidden
                 "expected": step.expected,
             }
             if failed:

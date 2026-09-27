@@ -1,12 +1,15 @@
-"""What the dashboard, test pages and "Needs attention" show, worked out from the run history.
+"""What the overview, test pages and "Needs attention" show, worked out from the run history.
 
 Every finished run points at its suite.json; each suite entry points at a run.json. Nothing here
-is stored twice: the numbers are read back from that evidence (cached until the file changes).
+is stored twice and nothing is estimated: every number is counted from that evidence (cached
+until the file changes). Where the evidence does not say something (a run without an Oracle
+release, say), the result says so rather than guessing.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -16,6 +19,7 @@ import yaml
 from quartermaster.evidence.document import plain_error
 
 _cache: dict[str, tuple[float, Any]] = {}
+PASSING = ("passed", "healed")
 
 
 def read_json(path: Path) -> Any:
@@ -36,59 +40,82 @@ def read_json(path: Path) -> Any:
     return data
 
 
+def suite_of(run: dict[str, Any]) -> dict[str, Any] | None:
+    if not run.get("suite_dir"):
+        return None
+    suite = read_json(Path(run["suite_dir"]) / "suite.json")
+    return suite if isinstance(suite, dict) else None
+
+
 def test_results(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One row per test per finished run, newest run first."""
+    """One row per test per finished run, newest run first, with the run's Oracle release."""
     rows = []
     for run in runs:
-        if not run.get("suite_dir"):
-            continue
-        suite = read_json(Path(run["suite_dir"]) / "suite.json")
-        if not isinstance(suite, dict):
+        suite = suite_of(run)
+        if suite is None:
             continue
         for entry in suite.get("runs", []):
-            rows.append({**entry, "service_run_id": run["id"], "at": run.get("started_at") or run["created_at"]})
+            rows.append(
+                {
+                    **entry,
+                    "service_run_id": run["id"],
+                    "at": run.get("started_at") or run["created_at"],
+                    "release": str(suite.get("release") or run.get("options", {}).get("release") or ""),
+                    "environment_url": suite.get("environment_url", ""),
+                }
+            )
     return rows
 
 
 def run_counts(run: dict[str, Any]) -> dict[str, int] | None:
     """How many tests of a finished run passed and failed."""
-    if not run.get("suite_dir"):
-        return None
-    suite = read_json(Path(run["suite_dir"]) / "suite.json")
-    if not isinstance(suite, dict):
+    suite = suite_of(run)
+    if suite is None:
         return None
     statuses = [e.get("status") for e in suite.get("runs", [])]
-    passed = sum(s in ("passed", "healed") for s in statuses)
+    passed = sum(s in PASSING for s in statuses)
     return {"total": len(statuses), "passed": passed, "failed": len(statuses) - passed}
 
 
-def dashboard(tests: list[dict[str, Any]], runs: list[dict[str, Any]]) -> dict[str, Any]:
-    results = test_results(runs)
+def latest_by_test(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for r in results:
         latest.setdefault(r["test_id"], r)
-    known = {t.get("id") for t in tests if t.get("id")}
-    current = {tid: r for tid, r in latest.items() if tid in known}  # tests still in the tests folder
-    passing = sum(r["status"] in ("passed", "healed") for r in current.values())
+    return latest
+
+
+def dashboard(tests: list[dict[str, Any]], runs: list[dict[str, Any]], release: str) -> dict[str, Any]:
+    results = test_results(runs)
+    usable = [t for t in tests if not t.get("problem") and t.get("id")]
+    known = {t["id"] for t in usable}
+    current = {tid: r for tid, r in latest_by_test(results).items() if tid in known}
+    passing = sum(r["status"] in PASSING for r in current.values())
     failing = sum(r["status"] == "failed" for r in current.values())
 
     finished = [r for r in runs if r.get("suite_dir") and r["status"] in ("passed", "failed")]
-    trend = []
-    for run in reversed(finished[:20]):  # oldest first, for the chart
+    activity = []
+    for run in reversed(finished[:30]):  # oldest first
         counts = run_counts(run)
+        suite = suite_of(run) or {}
         if counts and counts["total"]:
-            trend.append({"run_id": run["id"], "at": run.get("started_at"), **counts})
+            activity.append(
+                {
+                    "run_id": run["id"],
+                    "at": run.get("started_at"),
+                    "finished_at": run.get("finished_at"),
+                    "target": run["target"],
+                    "status": run["status"],
+                    "release": str(suite.get("release") or ""),
+                    **counts,
+                }
+            )
 
     week_ago = datetime.now().astimezone() - timedelta(days=7)
-    this_week = [r for r in runs if _when(r.get("created_at")) >= week_ago]
-
     modules: dict[str, dict[str, int]] = {}
-    for t in tests:
-        if t.get("problem"):
-            continue
+    for t in usable:
         m = modules.setdefault(t.get("module") or "Other", {"tests": 0, "passing": 0, "failing": 0, "not_run": 0})
         m["tests"] += 1
-        last = current.get(t.get("id", ""))
+        last = current.get(t["id"])
         if last is None:
             m["not_run"] += 1
         elif last["status"] == "failed":
@@ -97,63 +124,193 @@ def dashboard(tests: list[dict[str, Any]], runs: list[dict[str, Any]]) -> dict[s
             m["passing"] += 1
 
     return {
-        "tests": len([t for t in tests if not t.get("problem")]),
+        "tests": len(usable),
         "tested": len(current),
+        "never_run": len(usable) - len(current),
+        "coverage": round(100 * len(current) / len(usable)) if usable else None,
         "passing": passing,
         "failing": failing,
         "pass_rate": round(100 * passing / len(current)) if current else None,
-        "runs_this_week": len(this_week),
+        "runs_this_week": sum(1 for r in runs if _when(r.get("created_at")) >= week_ago),
         "tests_run_this_week": sum(1 for r in results if _when(r["at"]) >= week_ago),
         "documents": sum(1 for r in results if r.get("document")),
-        "trend": trend,
+        "activity": activity,
         "modules": [{"module": k, **v} for k, v in sorted(modules.items())],
-        "last_run_at": runs[0].get("started_at") if runs else None,
+        "last_run": _last_run(runs),
+        "readiness": readiness(usable, results, release),
+        "releases": release_comparison(usable, results),
     }
 
 
-def test_history(test_id: str, runs: list[dict[str, Any]], evidence_root: Path) -> list[dict[str, Any]]:
+def readiness(tests: list[dict[str, Any]], results: list[dict[str, Any]], release: str) -> dict[str, Any]:
+    """Where each test stands for one Oracle release.
+
+    validated  passed on this release
+    failing    failed on its latest run on this release
+    baselined  not yet run on this release, but passed on an earlier one
+    awaiting   not yet run on this release and never passed before
+    """
+    if not release:
+        return {"release": "", "total": len(tests)}
+    on_release = latest_by_test([r for r in results if r["release"] == release])
+    passed_before = {r["test_id"] for r in results if r["status"] in PASSING and r["release"] != release}
+    counts = {"validated": 0, "failing": 0, "baselined": 0, "awaiting": 0}
+    modules: dict[str, dict[str, int]] = {}
+    for t in tests:
+        r = on_release.get(t["id"])
+        state = (
+            ("validated" if r["status"] in PASSING else "failing")
+            if r
+            else ("baselined" if t["id"] in passed_before else "awaiting")
+        )
+        counts[state] += 1
+        m = modules.setdefault(t.get("module") or "Other", dict.fromkeys(("total", *counts), 0))
+        m["total"] += 1
+        m[state] += 1
+    return {
+        "release": release,
+        "total": len(tests),
+        **counts,
+        "modules": [{"module": k, **v} for k, v in sorted(modules.items())],
+    }
+
+
+def release_comparison(tests: list[dict[str, Any]], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pass rate of each Oracle release: the latest result of each test run on that release."""
+    known = {t["id"] for t in tests}
+    first_seen: dict[str, str] = {}
+    for r in reversed(results):  # oldest first
+        if r["release"]:
+            first_seen.setdefault(r["release"], r["at"])
     out = []
-    for r in test_results(runs):
-        if r["test_id"] != test_id:
-            continue
+    for release in sorted(first_seen, key=lambda k: first_seen[k]):
+        on_release = latest_by_test([r for r in results if r["release"] == release])
+        latest = {k: v for k, v in on_release.items() if k in known}
+        passed = sum(r["status"] in PASSING for r in latest.values())
         out.append(
             {
-                "run_id": r["service_run_id"],
-                "at": r["at"],
-                "status": r["status"],
-                "steps_passed": r.get("steps_passed"),
-                "steps_total": r.get("steps_total"),
-                "duration": r.get("duration"),
-                "document": r.get("document"),
-                "folder": r.get("run_dir"),
+                "release": release,
+                "tested": len(latest),
+                "passed": passed,
+                "failed": len(latest) - passed,
+                "pass_rate": round(100 * passed / len(latest)) if latest else None,
             }
         )
     return out
 
 
-def attention(tests: list[dict[str, Any]], runs: list[dict[str, Any]], tests_root: Path) -> dict[str, Any]:
-    """Tests that failed last time, tests that passed only because a fallback was used, and unreadable files."""
-    by_id = {t["id"]: t for t in tests if t.get("id")}
-    latest: dict[str, dict[str, Any]] = {}
-    for r in test_results(runs):
-        latest.setdefault(r["test_id"], r)
+def _last_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for run in runs:
+        if run["status"] not in ("queued",):
+            return {
+                "id": run["id"],
+                "status": run["status"],
+                "at": run.get("started_at") or run["created_at"],
+                "target": run["target"],
+            }
+    return None
 
-    failing, updates = [], []
+
+def test_history(test_id: str, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "run_id": r["service_run_id"],
+            "at": r["at"],
+            "status": r["status"],
+            "release": r["release"],
+            "steps_passed": r.get("steps_passed"),
+            "steps_total": r.get("steps_total"),
+            "duration": r.get("duration"),
+            "document": r.get("document"),
+            "folder": r.get("run_dir"),
+        }
+        for r in test_results(runs)
+        if r["test_id"] == test_id
+    ]
+
+
+# ---------------------------------------------------------------------- needs attention
+
+CATEGORIES = {
+    "assertion": "Checks that did not match",
+    "missing_element": "Items not found on the screen",
+    "timeout": "Screens that did not respond",
+    "authentication": "Sign-in problems",
+    "failure": "Other failures",
+    "could_not_run": "Runs that could not start",
+    "ui_change": "Oracle screen changes",
+    "unreadable": "Test files that could not be read",
+}
+
+
+def classify(error: str | None) -> str:
+    """Which kind of failure an error message describes (from its wording, nothing more)."""
+    text = error or ""
+    low = text.lower()
+    if "missingcredentials" in low or "sign in" in low or "sign-in" in low or "password" in low or "login" in low:
+        return "authentication"
+    if "expected text" in low or low.startswith("stepfailure") or "assert" in low:
+        return "assertion"
+    if re.search(r"matched \d+", low) or "resolutionerror" in low or "no suggestion matches" in low:
+        return "missing_element"
+    if "timeout" in low:
+        return "timeout"
+    return "failure"
+
+
+def expected_observed(error: str | None) -> dict[str, str] | None:
+    m = re.search(r"expected text '(.*)', found '(.*)'$", " ".join((error or "").split()))
+    return {"expected": m.group(1), "observed": m.group(2)} if m else None
+
+
+def attention(
+    tests: list[dict[str, Any]], runs: list[dict[str, Any]], tests_root: Path, release: str
+) -> dict[str, Any]:
+    """Everything that needs a person: failures by kind, screen changes to accept, runs that could not
+    start and files that could not be read."""
+    by_id = {t["id"]: t for t in tests if t.get("id")}
+    results = test_results(runs)
+    latest = latest_by_test(results)
+    last_good: dict[str, dict[str, Any]] = {}
+    for r in results:
+        if r["status"] in PASSING:
+            last_good.setdefault(r["test_id"], r)
+
+    items: list[dict[str, Any]] = []
     for test_id, r in latest.items():
         test = by_id.get(test_id)
         if test is None:
             continue  # the test file was removed or renamed
+        good = last_good.get(test_id)
         base = {
             "test_id": test_id,
             "title": test.get("title") or test_id,
             "file": test["file"],
+            "module": test.get("module", ""),
+            "process": test.get("process", ""),
             "at": r["at"],
             "run_id": r["service_run_id"],
+            "run_release": r["release"],
+            "current_release": release,
+            "last_good_release": good["release"] if good else None,
+            "last_good_at": good["at"] if good else None,
+            "document": r.get("document"),
+            "folder": r.get("run_dir"),
         }
         if r["status"] == "failed":
             f = r.get("failed_step") or {}
-            failing.append(
-                {**base, "step": f.get("number"), "intent": f.get("intent"), "error": plain_error(f.get("error"))}
+            raw = f.get("error")
+            items.append(
+                {
+                    **base,
+                    "category": classify(raw),
+                    "step": f.get("number"),
+                    "intent": f.get("intent"),
+                    "error": plain_error(raw),
+                    "detail": raw,
+                    "picture": f.get("screenshot"),
+                    "compare": expected_observed(raw),
+                }
             )
         spec = _load_spec(tests_root / test["file"])
         for h in r.get("healing") or []:
@@ -164,9 +321,10 @@ def attention(tests: list[dict[str, Any]], runs: list[dict[str, Any]], tests_roo
             if {new[0]: new[1]} not in strategies:
                 continue
             old = [str(x) for x in h.get("old") or []]
-            updates.append(
+            items.append(
                 {
                     **base,
+                    "category": "ui_change",
                     "step_index": h["step_index"],
                     "step": h["step_index"] + 1,
                     "intent": h.get("intent", ""),
@@ -176,12 +334,44 @@ def attention(tests: list[dict[str, Any]], runs: list[dict[str, Any]], tests_roo
                     "new_text": describe(new),
                 }
             )
-    broken = [{"file": t["file"], "problem": t["problem"]} for t in tests if t.get("problem")]
+
+    # a run that stopped before any test ran, unless a later run of the same tests got going
+    seen_targets: set[str] = set()
+    for run in runs:
+        if run["status"] in ("queued", "running", "cancelled"):
+            continue
+        if run["target"] in seen_targets:
+            continue
+        seen_targets.add(run["target"])
+        if run["status"] == "error":
+            message = run.get("error") or ""
+            items.append(
+                {
+                    "category": "authentication" if classify(message) == "authentication" else "could_not_run",
+                    "title": _target_title(run["target"], tests),
+                    "file": run["target"] if run["target"].endswith((".yaml", ".yml")) else None,
+                    "at": run.get("finished_at") or run["created_at"],
+                    "run_id": run["id"],
+                    "error": _last_error_line(message),
+                    "detail": message,
+                    "current_release": release,
+                }
+            )
+
+    items += [
+        {"category": "unreadable", "title": t["file"], "file": t["file"], "error": t["problem"]}
+        for t in tests
+        if t.get("problem")
+    ]
+    counts: dict[str, int] = {}
+    for it in items:
+        counts[it["category"]] = counts.get(it["category"], 0) + 1
     return {
-        "failing": failing,
-        "updates": updates,
-        "broken": broken,
-        "count": len(failing) + len(updates) + len(broken),
+        "items": items,
+        "count": len(items),
+        "counts": counts,
+        "categories": CATEGORIES,
+        "checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
 
 
@@ -200,6 +390,20 @@ def describe(strategy: list[str]) -> str:
     if kind == "test_id":
         return f'the element with test id "{value}"'
     return f"a technical page address ({kind})"
+
+
+def _target_title(target: str, tests: list[dict[str, Any]]) -> str:
+    if target in ("", "."):
+        return "All tests"
+    t = next((t for t in tests if t["file"] == target), None)
+    return (t or {}).get("title") or (target if target.endswith((".yaml", ".yml")) else f"All tests in {target}")
+
+
+def _last_error_line(message: str) -> str:
+    lines = [ln.strip() for ln in message.splitlines() if ln.strip()]
+    errors = [ln for ln in lines if ln.lower().startswith("error:")]
+    line = errors[-1][6:].strip() if errors else (lines[-1] if lines else "")
+    return line or "The run stopped before any test ran."
 
 
 def _load_spec(path: Path) -> dict[str, Any]:

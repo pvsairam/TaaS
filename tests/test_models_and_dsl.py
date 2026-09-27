@@ -114,3 +114,19 @@ def test_undefined_placeholder_in_locator_rejected(tmp_path: Path) -> None:
 def test_login_as_requires_value() -> None:
     with pytest.raises(ValidationError, match="requires a value"):
         Step(action=Action.LOGIN_AS, intent="switch")
+
+
+def test_masked_values_come_from_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from quartermaster.dsl.loader import MissingSecretError, display_value
+
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "id: x\ntitle: t\nmodule: m\nproduct: p\ndata: {pin: '${env:QM_X_1}'}\n"
+        "steps:\n  - {action: fill, intent: pin, value: '${pin}', target: {strategies: [{label: PIN}]}}\n"
+    )
+    test = load_test(p)  # env references are allowed in data
+    with pytest.raises(MissingSecretError, match="QM_X_1"):
+        render_value("${pin}", test.data)
+    monkeypatch.setenv("QM_X_1", "1234")
+    assert render_value("${pin}", test.data) == "1234"
+    assert display_value("${pin}", test.data) == "••••••"  # what evidence shows

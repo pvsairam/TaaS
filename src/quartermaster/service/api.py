@@ -4,8 +4,14 @@ Standard library only (`http.server`), so `qm serve` needs nothing beyond Quarte
 It listens on 127.0.0.1 and refuses requests addressed to any other host name, so other
 computers and other web sites cannot start runs.
 
-    GET  /api/status                 pod, credentials set or not, folders
+    GET  /api/status                 pod, credentials set or not, environment name and release, folders
+    GET  /api/settings, POST /api/settings   {"environment_name", "release"}
+    POST /api/check-pod              can this computer reach the pod now?
+    GET  /api/dashboard              pass rate, coverage, release readiness, activity
+    GET  /api/attention              what needs a person, by kind
     GET  /api/tests                  test files in the tests folder, with their last result
+    GET  /api/test?file=<path>       one test: steps in plain words, data, history, the file
+    POST /api/test/accept-update     {"file", "step_index", "new"} accept a screen change
     GET  /api/runs                   run history, newest first
     POST /api/runs                   {"target": "hcm/view_worker.yaml", "options": {...}} queue a run
     GET  /api/runs/<id>              one run, its progress events and (when done) its results
@@ -13,7 +19,7 @@ computers and other web sites cannot start runs.
     POST /api/runs/<id>/cancel
     GET  /api/recording              the recording in progress, or the last one
     POST /api/recording              {"id", "title", "module", "product", "persona", "file"} start recording
-    POST /api/recording/stop
+    POST /api/recording/<command>    pause, resume, check, undo, note {"text"}, mask, stop
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -27,6 +33,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,12 +45,13 @@ import yaml
 from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
-from quartermaster.service.recording import RecordCommandBuilder, Recording, qm_record_command
+from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
+from quartermaster.service.settings import Settings, check_pod
 from quartermaster.service.store import Store
 
 WEB_DIR = Path(__file__).parent / "web"
-_PAGES = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
+_WEB_FILE = re.compile(r"^/([a-z0-9-]+\.(?:js|css))$")  # the page's own scripts and styles, nothing else
 _TYPES = {".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".webm": "video/webm"}
 
 
@@ -88,6 +96,8 @@ class App:
         )
         self.recording = Recording(self.tests_root, self.evidence_root, data_dir / "recording", record_command)
         self.backups = data_dir / "backups"
+        self.settings = Settings(data_dir / "settings.json")
+        self.pod_check: dict[str, Any] | None = None
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -103,8 +113,11 @@ class App:
         url = urlsplit(raw_path)
         path, query = unquote(url.path), parse_qs(url.query)
         parts = [p for p in path.split("/") if p]
-        if method == "GET" and path in _PAGES:
-            return self._page(_PAGES[path])
+        if method == "GET" and path == "/":
+            return self._page("index.html")
+        web = _WEB_FILE.match(path)
+        if method == "GET" and web and (WEB_DIR / web.group(1)).is_file():
+            return self._page(web.group(1))
         if method == "GET" and parts[:1] == ["files"]:
             return self._file("/".join(parts[1:]))
         if parts[:1] != ["api"]:
@@ -116,10 +129,21 @@ class App:
             return _json(self.status())
         if method == "GET" and route == ["tests"]:
             return _json(self.tests())
+        if route == ["settings"]:
+            if method == "POST":
+                try:
+                    self.settings.update(data)
+                except ValueError as e:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+            return _json(self.settings.get())
+        if method == "POST" and route == ["check-pod"]:
+            self.pod_check = check_pod(os.environ.get("QM_FUSION_URL", ""))
+            return _json(self.pod_check)
         if method == "GET" and route == ["dashboard"]:
-            return _json(insights.dashboard(self.tests(), self.queue.store.list(limit=500)))
+            release = self.settings.get()["release"]
+            return _json(insights.dashboard(self.tests(), self.queue.store.list(limit=500), release))
         if method == "GET" and route == ["attention"]:
-            return _json(insights.attention(self.tests(), self.queue.store.list(limit=500), self.tests_root))
+            return _json(self.attention())
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -128,8 +152,11 @@ class App:
             if method == "GET":
                 return _json([self._run_view(r, counts=True) for r in self.queue.store.list()])
             if method == "POST":
+                options = dict(data.get("options") or {})
+                if not str(options.get("release") or "").strip():
+                    options["release"] = self.settings.get()["release"]  # the environment's release by default
                 try:
-                    queued = self.queue.submit(str(data.get("target") or ""), data.get("options") or {})
+                    queued = self.queue.submit(str(data.get("target") or ""), options)
                 except ValueError as e:
                     raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
                 return _json(self._run_view(queued), HTTPStatus.CREATED)
@@ -152,8 +179,11 @@ class App:
                     return _json(self.recording.start(data), HTTPStatus.CREATED)
                 except ValueError as e:
                     raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
-            if method == "POST" and route[1:] == ["stop"]:
-                return _json(self.recording.stop())
+            if method == "POST" and len(route) == 2 and route[1] in COMMANDS:
+                try:
+                    return _json(self.recording.send(route[1], str(data.get("text") or "")))
+                except ValueError as e:
+                    raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
         if method == "POST" and route == ["open"]:
             return _json({"opened": str(self._open(str(data.get("path") or "")))})
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
@@ -162,8 +192,14 @@ class App:
 
     def status(self) -> dict[str, Any]:
         url = os.environ.get("QM_FUSION_URL", "")
+        settings = self.settings.get()
+        runs = self.queue.store.list(limit=1)
         return {
+            **settings,
             "pod_url": url,
+            "pod_host": urlsplit(url).hostname or "",
+            "pod_check": self.pod_check,
+            "last_run": self._run_view(runs[0]) if runs else None,
             "user": os.environ.get("QM_FUSION_USER", ""),
             "password_set": bool(os.environ.get("QM_FUSION_PASSWORD")),
             "tests_folder": str(self.tests_root),
@@ -178,12 +214,29 @@ class App:
         for run in runs:
             last.setdefault(run["target"], run)
         latest: dict[str, dict[str, Any]] = {}  # each test's own latest result, whatever run it was part of
+        validated: dict[str, str] = {}  # the release each test last passed on
         for r in insights.test_results(runs):
-            latest.setdefault(r["test_id"], {"status": r["status"], "at": r["at"], "run_id": r["service_run_id"]})
+            latest.setdefault(
+                r["test_id"],
+                {
+                    "status": r["status"],
+                    "at": r["at"],
+                    "run_id": r["service_run_id"],
+                    "release": r["release"],
+                    "duration": r.get("duration"),
+                    "environment": urlsplit(r.get("environment_url") or "").hostname,
+                },
+            )
+            if r["status"] in insights.PASSING and r["release"]:
+                validated.setdefault(r["test_id"], r["release"])
         out = []
         for f in sorted(self.tests_root.rglob("*.y*ml")):
             rel = f.relative_to(self.tests_root).as_posix()
-            item: dict[str, Any] = {"file": rel, "folder": rel.rpartition("/")[0]}
+            item: dict[str, Any] = {
+                "file": rel,
+                "folder": rel.rpartition("/")[0],
+                "updated": datetime.fromtimestamp(f.stat().st_mtime).astimezone().isoformat(timespec="seconds"),
+            }
             try:
                 spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
                 if not isinstance(spec, dict):
@@ -197,6 +250,7 @@ class App:
                     persona=str(spec.get("persona", "")),
                     priority=str(spec.get("priority", "")),
                     tags=[str(t) for t in spec.get("tags") or []],
+                    owner=str(spec.get("owner", "")),
                     steps=len(spec.get("steps") or []),
                 )
             except (yaml.YAMLError, ValueError, OSError) as e:
@@ -204,6 +258,7 @@ class App:
             previous = last.get(rel)
             item["last_run"] = self._run_view(previous) if previous else None
             item["last_result"] = latest.get(item.get("id", ""))
+            item["release_validated"] = validated.get(item.get("id", ""))
             out.append(item)
         return out
 
@@ -233,7 +288,7 @@ class App:
                     "found_by": found_by,
                 }
             )
-        history = insights.test_history(item.get("id", ""), self.queue.store.list(limit=500), self.evidence_root)
+        history = insights.test_history(item.get("id", ""), self.queue.store.list(limit=500))
         for h in history:
             h["document_url"] = self._url_rel(h.pop("document"))
         tested = [h for h in history if h["status"] in ("passed", "healed", "failed")]
@@ -246,6 +301,15 @@ class App:
             "history": history,
             "pass_rate": round(100 * passed / len(tested)) if tested else None,
         }
+
+    def attention(self) -> dict[str, Any]:
+        result = insights.attention(
+            self.tests(), self.queue.store.list(limit=500), self.tests_root, self.settings.get()["release"]
+        )
+        for item in result["items"]:
+            item["picture_url"] = self._url_rel(item.pop("picture", None))
+            item["document_url"] = self._url_rel(item.pop("document", None))
+        return result
 
     def accept_update(self, data: dict[str, Any]) -> dict[str, Any]:
         path = self._test_file(str(data.get("file") or ""))
@@ -277,6 +341,11 @@ class App:
         view = {k: v for k, v in run.items() if k not in ("events_path", "log_path")}
         view["summary_url"] = self._url(run.get("summary"))
         view["suite_folder"] = self._relative(run.get("suite_dir"))
+        suite = insights.suite_of(run) or {}
+        # what the evidence says, else what was asked for
+        view["release"] = str(suite.get("release") or run["options"].get("release") or "")
+        view["executed_by"] = str(suite.get("executed_by") or run["options"].get("tester") or "")
+        view["environment"] = urlsplit(str(suite.get("environment_url") or "")).hostname or None
         if counts:
             view["counts"] = insights.run_counts(run)
         return view
@@ -311,12 +380,22 @@ class App:
                         "picture_url": self._url_rel(failed.get("screenshot")),
                     },
                     "needs_update": bool(entry.get("healing")),
+                    "started_at": record.get("started_at"),
+                    "finished_at": record.get("finished_at"),
+                    "record_url": self._url_rel(f"{entry['run_dir']}/run.json") if record else None,
                     "steps": [
                         {
                             "number": st.get("index", 0) + 1,
                             "intent": st.get("intent", ""),
+                            "action": st.get("action", ""),
+                            "value": st.get("value"),
+                            "expected": st.get("expected", ""),
                             "status": st.get("status", ""),
                             "error": plain_error(st.get("error")),
+                            "detail": st.get("error"),
+                            "compare": insights.expected_observed(st.get("error")),
+                            "locator": st.get("locator"),
+                            "started_at": st.get("started_at"),
                             "seconds": round((st.get("duration_ms") or 0) / 1000, 1),
                             "pictures": [self._url_rel(f"{entry['run_dir']}/{p}") for p in st.get("evidence") or []],
                         }

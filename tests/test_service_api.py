@@ -19,21 +19,28 @@ from test_service_queue import fake_command
 from quartermaster.evidence.suite import suite_folder, write_suite_document, write_suite_record
 from quartermaster.service.api import ApiError, App, make_server, port_of
 
-# Stand-in for `qm record`: waits for Enter (the web UI's Stop button), then saves a test file.
+# Stand-in for `qm record`: takes commands on its input until "stop" (the web UI's Finish button),
+# keeping them in its feed file so a test can see they arrived, then saves a test file.
 FAKE_RECORD = r"""
-import os, sys
-out = sys.argv[1]
+import json, os, sys
+out, feed = sys.argv[1], sys.argv[2]
 if out.endswith('no_pod.yaml'):
     print('error: set QM_FUSION_URL to the non-prod pod URL'); sys.exit(2)
-sys.stdin.readline()
+commands = []
+while True:
+    line = sys.stdin.readline().strip()
+    if line in ('', 'stop'):
+        break
+    commands.append(line)
+    json.dump({'steps': [], 'paused': 'pause' in commands, 'commands': commands}, open(feed, 'w'))
 os.makedirs(os.path.dirname(out), exist_ok=True)
 open(out, 'w').write('id: x\ntitle: Recorded\nsteps: []\n')
 print('Saved 0 step(s) to ' + out + '. Replay with: qm run ' + out)
 """
 
 
-def fake_record(out: Path, fields: dict[str, str], evidence_root: Path) -> list[str]:
-    return [sys.executable, "-c", FAKE_RECORD, str(out)]
+def fake_record(out: Path, fields: dict[str, str], evidence_root: Path, feed: Path) -> list[str]:
+    return [sys.executable, "-c", FAKE_RECORD, str(out), str(feed)]
 
 
 @pytest.fixture
@@ -171,9 +178,14 @@ def test_recording_starts_stops_and_saves(app: App) -> None:
     with pytest.raises(ApiError, match="already in progress"):
         call(app, "POST", "/api/recording", {**request, "id": "hcm.other"})
 
+    for command, body in (("pause", {}), ("note", {"text": "The worker's\npage   opens"}), ("mask", {})):
+        call(app, "POST", f"/api/recording/{command}", body)
+    feed = wait(lambda: (s := call(app, "GET", "/api/recording"))["feed"] and len(s["feed"]["commands"]) == 3 and s)
+    assert feed["feed"]["commands"] == ["pause", "note The worker's page opens", "mask"]  # one line each
+    assert feed["feed"]["paused"] is True
     call(app, "POST", "/api/recording/stop", {})
     saved = wait(lambda: (s := call(app, "GET", "/api/recording"))["status"] == "saved" and s)
-    assert saved["message"].startswith("Saved 0 step(s)")
+    assert saved["message"] == "Saved 0 step(s)."
     assert (app.tests_root / "recorded" / "hcm_search-worker.yaml").is_file()
 
     with pytest.raises(ApiError, match="already exists"):  # never overwrite a test
@@ -194,6 +206,8 @@ def test_recording_requests_are_checked_and_failures_explained(app: App) -> None
     call(app, "POST", "/api/recording", {**base, "file": "no_pod.yaml"})
     failed = wait(lambda: (s := call(app, "GET", "/api/recording"))["status"] == "error" and s)
     assert failed["message"] == "set QM_FUSION_URL to the non-prod pod URL"
+    with pytest.raises(ApiError, match="no recording is in progress"):
+        call(app, "POST", "/api/recording/pause", {})
 
 
 def test_http_guards(app: App) -> None:
@@ -229,28 +243,90 @@ def test_dashboard_counts_each_tests_latest_result(app: App) -> None:
     finished_suite_run(app)
     dash = call(app, "GET", "/api/dashboard")
     assert (dash["tests"], dash["tested"], dash["passing"], dash["failing"], dash["pass_rate"]) == (4, 3, 2, 1, 67)
-    assert dash["trend"][-1] == {**dash["trend"][-1], "total": 3, "passed": 2, "failed": 1}
+    assert (dash["coverage"], dash["never_run"]) == (75, 1)
+    assert dash["activity"][-1] == {**dash["activity"][-1], "total": 3, "passed": 2, "failed": 1, "release": "26D"}
+    assert dash["readiness"] == {"release": "", "total": 4}  # no release chosen yet
+    assert dash["releases"] == [{"release": "26D", "tested": 3, "passed": 2, "failed": 1, "pass_rate": 67}]
     hcm = next(m for m in dash["modules"] if m["module"] == "HCM")
     assert hcm == {"module": "HCM", "tests": 4, "passing": 2, "failing": 1, "not_run": 1}
     tests = {t["file"]: t for t in call(app, "GET", "/api/tests")}
     assert tests["hcm/location.yaml"]["last_result"]["status"] == "failed"  # it ran as part of a folder
     assert tests["hcm/pass.yaml"]["last_result"] is None
+    assert tests["hcm/personal.yaml"]["release_validated"] == "26D"
+
+
+def test_release_readiness_counts_each_test_once(app: App) -> None:
+    add_suite_tests(app)
+    finished_suite_run(app)  # ran on 26D
+    call(app, "POST", "/api/settings", {"release": "26D", "environment_name": "EIIV DEV2"})
+    ready = call(app, "GET", "/api/dashboard")["readiness"]
+    assert {k: ready[k] for k in ("release", "total", "validated", "failing", "baselined", "awaiting")} == {
+        "release": "26D",
+        "total": 4,
+        "validated": 2,
+        "failing": 1,
+        "baselined": 0,
+        "awaiting": 1,
+    }
+    call(app, "POST", "/api/settings", {"release": "26E"})
+    ready = call(app, "GET", "/api/dashboard")["readiness"]
+    assert (ready["validated"], ready["baselined"], ready["awaiting"]) == (0, 2, 2)  # passed on 26D only
+    status = call(app, "GET", "/api/status")
+    assert (status["release"], status["environment_name"]) == ("26E", "EIIV DEV2")
+    run = call(app, "POST", "/api/runs", {"target": "hcm/pass.yaml"})
+    assert run["options"]["release"] == "26E"  # new runs are labelled with the environment's release
+    with pytest.raises(ApiError, match="release may use"):
+        call(app, "POST", "/api/settings", {"release": "<b>"})
+    with pytest.raises(ApiError, match="unknown settings"):
+        call(app, "POST", "/api/settings", {"password": "x"})
+
+
+def test_pod_check_reports_what_happened(app: App) -> None:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Pod(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(302 if self.path == "/" else 503)
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None:
+            pass
+
+    pod = HTTPServer(("127.0.0.1", 0), Pod)
+    threading.Thread(target=pod.serve_forever, daemon=True).start()
+    try:
+        from quartermaster.service.settings import check_pod
+
+        assert check_pod("")["ok"] is False
+        up = check_pod(f"http://127.0.0.1:{pod.server_address[1]}/")
+        assert up["ok"] is True and up["message"].startswith("The pod answered")
+        down = check_pod(f"http://127.0.0.1:{pod.server_address[1]}/broken")
+        assert down["ok"] is False and down["status_code"] == 503
+        assert check_pod("http://127.0.0.1:1/", timeout=2)["message"].startswith("Could not reach the pod")
+    finally:
+        pod.shutdown()
+        pod.server_close()
 
 
 def test_needs_attention_and_accepting_an_update(app: App) -> None:
     add_suite_tests(app)
     finished_suite_run(app)
     todo = call(app, "GET", "/api/attention")
-    assert [f["test_id"] for f in todo["failing"]] == ["hcm.create-location"]
-    assert todo["failing"][0]["error"] == 'The screen showed "Redwood City" but it should show "Redwood Shores".'
-    (update,) = todo["updates"]
+    assert todo["counts"] == {"assertion": 1, "ui_change": 1, "unreadable": 1} and todo["count"] == 3
+    (failure,) = [i for i in todo["items"] if i["category"] == "assertion"]
+    assert failure["test_id"] == "hcm.create-location" and failure["step"] == 2
+    assert failure["error"] == 'The screen showed "Redwood City" but it should show "Redwood Shores".'
+    assert failure["compare"] == {"expected": "Redwood Shores", "observed": "Redwood City"}
+    assert failure["picture_url"].endswith("step-02.png") and failure["last_good_release"] is None
+    (update,) = [i for i in todo["items"] if i["category"] == "ui_change"]
     assert (update["file"], update["step"], update["new"]) == ("hcm/personal.yaml", 1, ["role", "textbox:Name"])
     assert update["old_text"] == 'the field labelled "Name"' and update["new_text"] == 'the textbox named "Name"'
-    assert [b["file"] for b in todo["broken"]] == ["broken.yaml"] and todo["count"] == 3
+    assert update["last_good_release"] == "26D"
+    assert [i["file"] for i in todo["items"] if i["category"] == "unreadable"] == ["broken.yaml"]
 
     done = call(app, "POST", "/api/test/accept-update", {"file": update["file"], "step_index": 0, "new": update["new"]})
     assert Path(done["backup"]).is_file()
-    assert call(app, "GET", "/api/attention")["updates"] == []  # the file now tries the role first
+    assert "ui_change" not in call(app, "GET", "/api/attention")["counts"]  # the file now tries the role first
     with pytest.raises(ApiError, match="already tries this first"):
         call(app, "POST", "/api/test/accept-update", {"file": update["file"], "step_index": 0, "new": update["new"]})
     with pytest.raises(ApiError, match="only test files in the tests folder"):
@@ -270,3 +346,12 @@ def test_test_detail_speaks_plainly(app: App) -> None:
         call(app, "GET", "/api/test?file=hcm/missing.yaml")
     with pytest.raises(ApiError, match="only test files"):
         call(app, "GET", "/api/test?file=../../etc/passwd")
+
+
+def test_a_run_that_could_not_start_needs_attention(app: App) -> None:
+    (app.tests_root / "crash.yaml").write_text("id: crash\ntitle: Crash\nmodule: HCM\nsteps: [{}]\n")
+    run = call(app, "POST", "/api/runs", {"target": "crash.yaml"})
+    wait(lambda: call(app, "GET", f"/api/runs/{run['id']}")["status"] == "error")
+    (item,) = [i for i in call(app, "GET", "/api/attention")["items"] if i["category"] == "could_not_run"]
+    assert item["title"] == "Crash" and item["error"] == "something went wrong before any test ran"
+    assert item["run_id"] == run["id"]

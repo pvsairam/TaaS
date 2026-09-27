@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import sys
 import threading
 from collections.abc import Callable
@@ -202,13 +203,14 @@ def _record(args: argparse.Namespace) -> int:
     assert_safe_target(env)
 
     driver = PlaywrightDriver(headless=False, evidence_dir=args.evidence)
-    recorder = Recorder()
+    recorder = Recorder(feed=Path(args.events) if args.events else None, test_id=args.id)
     driver.open(env, args.persona)  # sign-in is done for you and never recorded
     try:
         recorder.attach(driver.page)
         print("Recording. Do the business flow in the browser window.")
         print("Use 'Add check' in the page toolbar to record what must be true, e.g. a value on screen.")
         print("Finish with 'Stop recording' in the browser, or press Enter here.")
+        print("Commands here: pause, resume, check, undo, note <text>, mask (then Enter).")
         _wait_for_stop(recorder, driver.page)
     finally:
         driver.close()
@@ -226,27 +228,36 @@ def _record(args: argparse.Namespace) -> int:
     out.write_text(to_yaml(test), encoding="utf-8")
     load_test(out)  # the saved file must pass the same validation as hand-written specs
     print(f"Saved {len(test.steps)} step(s) to {out}. Replay with: qm run {out}")
+    secrets = [v[6:-1] for v in test.data.values() if v.startswith("${env:")]
+    if secrets:
+        print("Masked values were not saved. Before running it, set: " + ", ".join(secrets))
     return 0
 
 
 def _wait_for_stop(recorder: Any, page: Any) -> None:
-    """Return when Stop recording is pressed in the browser, Enter is pressed here, or the window closes.
+    """Run the recorder's commands until it stops: Stop recording in the browser, an empty line or
+    "stop" here, or the window closing.
 
-    Playwright's sync API may only be used from this thread, so the terminal is read in a helper
-    thread while this one keeps the browser responsive.
+    Playwright's sync API may only be used from this thread, so commands are read in a helper
+    thread and carried out here, between short waits that keep the browser responsive.
     """
-    entered = threading.Event()
+    lines: queue.Queue[str] = queue.Queue()
 
-    def read_enter() -> None:
-        sys.stdin.readline()
-        entered.set()
+    def read_lines() -> None:
+        while True:
+            line = sys.stdin.readline()
+            lines.put(line)
+            if not line.strip() or line.strip().lower() in ("stop", "finish"):
+                return  # an empty line (Enter) or the end of input finishes the recording
 
-    threading.Thread(target=read_enter, daemon=True).start()
-    while not (recorder.stopped or entered.is_set()):
+    threading.Thread(target=read_lines, daemon=True).start()
+    while not recorder.stopped:
         try:
             page.wait_for_timeout(200)  # also delivers the page's events to the recorder
         except Exception:  # the browser window was closed
             return
+        while not lines.empty():
+            recorder.command(lines.get())
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -337,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     rc.add_argument("--env-name", default="fusion")
     rc.add_argument("--evidence", default="evidence")
+    rc.add_argument("--events", help="keep the steps recorded so far in this file (used by the web UI)")
     rc.set_defaults(func=_record)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")

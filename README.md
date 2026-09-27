@@ -143,16 +143,27 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 
 | Page | Who it is for | What you do there |
 |---|---|---|
-| **Overview** | Everyone, managers first | Pass rate of every test's last run, runs this week, recent runs as a chart, results by module, and what needs attention. Download the latest summary document. |
-| **Runs** | Testers | Every run, newest first, with search and filters. Open one to watch each step as it happens, see the picture of every step (click to enlarge, arrow keys to move), and download each test's evidence document and the run summary. |
-| **Tests** | Testers, functional team | Every test with its module and last result; search and filter by module or status. Open a test to read its steps in plain words, its test data, its run history and (for the test team) the file itself. |
-| **Needs attention** | Test team | Tests that failed last time, with the reason in plain words; tests that passed only because something on the screen was found another way (accept the update with one click; a copy of the old file is kept); files that could not be read. |
-| **Record a test** | Functional team | Name the test and start. A browser opens already signed in; do the steps, then press Stop. |
-| **Settings** | Everyone | Which pod and user are in use (the password is never shown), folders, light or dark. |
+| **Overview** | Managers first, everyone | Pass rate, test coverage, what needs attention and runs this week. Release readiness for the pod's Oracle release (passed on it, failed on it, passed only on an earlier release, never passed), a comparison of releases once tests have run on two, recent activity and coverage by module. |
+| **Runs** | Testers | Every run with its result, module, release, environment, start, duration, who ran it and tests passed; search and filter. A run shows live progress in words ("Executing step 3 of 10…"), then each test's steps with screenshots, expected and observed values, video, documents and details. Technical detail stays folded away until asked for. |
+| **Tests** | Functional team, testers | Every test with its module and last result; search, filter by module or result, and choose extra columns (process, job role, owner, release validated, environment, last run, duration, tags, updated). A test's own page reads its steps in plain words with the real test data. |
+| **Needs attention** | Test team | Failures grouped by kind (checks that did not match, items not found, screens that did not respond, sign-in problems, runs that could not start, unreadable files) with the failed step, expected and observed, the screenshot and the last release it passed on. Oracle screen changes are accepted with one click (the old file is kept). |
+| **Record a test** | Functional team | Name the test and start. A browser opens already signed in. While recording: a timer, the steps so far, Pause and Resume, Add check, Add note (what should happen at a step), Mask value, Undo and Finish. |
+| **Settings** | Everyone | The environment's name and Oracle release, the pod address and a connection check, sign-in (the password is never shown), folders, theme and keyboard shortcuts. |
 
-Start a run from anywhere with **New run** (or press `N`): all tests, a folder or one test, pictures
-after every step or only on failure, video, Oracle release and your name. `Ctrl+K` searches tests,
-runs and pages.
+Start a run from anywhere with **New run** (or press `N`). `Ctrl+K` searches and runs anything: pages, tests,
+modules, recent runs, evidence and commands such as "Open the latest failed run". The sidebar collapses to icons
+(it starts collapsed on smaller screens), and the pod control at its foot shows the environment, its release and
+whether the pod answered the last check.
+
+**Masked values.** Press Mask value straight after typing something private while recording. From then on the
+value is hidden in the step list, and it is never written to the test file, the run record or the evidence
+documents: the test reads it from an environment variable that the recorder names when it saves (for example
+`QM_HCM_VIEW_WORKER_1`); set it like the password before running. (Sign-in and password fields are never
+recorded at all.)
+From a terminal, `qm record` takes the same commands typed and followed by Enter: `pause`, `resume`, `check`,
+`undo`, `note <text>`, `mask`, and an empty line to finish.
+
+The pages use the Inter font when the computer can reach Google Fonts, and the system font otherwise.
 
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer

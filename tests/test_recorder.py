@@ -147,3 +147,32 @@ def test_record_then_replay_in_real_browser(tmp_path: Path) -> None:
     play_driver = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=_serve_mock)
     result = run_test(saved, env, play_driver)
     assert result.status is StepStatus.PASSED, [s.error for s in result.steps]
+
+
+def test_commands_while_recording(tmp_path: Path) -> None:
+    import json
+
+    from quartermaster.recorder.recorder import Recorder
+
+    feed = tmp_path / "feed.json"
+    r = Recorder(feed=feed, test_id="hcm.view-worker")
+    r.command("note too early")
+    assert "Record a step first" in r.message
+    r._receive(_ev("fill", "PIN", ("label", "PIN"), value="1234"))
+    r.command("mask")
+    r.command("note   The PIN is accepted")
+    r.command("pause")
+    r._receive(_ev("click", "Ignored while paused", ("role", "button:X")))
+    r.command("resume")
+    r._receive(_ev("click", "Save", ("role", "button:Save")))
+    r.command("undo")
+    shown = json.loads(feed.read_text(encoding="utf-8"))
+    assert [s["intent"] for s in shown["steps"]] == ["Enter PIN"]
+    assert shown["steps"][0] == {**shown["steps"][0], "value": "••••••", "expected": "The PIN is accepted"}
+    assert shown["paused"] is False and shown["masked"] == 1 and "1234" not in feed.read_text(encoding="utf-8")
+    test = events_to_test(r.events, **{**META, "test_id": "hcm.view-worker"})
+    assert test.data == {"secret1": "${env:QM_HCM_VIEW_WORKER_1}"}
+    text = to_yaml(test)
+    assert "QM_HCM_VIEW_WORKER_1" in text and "1234" not in text
+    r.command("stop")
+    assert r.stopped
