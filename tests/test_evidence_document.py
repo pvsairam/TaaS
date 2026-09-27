@@ -94,9 +94,7 @@ def test_document_holds_steps_expected_results_and_screenshots(tmp_path: Path) -
         "Not done, because an earlier step failed.",
         "Screen after step 1",
         "Reviewed by",
-        "Technical details",
-        "videos/abc.webm",
-        "run.json in the run folder",  # where the full technical record is
+        "Saved in the videos folder next to this document",
     ):
         assert fragment in text, fragment
 
@@ -144,11 +142,9 @@ def test_step_pages_use_plain_words(tmp_path: Path) -> None:
     out = write_evidence_document(sample_run(tmp_path), tmp_path, tmp_path / "evidence.docx")
     root = ET.fromstring(zipfile.ZipFile(out).read("word/document.xml"))
     body = list(root.find(f"{W}body") or [])
-    texts = ["".join(t.text or "" for t in el.iter(f"{W}t")) for el in body]
-    tech = next(i for i, t in enumerate(texts) if "Technical details" in t)
-    before = " ".join(t.text or "" for el in body[:tech] for t in el.iter(f"{W}t"))
-    # locators, fingerprints and raw exception names stay out of the part a reviewer reads
-    for jargon in ("role=", "SHA-256 a", "StepFailure", "xpath", "Element used"):
+    before = " ".join(t.text or "" for el in body for t in el.iter(f"{W}t"))
+    # no locators, fingerprints, exception names or technical sections anywhere in the document
+    for jargon in ("role=", "SHA-256", "StepFailure", "xpath", "Element used", "Technical details", "a" * 64):
         assert jargon not in before, jargon
 
 

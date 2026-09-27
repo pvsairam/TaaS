@@ -148,8 +148,7 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
     if needs_update:
         add(_p([_r("Tests that need an update")], style="Heading1"))
         add(_p([_r("These tests passed, but an item on the screen was found in a different way than when the "
-                   "test was written. Update the test file so future runs stay reliable (the change needed is "
-                   "in each test's run.json):")]))
+                   "test was written. The test team should update these tests so future runs stay reliable:")]))
         for r in needs_update:
             add(_p([_r(r.get("test_title") or r["test_id"])], indent=360))
 
@@ -172,13 +171,6 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
         where = r.get("document") or r["run_dir"]
         erows.append([_cell(r.get("test_title") or r["test_id"], ew[0]), _cell(where, ew[1])])
     add(_table(erows, ew))
-
-    add(_p([_r("Technical details")], style="Heading1"))
-    add(_kv_table([
-        ("Summary ID", suite.get("suite_id", "")),
-        ("Full record", "suite.json in this summary's folder, and run.json in each test's run folder: original "
-                        "error messages, the items used on the screen and fingerprints of every picture"),
-    ]))
 
     return write_package(
         out,

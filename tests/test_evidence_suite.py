@@ -92,8 +92,6 @@ def test_summary_document_lists_results_failures_and_evidence(tmp_path: Path) ->
         "Tests that need an update",
         "hcm.create-location/20260927-100000-AAAA/hcm.create-location_evidence.docx",
         "Reviewed by",
-        "Technical details",
-        "suite.json in this summary's folder",
     ):
         assert fragment in text, fragment
     # only the failure screenshot is embedded; each test's own document holds the rest

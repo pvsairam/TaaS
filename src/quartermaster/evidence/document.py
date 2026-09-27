@@ -143,6 +143,8 @@ class _Doc:
             ("Oracle environment", run.get("environment_url", "")),
             ("Oracle release", run.get("release") or "Not recorded"),
         ]
+        if run.get("videos"):
+            about.append(("Video of the test", "Saved in the videos folder next to this document"))
         add(_kv_table(about, status_row=("Result", status)))
 
         add(_p([_r("Steps")], style="Heading1"))
@@ -191,17 +193,6 @@ class _Doc:
         for role, name in (("Run by", run.get("executed_by", "")), ("Reviewed by", ""), ("Approved by", "")):
             sign.append([_cell(role, sw[0], bold=True), _cell(name, sw[1]), _cell("", sw[2]), _cell("", sw[3])])
         add(_table(sign, sw, row_height=620))
-
-        add(_p([_r("Technical details")], style="Heading1"))
-        tech: list[tuple[str, Any]] = [
-            ("Test ID", run.get("test_id", "")),
-            ("Run ID", run.get("run_id", "")),
-            ("Test file", run.get("test_file", "")),
-        ]
-        tech += [("Video", v) for v in run.get("videos") or []]
-        tech.append(("Full record", "run.json in the run folder: every step, the item used on the screen, original "
-                                    "error messages and a fingerprint (SHA-256) of each picture and of the test file"))
-        add(_kv_table(tech))
 
         return document_xml(parts)
 
@@ -525,7 +516,7 @@ def plain_error(error: str | None) -> str:
         return "The screen did not respond in time."
     if "ended" in text and "job" in text:
         return "The scheduled process did not finish successfully."
-    return "The step could not be completed. See Technical details for the error."
+    return "The step could not be completed. The test team has the full error message in the run record."
 
 
 def _default_expected(step: dict[str, Any]) -> str:
