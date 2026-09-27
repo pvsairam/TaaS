@@ -93,8 +93,7 @@ def test_summary_document_lists_results_failures_and_evidence(tmp_path: Path) ->
         "hcm.create-location/20260927-100000-AAAA/hcm.create-location_evidence.docx",
         "Reviewed by",
         "Technical details",
-        "expected text 'Redwood Shores', found 'Redwood City'",  # original error, for the test team
-        "hcm.personal-info, step 1: the test looked for label=Name but found the item by role=textbox:Name.",
+        "suite.json in this summary's folder",
     ):
         assert fragment in text, fragment
     # only the failure screenshot is embedded; each test's own document holds the rest

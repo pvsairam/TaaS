@@ -25,7 +25,6 @@ from quartermaster.evidence.document import (
     _p,
     _page_break,
     _r,
-    _screenshot_setting,
     _status_label,
     plain_error,
     _table,
@@ -149,7 +148,8 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
     if needs_update:
         add(_p([_r("Tests that need an update")], style="Heading1"))
         add(_p([_r("These tests passed, but an item on the screen was found in a different way than when the "
-                   "test was written. Update the test file so future runs stay reliable (details at the end):")]))
+                   "test was written. Update the test file so future runs stay reliable (the change needed is "
+                   "in each test's run.json):")]))
         for r in needs_update:
             add(_p([_r(r.get("test_title") or r["test_id"])], indent=360))
 
@@ -176,26 +176,9 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
     add(_p([_r("Technical details")], style="Heading1"))
     add(_kv_table([
         ("Summary ID", suite.get("suite_id", "")),
-        ("Started", _when(suite.get("started_at"))),
-        ("Finished", _when(suite.get("finished_at"))),
-        ("Environment name", suite.get("environment", "")),
-        ("Computer", suite.get("machine", "")),
-        ("Pictures", _screenshot_setting(suite.get("screenshots", ""))),
-        ("Video", {"always": "Recorded for every test", "on-failure": "Kept for failed tests only"}.get(
-            suite.get("video", ""), "Not recorded")),
-        ("Quartermaster version", suite.get("quartermaster_version", "")),
+        ("Full record", "suite.json in this summary's folder, and run.json in each test's run folder: original "
+                        "error messages, the items used on the screen and fingerprints of every picture"),
     ]))
-    tw = [3000, 2400, _TEXT_W - 5400]
-    trows = [[_cell(h, w, header=True) for h, w in zip(("Test ID", "Run ID", "Original error"), tw)]]
-    for r in runs:
-        trows.append([_cell(r["test_id"], tw[0]), _cell(r.get("run_id", ""), tw[1]),
-                      _cell((r.get("failed_step") or {}).get("error") or "", tw[2])])
-    add(_table(trows, tw))
-    for r in needs_update:
-        for h in r.get("healing", []):
-            old, new = h.get("old", ["", ""]), h.get("new", ["", ""])
-            add(_p([_r(f"{r['test_id']}, step {h.get('step_index', 0) + 1}: the test looked for {old[0]}={old[1]} "
-                       f"but found the item by {new[0]}={new[1]}.", mono=True)], indent=360))
 
     return write_package(
         out,

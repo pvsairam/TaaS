@@ -30,7 +30,7 @@ _STATUS_FILL = {"passed": "E3F1E7", "healed": "F8ECDD", "failed": "F6E3E1", "ski
 _ACTUAL = {
     "passed": "As expected.",
     "healed": "As expected. The item was found in a different way than when the test was written, so "
-    "the test file should be updated (see Technical details).",
+    "the test file should be updated.",
     "skipped": "Not done, because an earlier step failed.",
 }
 
@@ -115,7 +115,6 @@ class _Doc:
     def build(self, run: dict[str, Any]) -> str:
         steps: list[dict[str, Any]] = run.get("steps", [])
         status = str(run.get("status", "")).lower()
-        hashes: dict[str, str] = run.get("evidence_sha256", {})
         counts = {k: sum(1 for s in steps if s.get("status") == k) for k in ("passed", "healed", "failed", "skipped")}
         parts: list[str] = []
         add = parts.append
@@ -194,43 +193,15 @@ class _Doc:
         add(_table(sign, sw, row_height=620))
 
         add(_p([_r("Technical details")], style="Heading1"))
-        add(_p([_r("For auditors and the test team. The fingerprints (SHA-256) show that the test file and "
-                   "pictures are the ones produced by this run: any change to a file changes its fingerprint.")]))
         tech: list[tuple[str, Any]] = [
             ("Test ID", run.get("test_id", "")),
             ("Run ID", run.get("run_id", "")),
             ("Test file", run.get("test_file", "")),
-            ("Test file fingerprint", run.get("test_file_sha256", "")),
-            ("Started", _when(run.get("started_at"))),
-            ("Finished", _when(run.get("finished_at"))),
-            ("Environment name", run.get("environment", "")),
-            ("Signed in as persona", run.get("persona") or "Default user"),
-            ("Computer", run.get("machine", "")),
-            ("Pictures", _screenshot_setting(run.get("screenshots", ""))),
-            ("Video", _video_line(run)),
-            ("Quartermaster version", run.get("quartermaster_version", "")),
         ]
-        for v in run.get("videos") or []:
-            tech.append(("Video file", v))
+        tech += [("Video", v) for v in run.get("videos") or []]
+        tech.append(("Full record", "run.json in the run folder: every step, the item used on the screen, original "
+                                    "error messages and a fingerprint (SHA-256) of each picture and of the test file"))
         add(_kv_table(tech))
-
-        detail = [s for s in steps if s.get("locator") or s.get("error") or s.get("evidence")]
-        if detail:
-            add(_p([_r("Per step")], style="Heading2"))
-            tw = [700, 3000, 6380]
-            trows = [[_cell("Step", tw[0], header=True), _cell("Item used", tw[1], header=True),
-                      _cell("Picture, fingerprint and original error", tw[2], header=True)]]
-            for s in detail:
-                notes = [f"{rel}  {hashes.get(rel, '')}".strip() for rel in s.get("evidence", [])]
-                if s.get("error"):
-                    notes.append(s["error"])
-                trows.append([_cell(str(s.get("index", 0) + 1), tw[0]), _cell(s.get("locator") or "", tw[1]),
-                              _cell("  |  ".join(notes), tw[2])])
-            add(_table(trows, tw))
-        for h in run.get("healing") or []:
-            old, new = h.get("old", ["", ""]), h.get("new", ["", ""])
-            add(_p([_r(f"Update needed, step {h.get('step_index', 0) + 1}: the test looked for {old[0]}={old[1]} "
-                       f"but found the item by {new[0]}={new[1]}.", mono=True)], indent=360))
 
         return document_xml(parts)
 
@@ -555,24 +526,6 @@ def plain_error(error: str | None) -> str:
     if "ended" in text and "job" in text:
         return "The scheduled process did not finish successfully."
     return "The step could not be completed. See Technical details for the error."
-
-
-def _screenshot_setting(mode: str) -> str:
-    return {
-        "every-step": "Taken after every step",
-        "on-failure": "Taken only when a step fails",
-        "off": "Not taken in this run",
-    }.get(mode, mode)
-
-
-def _video_line(run: dict[str, Any]) -> str:
-    videos = run.get("videos") or []
-    mode = run.get("video", "off")
-    if videos:
-        return f"Recorded, {len(videos)} file(s) in the run folder"
-    if mode == "on-failure":
-        return "Recorded only on failure; this run passed, so none was kept"
-    return "Not recorded"
 
 
 def _default_expected(step: dict[str, Any]) -> str:

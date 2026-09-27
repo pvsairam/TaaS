@@ -95,9 +95,8 @@ def test_document_holds_steps_expected_results_and_screenshots(tmp_path: Path) -
         "Screen after step 1",
         "Reviewed by",
         "Technical details",
-        "StepFailure: expected text 'Redwood City', found ''",  # original error kept for the test team
-        "a" * 64,  # screenshot fingerprint, in Technical details only
         "videos/abc.webm",
+        "run.json in the run folder",  # where the full technical record is
     ):
         assert fragment in text, fragment
 
