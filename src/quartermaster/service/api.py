@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.evidence.document import plain_error
+from quartermaster.service import insights
+from quartermaster.service.heal import accept_update
 from quartermaster.service.recording import RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
 from quartermaster.service.store import Store
@@ -84,6 +87,7 @@ class App:
             cwd=cwd,
         )
         self.recording = Recording(self.tests_root, self.evidence_root, data_dir / "recording", record_command)
+        self.backups = data_dir / "backups"
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -112,9 +116,17 @@ class App:
             return _json(self.status())
         if method == "GET" and route == ["tests"]:
             return _json(self.tests())
+        if method == "GET" and route == ["dashboard"]:
+            return _json(insights.dashboard(self.tests(), self.queue.store.list(limit=500)))
+        if method == "GET" and route == ["attention"]:
+            return _json(insights.attention(self.tests(), self.queue.store.list(limit=500), self.tests_root))
+        if method == "GET" and route == ["test"]:
+            return _json(self.test_detail(str((query.get("file") or [""])[0])))
+        if method == "POST" and route == ["test", "accept-update"]:
+            return _json(self.accept_update(data))
         if route == ["runs"]:
             if method == "GET":
-                return _json([self._run_view(r) for r in self.queue.store.list()])
+                return _json([self._run_view(r, counts=True) for r in self.queue.store.list()])
             if method == "POST":
                 try:
                     queued = self.queue.submit(str(data.get("target") or ""), data.get("options") or {})
@@ -161,9 +173,13 @@ class App:
         }
 
     def tests(self) -> list[dict[str, Any]]:
+        runs = self.queue.store.list(limit=500)  # newest first
         last: dict[str, dict[str, Any]] = {}
-        for run in self.queue.store.list(limit=500):  # newest first
+        for run in runs:
             last.setdefault(run["target"], run)
+        latest: dict[str, dict[str, Any]] = {}  # each test's own latest result, whatever run it was part of
+        for r in insights.test_results(runs):
+            latest.setdefault(r["test_id"], {"status": r["status"], "at": r["at"], "run_id": r["service_run_id"]})
         out = []
         for f in sorted(self.tests_root.rglob("*.y*ml")):
             rel = f.relative_to(self.tests_root).as_posix()
@@ -177,14 +193,77 @@ class App:
                     title=str(spec.get("title", "")),
                     module=str(spec.get("module", "")),
                     product=str(spec.get("product", "")),
+                    process=str(spec.get("process", "")),
+                    persona=str(spec.get("persona", "")),
+                    priority=str(spec.get("priority", "")),
+                    tags=[str(t) for t in spec.get("tags") or []],
                     steps=len(spec.get("steps") or []),
                 )
             except (yaml.YAMLError, ValueError, OSError) as e:
                 item["problem"] = f"Could not read this file: {e}"
             previous = last.get(rel)
             item["last_run"] = self._run_view(previous) if previous else None
+            item["last_result"] = latest.get(item.get("id", ""))
             out.append(item)
         return out
+
+    def test_detail(self, rel: str) -> dict[str, Any]:
+        path = self._test_file(rel)
+        text = path.read_text(encoding="utf-8")
+        item = next((t for t in self.tests() if t["file"] == path.relative_to(self.tests_root).as_posix()), {})
+        try:
+            loaded = yaml.safe_load(text)
+        except yaml.YAMLError:
+            loaded = None
+        spec: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
+        data: dict[str, Any] = spec["data"] if isinstance(spec.get("data"), dict) else {}
+        steps = []
+        for i, step in enumerate(spec.get("steps") or []):
+            if not isinstance(step, dict):
+                continue
+            target: dict[str, Any] = step["target"] if isinstance(step.get("target"), dict) else {}
+            strategies = [s for s in target.get("strategies") or [] if isinstance(s, dict)]
+            found_by = [insights.describe([str(k), _fill(str(v), data)]) for s in strategies for k, v in s.items()]
+            steps.append(
+                {
+                    "number": i + 1,
+                    "action": step.get("action", ""),
+                    "intent": step.get("intent", ""),
+                    "value": "" if step.get("value") is None else _fill(str(step.get("value")), data),
+                    "found_by": found_by,
+                }
+            )
+        history = insights.test_history(item.get("id", ""), self.queue.store.list(limit=500), self.evidence_root)
+        for h in history:
+            h["document_url"] = self._url_rel(h.pop("document"))
+        tested = [h for h in history if h["status"] in ("passed", "healed", "failed")]
+        passed = sum(h["status"] != "failed" for h in tested)
+        return {
+            **item,
+            "data": data,
+            "steps_detail": steps,
+            "yaml": text,
+            "history": history,
+            "pass_rate": round(100 * passed / len(tested)) if tested else None,
+        }
+
+    def accept_update(self, data: dict[str, Any]) -> dict[str, Any]:
+        path = self._test_file(str(data.get("file") or ""))
+        try:
+            backup = accept_update(
+                path, int(data.get("step_index", -1)), [str(x) for x in data.get("new") or []], self.backups
+            )
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        return {"updated": path.relative_to(self.tests_root).as_posix(), "backup": str(backup)}
+
+    def _test_file(self, rel: str) -> Path:
+        path = (self.tests_root / rel).resolve()
+        if self.tests_root not in path.parents or path.suffix.lower() not in (".yaml", ".yml"):
+            raise ApiError(HTTPStatus.FORBIDDEN, "only test files in the tests folder can be opened")
+        if not path.is_file():
+            raise ApiError(HTTPStatus.NOT_FOUND, "no such test file")
+        return path
 
     def run_detail(self, run: dict[str, Any]) -> dict[str, Any]:
         view = self._run_view(run)
@@ -194,10 +273,12 @@ class App:
         view["output"] = _tail(log) if log and log.is_file() else ""
         return view
 
-    def _run_view(self, run: dict[str, Any]) -> dict[str, Any]:
+    def _run_view(self, run: dict[str, Any], counts: bool = False) -> dict[str, Any]:
         view = {k: v for k, v in run.items() if k not in ("events_path", "log_path")}
         view["summary_url"] = self._url(run.get("summary"))
         view["suite_folder"] = self._relative(run.get("suite_dir"))
+        if counts:
+            view["counts"] = insights.run_counts(run)
         return view
 
     def _suite_results(self, run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -212,7 +293,7 @@ class App:
         for entry in suite.get("runs", []):
             run_dir = self.evidence_root / entry["run_dir"]
             record_file = run_dir / "run.json"
-            record = json.loads(record_file.read_text(encoding="utf-8")) if record_file.is_file() else {}
+            record = insights.read_json(record_file) or {}
             failed = entry.get("failed_step") or None
             results.append(
                 {
@@ -230,6 +311,17 @@ class App:
                         "picture_url": self._url_rel(failed.get("screenshot")),
                     },
                     "needs_update": bool(entry.get("healing")),
+                    "steps": [
+                        {
+                            "number": st.get("index", 0) + 1,
+                            "intent": st.get("intent", ""),
+                            "status": st.get("status", ""),
+                            "error": plain_error(st.get("error")),
+                            "seconds": round((st.get("duration_ms") or 0) / 1000, 1),
+                            "pictures": [self._url_rel(f"{entry['run_dir']}/{p}") for p in st.get("evidence") or []],
+                        }
+                        for st in record.get("steps", [])
+                    ],
                 }
             )
         return results
@@ -288,6 +380,11 @@ class App:
         if not isinstance(data, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "the request must be a JSON object")
         return data
+
+
+def _fill(text: str, data: dict[str, Any]) -> str:
+    """Show ${name} placeholders with the test data they stand for (unknown names stay as written)."""
+    return re.sub(r"\$\{(\w+)\}", lambda m: str(data[m.group(1)]) if m.group(1) in data else m.group(0), text)
 
 
 def _with_plain_error(event: dict[str, Any]) -> dict[str, Any]:

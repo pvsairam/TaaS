@@ -141,12 +141,18 @@ qm serve --tests my_tests          # or --tests examples/tests
 
 Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use it; Ctrl+C stops it.
 
-| Page | What you do there |
-|---|---|
-| **Runs** | Choose all tests, a folder or one test; choose pictures and video; start. Runs wait in line and go one at a time. Open a run to watch each step as it happens, then download the evidence documents and the summary, or open the folder. |
-| **Tests** | See every test file, its last result, and run one with a click. |
-| **Record** | Fill in the test name and start. A browser opens already signed in; do the steps, then press Stop (in the page or in that browser). The new test appears under Tests. |
-| **Settings** | Check which pod and user are in use (the password is never shown) and where tests and evidence are kept. |
+| Page | Who it is for | What you do there |
+|---|---|---|
+| **Overview** | Everyone, managers first | Pass rate of every test's last run, runs this week, recent runs as a chart, results by module, and what needs attention. Download the latest summary document. |
+| **Runs** | Testers | Every run, newest first, with search and filters. Open one to watch each step as it happens, see the picture of every step (click to enlarge, arrow keys to move), and download each test's evidence document and the run summary. |
+| **Tests** | Testers, functional team | Every test with its module and last result; search and filter by module or status. Open a test to read its steps in plain words, its test data, its run history and (for the test team) the file itself. |
+| **Needs attention** | Test team | Tests that failed last time, with the reason in plain words; tests that passed only because something on the screen was found another way (accept the update with one click; a copy of the old file is kept); files that could not be read. |
+| **Record a test** | Functional team | Name the test and start. A browser opens already signed in; do the steps, then press Stop. |
+| **Settings** | Everyone | Which pod and user are in use (the password is never shown), folders, light or dark. |
+
+Start a run from anywhere with **New run** (or press `N`): all tests, a folder or one test, pictures
+after every step or only on failure, video, Oracle release and your name. `Ctrl+K` searches tests,
+runs and pages.
 
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer

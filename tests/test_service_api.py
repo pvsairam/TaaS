@@ -113,14 +113,33 @@ def test_bad_requests_get_a_plain_answer(app: App) -> None:
         app.handle("POST", "/api/runs", b"{nope")
 
 
-def test_finished_run_links_to_its_evidence_in_plain_words(app: App) -> None:
+def finished_suite_run(app: App) -> dict[str, Any]:
+    """A finished run of three tests: hcm.view-worker passed, hcm.create-location failed at step 2 and
+    hcm.personal-info passed only because step 1 was found by its role instead of its label."""
     root = app.evidence_root
-    suite = _suite(root)  # three tests: passed, failed at step 2, healed
+    suite = _suite(root)
     folder = suite_folder(root, "S1")
     write_suite_record(suite, folder)
     summary = write_suite_document(suite, root, folder / "summary.docx")
     run = app.queue.store.create("hcm", {"screenshots": "every-step", "video": "off"})
     app.queue.store.update(run["id"], status="failed", suite_dir=str(folder), summary=str(summary))
+    return run
+
+
+def add_suite_tests(app: App) -> None:
+    """Test files for the three tests in finished_suite_run."""
+    hcm = app.tests_root / "hcm"
+    (hcm / "worker.yaml").write_text("id: hcm.view-worker\ntitle: View a worker\nmodule: HCM\nsteps: [{}]\n")
+    (hcm / "location.yaml").write_text("id: hcm.create-location\ntitle: Create a location\nmodule: HCM\nsteps: [{}]\n")
+    (hcm / "personal.yaml").write_text(
+        "id: hcm.personal-info\ntitle: Personal info\nmodule: HCM\ndata: {name: Pat}\nsteps:\n"
+        "  - action: fill\n    intent: Enter the name\n    value: ${name}\n    target:\n      strategies:\n"
+        '        - label: Name\n        - role: "textbox:Name"\n'
+    )
+
+
+def test_finished_run_links_to_its_evidence_in_plain_words(app: App) -> None:
+    run = finished_suite_run(app)
 
     detail = call(app, "GET", f"/api/runs/{run['id']}")
     assert detail["summary_url"] == "/files/_suites/S1/summary.docx" and detail["suite_folder"] == "_suites/S1"
@@ -203,3 +222,51 @@ def test_http_guards(app: App) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_dashboard_counts_each_tests_latest_result(app: App) -> None:
+    add_suite_tests(app)
+    finished_suite_run(app)
+    dash = call(app, "GET", "/api/dashboard")
+    assert (dash["tests"], dash["tested"], dash["passing"], dash["failing"], dash["pass_rate"]) == (4, 3, 2, 1, 67)
+    assert dash["trend"][-1] == {**dash["trend"][-1], "total": 3, "passed": 2, "failed": 1}
+    hcm = next(m for m in dash["modules"] if m["module"] == "HCM")
+    assert hcm == {"module": "HCM", "tests": 4, "passing": 2, "failing": 1, "not_run": 1}
+    tests = {t["file"]: t for t in call(app, "GET", "/api/tests")}
+    assert tests["hcm/location.yaml"]["last_result"]["status"] == "failed"  # it ran as part of a folder
+    assert tests["hcm/pass.yaml"]["last_result"] is None
+
+
+def test_needs_attention_and_accepting_an_update(app: App) -> None:
+    add_suite_tests(app)
+    finished_suite_run(app)
+    todo = call(app, "GET", "/api/attention")
+    assert [f["test_id"] for f in todo["failing"]] == ["hcm.create-location"]
+    assert todo["failing"][0]["error"] == 'The screen showed "Redwood City" but it should show "Redwood Shores".'
+    (update,) = todo["updates"]
+    assert (update["file"], update["step"], update["new"]) == ("hcm/personal.yaml", 1, ["role", "textbox:Name"])
+    assert update["old_text"] == 'the field labelled "Name"' and update["new_text"] == 'the textbox named "Name"'
+    assert [b["file"] for b in todo["broken"]] == ["broken.yaml"] and todo["count"] == 3
+
+    done = call(app, "POST", "/api/test/accept-update", {"file": update["file"], "step_index": 0, "new": update["new"]})
+    assert Path(done["backup"]).is_file()
+    assert call(app, "GET", "/api/attention")["updates"] == []  # the file now tries the role first
+    with pytest.raises(ApiError, match="already tries this first"):
+        call(app, "POST", "/api/test/accept-update", {"file": update["file"], "step_index": 0, "new": update["new"]})
+    with pytest.raises(ApiError, match="only test files in the tests folder"):
+        call(app, "POST", "/api/test/accept-update", {"file": "../x.yaml", "step_index": 0, "new": ["a", "b"]})
+
+
+def test_test_detail_speaks_plainly(app: App) -> None:
+    add_suite_tests(app)
+    finished_suite_run(app)
+    detail = call(app, "GET", "/api/test?file=hcm/personal.yaml")
+    (step,) = detail["steps_detail"]
+    assert step["value"] == "Pat"  # test data shown instead of ${name}
+    assert step["found_by"] == ['the field labelled "Name"', 'the textbox named "Name"']
+    assert detail["history"][0]["status"] == "healed" and detail["pass_rate"] == 100
+    assert detail["yaml"].startswith("id: hcm.personal-info")
+    with pytest.raises(ApiError, match="no such test file"):
+        call(app, "GET", "/api/test?file=hcm/missing.yaml")
+    with pytest.raises(ApiError, match="only test files"):
+        call(app, "GET", "/api/test?file=../../etc/passwd")
