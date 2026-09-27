@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 from quartermaster.domain.models import Environment, LocatorStrategy
 from quartermaster.runner.credentials import persona_credentials
 
-
 # The red box is a separate overlay on top of the page: an outline on the element itself is
 # often clipped by Redwood field wrappers. Tiny elements (e.g. hidden radio inputs) box their label.
 _DRAW_HIGHLIGHT = """el => {

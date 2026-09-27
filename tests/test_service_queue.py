@@ -44,8 +44,13 @@ def queue(tmp_path: Path):  # type: ignore[no-untyped-def]
     tests.mkdir()
     for name in ("pass.yaml", "fail.yaml", "crash.yaml", "slow.yaml"):
         (tests / name).write_text("id: x\n")
-    q = RunQueue(Store(tmp_path / "qm.db"), tests_root=tests, evidence_root=tmp_path / "evidence",
-                 work_dir=tmp_path / "work", command=fake_command)
+    q = RunQueue(
+        Store(tmp_path / "qm.db"),
+        tests_root=tests,
+        evidence_root=tmp_path / "evidence",
+        work_dir=tmp_path / "work",
+        command=fake_command,
+    )
     q.start()
     yield q
     q.stop()
@@ -115,10 +120,19 @@ def test_a_run_left_running_by_a_stopped_service_is_marked_as_error(tmp_path: Pa
 
 def test_the_real_command_line() -> None:
     options = check_options({"video": "always", "release": "26D", "tester": "Sai", "headed": True})
-    cmd = qm_run_command("/tests/my_tests", options, Path("/evidence"), Path("/work/1/events.jsonl"))
+    evidence, events = Path("/evidence"), Path("/work/1/events.jsonl")
+    cmd = qm_run_command("/tests/my_tests", options, evidence, events)
     assert cmd[1:5] == ["-m", "quartermaster.cli", "run", "/tests/my_tests"]
     joined = " ".join(cmd)
-    for part in ("--events /work/1/events.jsonl", "--screenshots every-step", "--video always", "--evidence-doc",
-                 "--headed", "--release 26D", "--tester Sai", "--evidence /evidence"):
+    for part in (
+        f"--events {events}",  # the OS's own path form: backslashes on Windows
+        "--screenshots every-step",
+        "--video always",
+        "--evidence-doc",
+        "--headed",
+        "--release 26D",
+        "--tester Sai",
+        f"--evidence {evidence}",
+    ):
         assert part in joined, part
     assert json.dumps(options)  # stored as JSON in the history

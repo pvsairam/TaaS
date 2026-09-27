@@ -25,19 +25,38 @@ def _run(root: Path, test_id: str, status: str, *, fail_at: int | None = None) -
         if st == "failed":
             (run_dir / "screenshots" / f"step-{i + 1:02d}.png").write_bytes(tiny_png())
             shot = [f"screenshots/step-{i + 1:02d}.png"]
-        steps.append({"index": i, "intent": f"Step {i + 1} of {test_id}", "status": st,
-                      "error": "StepFailure: expected text 'Redwood Shores', found 'Redwood City'" if st == "failed"
-                      else None, "evidence": shot})
+        steps.append(
+            {
+                "index": i,
+                "intent": f"Step {i + 1} of {test_id}",
+                "status": st,
+                "error": "StepFailure: expected text 'Redwood Shores', found 'Redwood City'"
+                if st == "failed"
+                else None,
+                "evidence": shot,
+            }
+        )
     doc = run_dir / f"{test_id}_evidence.docx"
     doc.write_bytes(b"placeholder")
     record = {
-        "run_id": "20260927-100000-AAAA", "test_id": test_id, "test_title": f"Title of {test_id}", "status": status,
-        "environment": "fusion", "environment_url": "https://abcd-dev2.fa.us6.oraclecloud.com", "release": "26D",
-        "executed_by": "Test Person", "machine": "laptop", "screenshots": "on-failure", "video": "off",
-        "quartermaster_version": "0.1.0", "started_at": "2026-09-27T10:00:00+00:00",
-        "finished_at": "2026-09-27T10:01:05+00:00", "steps": steps,
+        "run_id": "20260927-100000-AAAA",
+        "test_id": test_id,
+        "test_title": f"Title of {test_id}",
+        "status": status,
+        "environment": "fusion",
+        "environment_url": "https://abcd-dev2.fa.us6.oraclecloud.com",
+        "release": "26D",
+        "executed_by": "Test Person",
+        "machine": "laptop",
+        "screenshots": "on-failure",
+        "video": "off",
+        "quartermaster_version": "0.1.0",
+        "started_at": "2026-09-27T10:00:00+00:00",
+        "finished_at": "2026-09-27T10:01:05+00:00",
+        "steps": steps,
         "healing": [{"step_index": 0, "old": ["label", "Name"], "new": ["role", "textbox:Name"]}]
-        if status == "healed" else [],
+        if status == "healed"
+        else [],
     }
     return record, run_dir, doc
 
@@ -48,8 +67,14 @@ def _suite(root: Path) -> dict[str, Any]:
         _run(root, "hcm.create-location", "failed", fail_at=1),
         _run(root, "hcm.personal-info", "healed"),
     ]
-    return build_suite_record(runs, suite_id="S1", evidence_root=root, target="my_tests",
-                              started_at="2026-09-27T10:00:00+00:00", finished_at="2026-09-27T10:04:00+00:00")
+    return build_suite_record(
+        runs,
+        suite_id="S1",
+        evidence_root=root,
+        target="my_tests",
+        started_at="2026-09-27T10:00:00+00:00",
+        finished_at="2026-09-27T10:04:00+00:00",
+    )
 
 
 def test_suite_record_summarises_each_test_with_relative_paths(tmp_path: Path) -> None:
@@ -60,7 +85,8 @@ def test_suite_record_summarises_each_test_with_relative_paths(tmp_path: Path) -
     assert ok["document"] == "hcm.view-worker/20260927-100000-AAAA/hcm.view-worker_evidence.docx"
     assert (ok["steps_passed"], ok["steps_total"], ok["duration"]) == (3, 3, "1 min 5 s")
     assert failed["failed_step"] == {
-        "number": 2, "intent": "Step 2 of hcm.create-location",
+        "number": 2,
+        "intent": "Step 2 of hcm.create-location",
         "error": "StepFailure: expected text 'Redwood Shores', found 'Redwood City'",
         "screenshot": "hcm.create-location/20260927-100000-AAAA/screenshots/step-02.png",
     }
@@ -100,8 +126,14 @@ def test_summary_document_lists_results_failures_and_evidence(tmp_path: Path) ->
 
 def test_all_passed_suite(tmp_path: Path) -> None:
     runs = [_run(tmp_path, "a.one", "passed"), _run(tmp_path, "a.two", "passed")]
-    suite = build_suite_record(runs, suite_id="S2", evidence_root=tmp_path, target="t",
-                               started_at="2026-09-27T10:00:00+00:00", finished_at="2026-09-27T10:00:30+00:00")
+    suite = build_suite_record(
+        runs,
+        suite_id="S2",
+        evidence_root=tmp_path,
+        target="t",
+        started_at="2026-09-27T10:00:00+00:00",
+        finished_at="2026-09-27T10:00:30+00:00",
+    )
     assert suite["status"] == "passed"
     out = write_suite_document(suite, tmp_path, tmp_path / "s.docx")
     text = " ".join(t.text or "" for t in ET.fromstring(zipfile.ZipFile(out).read("word/document.xml")).iter(f"{W}t"))

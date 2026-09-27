@@ -125,8 +125,9 @@ def test_step_results_record_what_was_done(stage_env: Environment) -> None:
 
 
 def test_failed_check_still_reports_the_element_it_looked_at(stage_env: Environment) -> None:
-    check = Step(action=Action.ASSERT_TEXT, intent="City", value="Redwood City",
-                 target=Locator(strategies=[{"label": "City"}]))
+    check = Step(
+        action=Action.ASSERT_TEXT, intent="City", value="Redwood City", target=Locator(strategies=[{"label": "City"}])
+    )
     d = FakeDriver({("label", "City"): 1}, texts={"City": "Menlo Park"})
     [s] = run_test(_tc(check), stage_env, d).steps
     assert s.status is StepStatus.FAILED and s.locator == "label=City"

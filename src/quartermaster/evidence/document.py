@@ -86,7 +86,7 @@ def document_xml(parts: list[str]) -> str:
         'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
         'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
         'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
-        f'<w:body>{"".join(parts)}{sect}</w:body></w:document>'
+        f"<w:body>{''.join(parts)}{sect}</w:body></w:document>"
     )
 
 
@@ -122,14 +122,27 @@ class _Doc:
         # --- page 1: what this is, the result, and the list of steps
         add(_p([_r("Test Evidence")], style="Title"))
         add(_p([_r(run.get("test_title") or run.get("test_id", ""))], style="Subtitle"))
-        add(_p([_r("Result: ", bold=True, size=28),
-                _r(_status_label(status).upper(), bold=True, size=28, color=_STATUS_COLOR.get(status, "15202A"))],
-               after=160))
-        add(_p([_r(
-            "This document is the record of an automated test run in Oracle Fusion. For each step it shows "
-            "what was done, what should happen, what did happen and, where taken, a picture of the screen "
-            "afterwards. A red box in a picture marks the item the step used."
-        )], after=200))
+        add(
+            _p(
+                [
+                    _r("Result: ", bold=True, size=28),
+                    _r(_status_label(status).upper(), bold=True, size=28, color=_STATUS_COLOR.get(status, "15202A")),
+                ],
+                after=160,
+            )
+        )
+        add(
+            _p(
+                [
+                    _r(
+                        "This document is the record of an automated test run in Oracle Fusion. For each step it shows "
+                        "what was done, what should happen, what did happen and, where taken, a picture of the screen "
+                        "afterwards. A red box in a picture marks the item the step used."
+                    )
+                ],
+                after=200,
+            )
+        )
 
         add(_p([_r("About this test")], style="Heading1"))
         passed = counts["passed"] + counts["healed"]
@@ -149,15 +162,24 @@ class _Doc:
 
         add(_p([_r("Steps")], style="Heading1"))
         widths = [700, 7380, 2000]
-        rows = [[_cell("Step", widths[0], header=True), _cell("What was done", widths[1], header=True),
-                 _cell("Result", widths[2], header=True)]]
+        rows = [
+            [
+                _cell("Step", widths[0], header=True),
+                _cell("What was done", widths[1], header=True),
+                _cell("Result", widths[2], header=True),
+            ]
+        ]
         for s in steps:
             st = s.get("status", "")
-            rows.append([
-                _cell(str(s.get("index", 0) + 1), widths[0]),
-                _cell(s.get("intent", ""), widths[1]),
-                _cell(_status_label(st), widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True),
-            ])
+            rows.append(
+                [
+                    _cell(str(s.get("index", 0) + 1), widths[0]),
+                    _cell(s.get("intent", ""), widths[1]),
+                    _cell(
+                        _status_label(st), widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True
+                    ),
+                ]
+            )
         add(_table(rows, widths))
 
         # --- one block per step; a step with a picture starts on a new page
@@ -189,7 +211,7 @@ class _Doc:
         add(_p([_r("Sign-off")], style="Heading1"))
         add(_p([_r("By signing, the reviewer confirms this document is a true record of the test run above.")]))
         sw = [2200, 3080, 2800, 2000]
-        sign = [[_cell(h, w, header=True) for h, w in zip(("Role", "Name", "Signature", "Date"), sw)]]
+        sign = [[_cell(h, w, header=True) for h, w in zip(("Role", "Name", "Signature", "Date"), sw, strict=True)]]
         for role, name in (("Run by", run.get("executed_by", "")), ("Reviewed by", ""), ("Approved by", "")):
             sign.append([_cell(role, sw[0], bold=True), _cell(name, sw[1]), _cell("", sw[2]), _cell("", sw[3])])
         add(_table(sign, sw, row_height=620))
@@ -224,7 +246,7 @@ class _Doc:
             f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
             f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
             f'<a:ln w="9525"><a:solidFill><a:srgbClr val="B8C3C9"/></a:solidFill></a:ln></pic:spPr>'
-            f'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+            f"</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
         )
         caption = caption or f"Figure {step_no}. Screen after step {step_no}. File {rel}"
         if sha256:
@@ -262,15 +284,23 @@ def _r(
 
 
 def _p(
-    runs: list[str], *, style: str | None = None, before: int | None = None, after: int | None = None,
+    runs: list[str],
+    *,
+    style: str | None = None,
+    before: int | None = None,
+    after: int | None = None,
     indent: int | None = None,
 ) -> str:
     ppr = ""
     if style:
         ppr += f'<w:pStyle w:val="{style}"/>'
     if before is not None or after is not None:
-        ppr += "<w:spacing" + (f' w:before="{before}"' if before is not None else "") + (
-            f' w:after="{after}"' if after is not None else "") + "/>"
+        ppr += (
+            "<w:spacing"
+            + (f' w:before="{before}"' if before is not None else "")
+            + (f' w:after="{after}"' if after is not None else "")
+            + "/>"
+        )
     if indent:
         ppr += f'<w:ind w:left="{indent}"/>'
     return f"<w:p>{f'<w:pPr>{ppr}</w:pPr>' if ppr else ''}{''.join(runs)}</w:p>"
@@ -281,7 +311,12 @@ def _page_break() -> str:
 
 
 def _cell(
-    text: str, width: int, *, header: bool = False, fill: str | None = None, color: str | None = None,
+    text: str,
+    width: int,
+    *,
+    header: bool = False,
+    fill: str | None = None,
+    color: str | None = None,
     bold: bool = False,
 ) -> str:
     shade = fill or ("E6EDF0" if header else None)
@@ -406,14 +441,24 @@ def _footer(left_text: str) -> str:
 
 
 def _styles() -> str:
-    def para_style(sid: str, name: str, size: int, *, bold: bool = False, color: str = "15202A", before: int = 0,
-                   after: int = 120, outline: int | None = None, italic: bool = False) -> str:
+    def para_style(
+        sid: str,
+        name: str,
+        size: int,
+        *,
+        bold: bool = False,
+        color: str = "15202A",
+        before: int = 0,
+        after: int = 120,
+        outline: int | None = None,
+        italic: bool = False,
+    ) -> str:
         ol = f'<w:outlineLvl w:val="{outline}"/>' if outline is not None else ""
         return (
             f'<w:style w:type="paragraph" w:styleId="{sid}"><w:name w:val="{name}"/><w:basedOn w:val="Normal"/>'
             '<w:next w:val="Normal"/><w:qFormat/>'
             f'<w:pPr><w:keepNext/><w:spacing w:before="{before}" w:after="{after}"/>'
-            f'{ol}</w:pPr><w:rPr>{"<w:b/>" if bold else ""}{"<w:i/>" if italic else ""}'
+            f"{ol}</w:pPr><w:rPr>{'<w:b/>' if bold else ''}{'<w:i/>' if italic else ''}"
             f'<w:color w:val="{color}"/><w:sz w:val="{size}"/></w:rPr></w:style>'
         )
 
@@ -470,8 +515,12 @@ def _duration(start: str | None, end: str | None) -> str:
 
 
 def _status_label(status: str) -> str:
-    return {"passed": "Passed", "healed": "Passed, test needs an update", "failed": "Failed",
-            "skipped": "Not done"}.get(status, status.capitalize())
+    return {
+        "passed": "Passed",
+        "healed": "Passed, test needs an update",
+        "failed": "Failed",
+        "skipped": "Not done",
+    }.get(status, status.capitalize())
 
 
 def _step_extras(counts: dict[str, int]) -> str:
@@ -501,8 +550,11 @@ def plain_error(error: str | None) -> str:
     m = m or re.search(r'expected text "(.*)", found "(.*)"$', text)
     if m:
         found = m.group(2).strip()
-        return f"The screen showed \"{found}\" but it should show \"{m.group(1)}\"." if found else (
-            f"The screen was empty where it should show \"{m.group(1)}\".")
+        return (
+            f'The screen showed "{found}" but it should show "{m.group(1)}".'
+            if found
+            else (f'The screen was empty where it should show "{m.group(1)}".')
+        )
     matches = [int(n) for n in re.findall(r"matched (\d+)", text)]
     if matches and all(n == 0 for n in matches):
         return "The item could not be found on the screen."
@@ -524,9 +576,9 @@ def _default_expected(step: dict[str, Any]) -> str:
     return {
         "navigate": "The page opens.",
         "click": "The click works.",
-        "fill": f"\"{value}\" can be entered." if value else "The value can be entered.",
-        "select": f"\"{value}\" can be chosen." if value else "The value can be chosen.",
+        "fill": f'"{value}" can be entered.' if value else "The value can be entered.",
+        "select": f'"{value}" can be chosen.' if value else "The value can be chosen.",
         "assert_visible": "It is shown on the screen.",
-        "assert_text": f"It shows \"{value}\"." if value else "It shows the expected text.",
+        "assert_text": f'It shows "{value}".' if value else "It shows the expected text.",
         "login_as": f"Signed in as {value}." if value else "Signed in.",
     }.get(action, "The step completes.")

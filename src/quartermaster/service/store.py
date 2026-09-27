@@ -62,8 +62,17 @@ class Store:
     def update(self, run_id: str, **fields: Any) -> None:
         if not fields:
             return
-        unknown = set(fields) - {"status", "started_at", "finished_at", "exit_code", "suite_dir", "summary",
-                                 "events_path", "log_path", "error"}
+        unknown = set(fields) - {
+            "status",
+            "started_at",
+            "finished_at",
+            "exit_code",
+            "suite_dir",
+            "summary",
+            "events_path",
+            "log_path",
+            "error",
+        }
         if unknown:
             raise ValueError(f"unknown run fields: {sorted(unknown)}")
         cols = ", ".join(f"{k} = ?" for k in fields)

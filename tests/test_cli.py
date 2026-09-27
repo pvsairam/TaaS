@@ -100,10 +100,21 @@ def test_cli_run_writes_run_folder_record_and_word_document(
     page = {("role", "link:Navigator"): 1, ("xpath", "//*[starts-with(normalize-space(text()), 'Welcome,')]"): 1}
     monkeypatch.setattr(cli, "driver_factory", lambda args, run_dir: FakeDriver(page, evidence_dir=run_dir))
     evidence = tmp_path / "evidence"
-    rc = main([
-        "run", str(EXAMPLES / "smoke" / "login.yaml"), "--evidence", str(evidence),
-        "--screenshots", "every-step", "--evidence-doc", "--release", "26C", "--tester", "Test Person",
-    ])
+    rc = main(
+        [
+            "run",
+            str(EXAMPLES / "smoke" / "login.yaml"),
+            "--evidence",
+            str(evidence),
+            "--screenshots",
+            "every-step",
+            "--evidence-doc",
+            "--release",
+            "26C",
+            "--tester",
+            "Test Person",
+        ]
+    )
     assert rc == 0, capsys.readouterr()
 
     [run_dir] = list((evidence / "smoke.login").iterdir())  # evidence/<test id>/<run id>/
@@ -126,7 +137,6 @@ def test_cli_run_writes_run_folder_record_and_word_document(
     # a summary is written even for a single test
     [summary] = list((evidence / "_suites").glob("*/suite_*_summary.docx"))
     assert zipfile.is_zipfile(summary)
-
 
 
 def test_cli_run_of_a_folder_writes_suite_record_and_summary(

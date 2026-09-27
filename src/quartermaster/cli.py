@@ -105,8 +105,9 @@ def _run(args: argparse.Namespace) -> int:
             for v in videos:
                 Path(v).unlink(missing_ok=True)
             videos = []
-        record = build_record(result, run_dir=run_dir, test_file=spec_file, video_mode=args.video, videos=videos,
-                              executed_by=args.tester)
+        record = build_record(
+            result, run_dir=run_dir, test_file=spec_file, video_mode=args.video, videos=videos, executed_by=args.tester
+        )
         write_record(record, run_dir)
         print(f"        evidence: {run_dir}")
         doc: Path | None = None
@@ -114,8 +115,16 @@ def _run(args: argparse.Namespace) -> int:
             doc = write_evidence_document(record, run_dir, run_dir / f"{t.id}_{run_id}_evidence.docx")
             print(f"        document: {doc}")
         suite_runs.append((record, run_dir, doc))
-        emit({"type": "test_saved", "test_id": t.id, "run_id": run_id, "run_dir": str(run_dir),
-              "document": str(doc) if doc else None, "status": result.status.value})
+        emit(
+            {
+                "type": "test_saved",
+                "test_id": t.id,
+                "run_id": run_id,
+                "run_dir": str(run_dir),
+                "document": str(doc) if doc else None,
+                "status": result.status.value,
+            }
+        )
 
     suite_id = new_run_id()
     suite = build_suite_record(
@@ -133,8 +142,15 @@ def _run(args: argparse.Namespace) -> int:
     if args.evidence_doc:
         summary = write_suite_document(suite, evidence_root, suite_dir / f"suite_{suite_id}_summary.docx")
         print(f"Summary document: {summary}")
-    emit({"type": "suite_end", "at": suite["finished_at"], "status": suite["status"], "suite_dir": str(suite_dir),
-          "summary": str(summary) if summary else None})
+    emit(
+        {
+            "type": "suite_end",
+            "at": suite["finished_at"],
+            "status": suite["status"],
+            "suite_dir": str(suite_dir),
+            "summary": str(summary) if summary else None,
+        }
+    )
 
     if args.report:
         Path(args.report).write_text(
@@ -220,7 +236,12 @@ def _wait_for_stop(recorder: Any, page: Any) -> None:
     thread while this one keeps the browser responsive.
     """
     entered = threading.Event()
-    threading.Thread(target=lambda: (sys.stdin.readline(), entered.set()), daemon=True).start()
+
+    def read_enter() -> None:
+        sys.stdin.readline()
+        entered.set()
+
+    threading.Thread(target=read_enter, daemon=True).start()
     while not (recorder.stopped or entered.is_set()):
         try:
             page.wait_for_timeout(200)  # also delivers the page's events to the recorder
@@ -252,15 +273,20 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--headed", action="store_true", help="show the browser window")
     rn.add_argument("--evidence", default="evidence", help="root folder for run evidence (one folder per run)")
     rn.add_argument(
-        "--screenshots", default="on-failure", choices=[m.value for m in ScreenshotMode],
+        "--screenshots",
+        default="on-failure",
+        choices=[m.value for m in ScreenshotMode],
         help="when to take screenshots (default: on-failure)",
     )
     rn.add_argument(
-        "--video", default="off", choices=["off", "on-failure", "always"],
+        "--video",
+        default="off",
+        choices=["off", "on-failure", "always"],
         help="record a video of the run into the run folder; never put in the document (default: off)",
     )
     rn.add_argument(
-        "--evidence-doc", action="store_true",
+        "--evidence-doc",
+        action="store_true",
         help="write a Word evidence document for each test, plus a summary document for the whole run",
     )
     rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")

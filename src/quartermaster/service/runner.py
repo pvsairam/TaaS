@@ -33,8 +33,21 @@ CommandBuilder = Callable[[str, dict[str, Any], Path, Path], list[str]]
 
 
 def qm_run_command(target: str, options: dict[str, Any], evidence_root: Path, events: Path) -> list[str]:
-    cmd = [sys.executable, "-m", "quartermaster.cli", "run", target, "--evidence", str(evidence_root),
-           "--events", str(events), "--screenshots", options["screenshots"], "--video", options["video"]]
+    cmd = [
+        sys.executable,
+        "-m",
+        "quartermaster.cli",
+        "run",
+        target,
+        "--evidence",
+        str(evidence_root),
+        "--events",
+        str(events),
+        "--screenshots",
+        options["screenshots"],
+        "--video",
+        options["video"],
+    ]
     if options["evidence_doc"]:
         cmd.append("--evidence-doc")
     if options["headed"]:
