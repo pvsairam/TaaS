@@ -78,6 +78,8 @@ def _run(args: argparse.Namespace) -> int:
         tests, files = [load_test(target)], [target]
     evidence_root = Path(args.evidence)
     suite_started = datetime.now().astimezone().isoformat(timespec="seconds")
+    emit = _event_writer(args.events)
+    emit({"type": "suite_start", "at": suite_started, "tests": [t.id for t in tests]})
 
     results: list[RunResult] = []
     suite_runs: list[tuple[dict[str, Any], Path, Path | None]] = []
@@ -86,7 +88,9 @@ def _run(args: argparse.Namespace) -> int:
         run_dir = run_folder(evidence_root, t.id, run_id)
         driver = driver_factory(args, run_dir)
         try:
-            result = run_test(t, env, driver, run_id=run_id, screenshots=ScreenshotMode(args.screenshots))
+            result = run_test(
+                t, env, driver, run_id=run_id, screenshots=ScreenshotMode(args.screenshots), on_event=emit
+            )
         except (UnsafeEnvironmentError, MissingCredentialsError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
@@ -110,6 +114,8 @@ def _run(args: argparse.Namespace) -> int:
             doc = write_evidence_document(record, run_dir, run_dir / f"{t.id}_{run_id}_evidence.docx")
             print(f"        document: {doc}")
         suite_runs.append((record, run_dir, doc))
+        emit({"type": "test_saved", "test_id": t.id, "run_id": run_id, "run_dir": str(run_dir),
+              "document": str(doc) if doc else None, "status": result.status.value})
 
     suite_id = new_run_id()
     suite = build_suite_record(
@@ -123,9 +129,12 @@ def _run(args: argparse.Namespace) -> int:
     suite_dir = suite_folder(evidence_root, suite_id)
     write_suite_record(suite, suite_dir)
     print(f"\nSuite record: {suite_dir / 'suite.json'}")
+    summary: Path | None = None
     if args.evidence_doc:
         summary = write_suite_document(suite, evidence_root, suite_dir / f"suite_{suite_id}_summary.docx")
         print(f"Summary document: {summary}")
+    emit({"type": "suite_end", "at": suite["finished_at"], "status": suite["status"], "suite_dir": str(suite_dir),
+          "summary": str(summary) if summary else None})
 
     if args.report:
         Path(args.report).write_text(
@@ -134,6 +143,20 @@ def _run(args: argparse.Namespace) -> int:
     failed = sum(r.status is StepStatus.FAILED for r in results)
     print(f"{len(results) - failed}/{len(results)} passed")
     return 1 if failed else 0
+
+
+def _event_writer(path: str | None) -> Callable[[dict[str, Any]], None]:
+    """Progress events as JSON lines (for the web service); a no-op when no file is given."""
+    if not path:
+        return lambda _event: None
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(event: dict[str, Any]) -> None:
+        with out.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event) + "\n")
+
+    return write
 
 
 def _document(args: argparse.Namespace) -> int:
@@ -243,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
     rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")
     rn.add_argument("--report", help="write JSON results for all runs to this file")
+    rn.add_argument("--events", help="append progress events to this file as JSON lines (used by the web service)")
     rn.set_defaults(func=_run)
 
     dc = sub.add_parser("document", help="rebuild a Word document from a saved run or suite folder")

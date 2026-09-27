@@ -63,14 +63,23 @@ def run_test(
     healer: Healer | None = None,
     run_id: str | None = None,
     screenshots: ScreenshotMode = ScreenshotMode.ON_FAILURE,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunResult:
+    """Run one test. `on_event`, if given, hears about progress as it happens (for live views):
+    run_start, step_start, step_end and run_end, each a small JSON-ready dict."""
     assert_safe_target(env, allowed_hosts)
     run_id = run_id or uuid.uuid4().hex[:8].upper()
+
+    def emit(kind: str, **fields: Any) -> None:
+        if on_event is not None:
+            on_event({"type": kind, "test_id": test.id, "run_id": run_id, "at": _now(), **fields})
+
     runtime = {"RUN_ID": run_id}
     results: list[StepResult] = []
     healing: list[HealingProposal] = []
     started_at = _now()
 
+    emit("run_start", title=test.title, steps=len(test.steps))
     driver.open(env, test.persona)
     try:
         failed = False
@@ -84,7 +93,9 @@ def run_test(
             }
             if failed:
                 results.append(StepResult(**base, status=StepStatus.SKIPPED))
+                emit("step_end", index=i, intent=step.intent, status=StepStatus.SKIPPED.value, error=None, evidence=[])
                 continue
+            emit("step_start", index=i, intent=step.intent)
             start = time.perf_counter()
             step_started = _now()
             status, error, evidence = StepStatus.PASSED, None, []
@@ -131,10 +142,11 @@ def run_test(
                     started_at=step_started,
                 )
             )
+            emit("step_end", index=i, intent=step.intent, status=status.value, error=error, evidence=evidence)
     finally:
         driver.close()
 
-    return RunResult(
+    result = RunResult(
         test_id=test.id,
         environment=env.name,
         steps=results,
@@ -148,6 +160,8 @@ def run_test(
         finished_at=_now(),
         screenshots=screenshots,
     )
+    emit("run_end", status=result.status.value)
+    return result
 
 
 def _now() -> str:
