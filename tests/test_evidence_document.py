@@ -83,15 +83,20 @@ def test_document_holds_steps_expected_results_and_screenshots(tmp_path: Path) -
     media = [n for n in z.namelist() if n.startswith("word/media/")]
     assert len(media) == 2  # one per screenshot
     for fragment in (
-        "Test Evidence Report",
+        "Test Evidence",
         "FAILED",
+        "This document is the record of an automated test run in Oracle Fusion.",
+        "1 of 3 passed (1 failed, 1 not done)",
         "Step 1: Click Add Location",
         "New location screen opens (TS002 step 2).",  # expected result from the spec
-        "The text shows Redwood City.",  # default expected result when the spec has none
-        "StepFailure: expected text 'Redwood City', found ''",  # actual result of the failed step
-        "Not run, because an earlier step failed.",
-        "SHA-256 " + "a" * 64,
+        'It shows "Redwood City".',  # default expected result when the spec has none
+        'The screen was empty where it should show "Redwood City".',  # plain actual result
+        "Not done, because an earlier step failed.",
+        "Screen after step 1",
         "Reviewed by",
+        "Technical details",
+        "StepFailure: expected text 'Redwood City', found ''",  # original error kept for the test team
+        "a" * 64,  # screenshot fingerprint, in Technical details only
         "videos/abc.webm",
     ):
         assert fragment in text, fragment
@@ -134,3 +139,26 @@ def test_missing_screenshot_is_reported_not_fatal(tmp_path: Path) -> None:
     (tmp_path / "screenshots" / "step-02.png").unlink()
     _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
     assert "Screenshot missing: screenshots/step-02.png" in text
+
+
+def test_step_pages_use_plain_words(tmp_path: Path) -> None:
+    out = write_evidence_document(sample_run(tmp_path), tmp_path, tmp_path / "evidence.docx")
+    root = ET.fromstring(zipfile.ZipFile(out).read("word/document.xml"))
+    body = list(root.find(f"{W}body") or [])
+    texts = ["".join(t.text or "" for t in el.iter(f"{W}t")) for el in body]
+    tech = next(i for i, t in enumerate(texts) if "Technical details" in t)
+    before = " ".join(t.text or "" for el in body[:tech] for t in el.iter(f"{W}t"))
+    # locators, fingerprints and raw exception names stay out of the part a reviewer reads
+    for jargon in ("role=", "SHA-256 a", "StepFailure", "xpath", "Element used"):
+        assert jargon not in before, jargon
+
+
+def test_steps_without_pictures_do_not_get_their_own_page(tmp_path: Path) -> None:
+    run = sample_run(tmp_path)
+    for step in run["steps"]:
+        step["evidence"] = []
+    run["screenshots"] = "on-failure"
+    out = write_evidence_document(run, tmp_path, tmp_path / "evidence.docx")
+    doc = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert doc.count('w:type="page"') == 1  # only the break before sign-off
+

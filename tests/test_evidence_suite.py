@@ -80,17 +80,21 @@ def test_summary_document_lists_results_failures_and_evidence(tmp_path: Path) ->
             ET.fromstring(z.read(name))
     text = " ".join(t.text or "" for t in ET.fromstring(z.read("word/document.xml")).iter(f"{W}t"))
     for fragment in (
-        "Regression Run Summary",
-        "FAILURES",
-        "3 in total: 1 passed, 1 passed with a backup locator, 1 failed",
-        "Title of hcm.view-worker (hcm.view-worker)",
+        "Test Run Summary",
+        "SOME TESTS FAILED",
+        "This is the summary of an automated test run in Oracle Fusion.",
+        "3: 2 passed, 1 failed",
+        "Title of hcm.view-worker",
         "3 of 3",
-        "Failed: Title of hcm.create-location",
+        "What failed",
         "Step 2: Step 2 of hcm.create-location",
-        "expected text 'Redwood Shores', found 'Redwood City'",
+        'The screen showed "Redwood City" but it should show "Redwood Shores".',
+        "Tests that need an update",
         "hcm.create-location/20260927-100000-AAAA/hcm.create-location_evidence.docx",
-        "hcm.personal-info, step 1: replace label=Name with role=textbox:Name",
         "Reviewed by",
+        "Technical details",
+        "expected text 'Redwood Shores', found 'Redwood City'",  # original error, for the test team
+        "hcm.personal-info, step 1: the test looked for label=Name but found the item by role=textbox:Name.",
     ):
         assert fragment in text, fragment
     # only the failure screenshot is embedded; each test's own document holds the rest
@@ -104,4 +108,4 @@ def test_all_passed_suite(tmp_path: Path) -> None:
     assert suite["status"] == "passed"
     out = write_suite_document(suite, tmp_path, tmp_path / "s.docx")
     text = " ".join(t.text or "" for t in ET.fromstring(zipfile.ZipFile(out).read("word/document.xml")).iter(f"{W}t"))
-    assert "ALL PASSED" in text and "Failed:" not in text
+    assert "ALL PASSED" in text and "What failed" not in text and "need an update" not in text

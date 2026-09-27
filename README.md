@@ -170,7 +170,7 @@ test's own document is.
 ```
 evidence/_suites/<suite id>/
   suite.json                          every test's result and evidence location
-  suite_<suite id>_summary.docx       only with --evidence-doc and two or more tests
+  suite_<suite id>_summary.docx       with --evidence-doc
 ```
 
 Rebuild a document at any time from a saved run folder or suite folder:

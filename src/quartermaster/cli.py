@@ -123,7 +123,7 @@ def _run(args: argparse.Namespace) -> int:
     suite_dir = suite_folder(evidence_root, suite_id)
     write_suite_record(suite, suite_dir)
     print(f"\nSuite record: {suite_dir / 'suite.json'}")
-    if args.evidence_doc and len(suite_runs) > 1:
+    if args.evidence_doc:
         summary = write_suite_document(suite, evidence_root, suite_dir / f"suite_{suite_id}_summary.docx")
         print(f"Summary document: {summary}")
 
@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     rn.add_argument(
         "--evidence-doc", action="store_true",
-        help="write a Word evidence document for each test, plus a summary document when 2+ tests run",
+        help="write a Word evidence document for each test, plus a summary document for the whole run",
     )
     rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
     rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")

@@ -123,6 +123,10 @@ def test_cli_run_writes_run_folder_record_and_word_document(
     assert main(["document", str(run_dir), "--out", str(rebuilt)]) == 0
     assert rebuilt.exists()
 
+    # a summary is written even for a single test
+    [summary] = list((evidence / "_suites").glob("*/suite_*_summary.docx"))
+    assert zipfile.is_zipfile(summary)
+
 
 
 def test_cli_run_of_a_folder_writes_suite_record_and_summary(

@@ -10,6 +10,7 @@ producing evidence needs no extra packages.
 
 from __future__ import annotations
 
+import re
 import struct
 import zipfile
 from datetime import datetime
@@ -27,20 +28,10 @@ _MAX_IMG_W_IN, _MAX_IMG_H_IN = 7.0, 8.0
 _STATUS_COLOR = {"passed": "2C7A45", "healed": "A45708", "failed": "A63A32", "skipped": "6B7780"}
 _STATUS_FILL = {"passed": "E3F1E7", "healed": "F8ECDD", "failed": "F6E3E1", "skipped": "EEF1F3"}
 _ACTUAL = {
-    "passed": "Completed as expected.",
-    "healed": "Completed. The first locator did not match, a backup locator was used.",
-    "skipped": "Not run, because an earlier step failed.",
-}
-_ACTION = {
-    "navigate": "Open page",
-    "click": "Click",
-    "fill": "Enter value",
-    "select": "Choose value",
-    "assert_visible": "Check it is shown",
-    "assert_text": "Check the text",
-    "login_as": "Sign in as",
-    "wait_job": "Wait for process",
-    "api_call": "API call",
+    "passed": "As expected.",
+    "healed": "As expected. The item was found in a different way than when the test was written, so "
+    "the test file should be updated (see Technical details).",
+    "skipped": "Not done, because an earlier step failed.",
 }
 
 _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -125,111 +116,121 @@ class _Doc:
         steps: list[dict[str, Any]] = run.get("steps", [])
         status = str(run.get("status", "")).lower()
         hashes: dict[str, str] = run.get("evidence_sha256", {})
+        counts = {k: sum(1 for s in steps if s.get("status") == k) for k in ("passed", "healed", "failed", "skipped")}
         parts: list[str] = []
         add = parts.append
 
-        add(_p([_r("Test Evidence Report")], style="Title"))
+        # --- page 1: what this is, the result, and the list of steps
+        add(_p([_r("Test Evidence")], style="Title"))
         add(_p([_r(run.get("test_title") or run.get("test_id", ""))], style="Subtitle"))
-        add(
-            _p(
-                [
-                    _r("Result: ", bold=True, size=28),
-                    _r(status.upper() or "UNKNOWN", bold=True, size=28, color=_STATUS_COLOR.get(status, "15202A")),
-                ],
-                after=200,
-            )
-        )
+        add(_p([_r("Result: ", bold=True, size=28),
+                _r(_status_label(status).upper(), bold=True, size=28, color=_STATUS_COLOR.get(status, "15202A"))],
+               after=160))
+        add(_p([_r(
+            "This document is the record of an automated test run in Oracle Fusion. For each step it shows "
+            "what was done, what should happen, what did happen and, where taken, a picture of the screen "
+            "afterwards. A red box in a picture marks the item the step used."
+        )], after=200))
 
-        add(_p([_r("Run details")], style="Heading1"))
-        counts = {k: sum(1 for s in steps if s.get("status") == k) for k in ("passed", "healed", "failed", "skipped")}
-        details = [
-            ("Test ID", run.get("test_id", "")),
-            ("Test title", run.get("test_title", "")),
-            ("Test file", run.get("test_file", "")),
-            ("Test file SHA-256", run.get("test_file_sha256", "")),
-            ("Run ID", run.get("run_id", "")),
-            ("Environment", f"{run.get('environment', '')}  {run.get('environment_url', '')}".strip()),
-            ("Oracle release", run.get("release") or "Not given"),
-            ("Persona", run.get("persona") or "Default user"),
-            ("Executed by", run.get("executed_by", "")),
-            ("Machine", run.get("machine", "")),
-            ("Started", _when(run.get("started_at"))),
-            ("Finished", _when(run.get("finished_at"))),
-            ("Duration", _duration(run.get("started_at"), run.get("finished_at"))),
-            (
-                "Steps",
-                f"{len(steps)} in total: {counts['passed']} passed, {counts['healed']} passed with a backup locator, "
-                f"{counts['failed']} failed, {counts['skipped']} not run",
-            ),
-            ("Screenshots", _screenshot_setting(run.get("screenshots", ""))),
-            ("Video", _video_line(run)),
-            ("Quartermaster version", run.get("quartermaster_version", "")),
+        add(_p([_r("About this test")], style="Heading1"))
+        passed = counts["passed"] + counts["healed"]
+        about = [
+            ("What was tested", run.get("test_title") or run.get("test_id", "")),
+            ("Result", _status_label(status)),
+            ("Steps", f"{passed} of {len(steps)} passed" + _step_extras(counts)),
+            ("Date and time", _when(run.get("started_at"))),
+            ("Time taken", _duration(run.get("started_at"), run.get("finished_at"))),
+            ("Run by", run.get("executed_by") or "Not recorded"),
+            ("Oracle environment", run.get("environment_url", "")),
+            ("Oracle release", run.get("release") or "Not recorded"),
         ]
-        add(_kv_table(details))
+        add(_kv_table(about, status_row=("Result", status)))
 
-        add(_p([_r("Step summary")], style="Heading1"))
-        widths = [700, 5680, 1900, 1800]
-        rows = [[_cell("#", widths[0], header=True), _cell("Step", widths[1], header=True),
-                 _cell("Action", widths[2], header=True), _cell("Result", widths[3], header=True)]]
+        add(_p([_r("Steps")], style="Heading1"))
+        widths = [700, 7380, 2000]
+        rows = [[_cell("Step", widths[0], header=True), _cell("What was done", widths[1], header=True),
+                 _cell("Result", widths[2], header=True)]]
         for s in steps:
             st = s.get("status", "")
             rows.append([
                 _cell(str(s.get("index", 0) + 1), widths[0]),
                 _cell(s.get("intent", ""), widths[1]),
-                _cell(_ACTION.get(s.get("action", ""), s.get("action", "")), widths[2]),
-                _cell(_status_label(st), widths[3], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True),
+                _cell(_status_label(st), widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True),
             ])
         add(_table(rows, widths))
 
-        for s in steps:
+        # --- one block per step; a step with a picture starts on a new page
+        if any(s.get("evidence") for s in steps):
             add(_page_break())
+        add(_p([_r("Step details")], style="Heading1"))
+        first = True
+        for s in steps:
             n = s.get("index", 0) + 1
             st = s.get("status", "")
-            add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
-            actual = s.get("error") or _ACTUAL.get(st, "")
-            rows_kv = [
-                ("Result", _status_label(st)),
-                ("Action", _ACTION.get(s.get("action", ""), s.get("action", ""))),
-                ("Value used", s.get("value") or "None"),
-                ("Expected result", s.get("expected") or _default_expected(s)),
-                ("Actual result", actual),
-                ("Started", _when(s.get("started_at")) or "Not run"),
-                ("Duration", f"{float(s.get('duration_ms', 0)) / 1000:.1f} s" if st != "skipped" else ""),
-                ("Element used", s.get("locator") or "None"),
-            ]
-            add(_kv_table(rows_kv, status_row=("Result", st)))
             shots = s.get("evidence", [])
-            if not shots:
-                reason = "the step was not run" if st == "skipped" else _screenshot_setting(run.get("screenshots", ""))
-                add(_p([_r(f"No screenshot for this step ({reason}).", italic=True, color="6B7780")], before=160))
+            if shots and not first:
+                add(_page_break())
+            first = False
+            add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
+            rows_kv: list[tuple[str, Any]] = [("Result", _status_label(st))]
+            if s.get("value") and s.get("action") in ("fill", "select", "navigate", "login_as"):
+                rows_kv.append(("Value entered" if s.get("action") in ("fill", "select") else "Opened", s["value"]))
+            rows_kv.append(("What should happen", s.get("expected") or _default_expected(s)))
+            rows_kv.append(("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, "")))
+            if st != "skipped":
+                rows_kv.append(("Time", _clock(s.get("started_at"))))
+            add(_kv_table(rows_kv, status_row=("Result", st)))
             for rel in shots:
-                add(self._image(rel, n, hashes.get(rel, "")))
+                add(self._image(rel, n, "", caption=f"Screen after step {n}"))
 
-        videos = run.get("videos") or []
-        healing = run.get("healing") or []
-        if videos or healing:
-            add(_page_break())
-            add(_p([_r("Other evidence")], style="Heading1"))
-            if videos:
-                add(_p([_r("Video recordings are kept in the run folder and are not part of this document:")]))
-                for v in videos:
-                    add(_p([_r(v, mono=True)], indent=360))
-            if healing:
-                add(_p([_r("Locator changes to review (steps that passed with a backup locator):")], before=200))
-                for h in healing:
-                    old, new = h.get("old", ["", ""]), h.get("new", ["", ""])
-                    add(_p([_r(f"Step {h.get('step_index', 0) + 1}: replace {old[0]}={old[1]} with {new[0]}={new[1]}",
-                               mono=True)], indent=360))
-
+        # --- sign-off, then the technical appendix
         add(_page_break())
         add(_p([_r("Sign-off")], style="Heading1"))
         add(_p([_r("By signing, the reviewer confirms this document is a true record of the test run above.")]))
         sw = [2200, 3080, 2800, 2000]
-        sign = [[_cell("Role", sw[0], header=True), _cell("Name", sw[1], header=True),
-                 _cell("Signature", sw[2], header=True), _cell("Date", sw[3], header=True)]]
-        for role, name in (("Executed by", run.get("executed_by", "")), ("Reviewed by", ""), ("Approved by", "")):
+        sign = [[_cell(h, w, header=True) for h, w in zip(("Role", "Name", "Signature", "Date"), sw)]]
+        for role, name in (("Run by", run.get("executed_by", "")), ("Reviewed by", ""), ("Approved by", "")):
             sign.append([_cell(role, sw[0], bold=True), _cell(name, sw[1]), _cell("", sw[2]), _cell("", sw[3])])
         add(_table(sign, sw, row_height=620))
+
+        add(_p([_r("Technical details")], style="Heading1"))
+        add(_p([_r("For auditors and the test team. The fingerprints (SHA-256) show that the test file and "
+                   "pictures are the ones produced by this run: any change to a file changes its fingerprint.")]))
+        tech: list[tuple[str, Any]] = [
+            ("Test ID", run.get("test_id", "")),
+            ("Run ID", run.get("run_id", "")),
+            ("Test file", run.get("test_file", "")),
+            ("Test file fingerprint", run.get("test_file_sha256", "")),
+            ("Started", _when(run.get("started_at"))),
+            ("Finished", _when(run.get("finished_at"))),
+            ("Environment name", run.get("environment", "")),
+            ("Signed in as persona", run.get("persona") or "Default user"),
+            ("Computer", run.get("machine", "")),
+            ("Pictures", _screenshot_setting(run.get("screenshots", ""))),
+            ("Video", _video_line(run)),
+            ("Quartermaster version", run.get("quartermaster_version", "")),
+        ]
+        for v in run.get("videos") or []:
+            tech.append(("Video file", v))
+        add(_kv_table(tech))
+
+        detail = [s for s in steps if s.get("locator") or s.get("error") or s.get("evidence")]
+        if detail:
+            add(_p([_r("Per step")], style="Heading2"))
+            tw = [700, 3000, 6380]
+            trows = [[_cell("Step", tw[0], header=True), _cell("Item used", tw[1], header=True),
+                      _cell("Picture, fingerprint and original error", tw[2], header=True)]]
+            for s in detail:
+                notes = [f"{rel}  {hashes.get(rel, '')}".strip() for rel in s.get("evidence", [])]
+                if s.get("error"):
+                    notes.append(s["error"])
+                trows.append([_cell(str(s.get("index", 0) + 1), tw[0]), _cell(s.get("locator") or "", tw[1]),
+                              _cell("  |  ".join(notes), tw[2])])
+            add(_table(trows, tw))
+        for h in run.get("healing") or []:
+            old, new = h.get("old", ["", ""]), h.get("new", ["", ""])
+            add(_p([_r(f"Update needed, step {h.get('step_index', 0) + 1}: the test looked for {old[0]}={old[1]} "
+                       f"but found the item by {new[0]}={new[1]}.", mono=True)], indent=360))
 
         return document_xml(parts)
 
@@ -500,20 +501,67 @@ def _duration(start: str | None, end: str | None) -> str:
     except ValueError:
         return ""
     m, s = divmod(int(round(secs)), 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h} h {m} min"
     return f"{m} min {s} s" if m else f"{s} s"
 
 
 def _status_label(status: str) -> str:
-    return {"passed": "Passed", "healed": "Passed (backup locator)", "failed": "Failed", "skipped": "Not run"}.get(
-        status, status
-    )
+    return {"passed": "Passed", "healed": "Passed, test needs an update", "failed": "Failed",
+            "skipped": "Not done"}.get(status, status.capitalize())
+
+
+def _step_extras(counts: dict[str, int]) -> str:
+    extra = []
+    if counts.get("failed"):
+        extra.append(f"{counts['failed']} failed")
+    if counts.get("skipped"):
+        extra.append(f"{counts['skipped']} not done")
+    return f" ({', '.join(extra)})" if extra else ""
+
+
+def _clock(iso: str | None) -> str:
+    if not iso:
+        return ""
+    try:
+        return datetime.fromisoformat(iso).strftime("%H:%M:%S")
+    except ValueError:
+        return iso
+
+
+def plain_error(error: str | None) -> str:
+    """Say what went wrong in everyday words. The original message stays in Technical details."""
+    if not error:
+        return ""
+    text = " ".join(error.split())
+    m = re.search(r"expected text '(.*)', found '(.*)'$", text)
+    m = m or re.search(r'expected text "(.*)", found "(.*)"$', text)
+    if m:
+        found = m.group(2).strip()
+        return f"The screen showed \"{found}\" but it should show \"{m.group(1)}\"." if found else (
+            f"The screen was empty where it should show \"{m.group(1)}\".")
+    matches = [int(n) for n in re.findall(r"matched (\d+)", text)]
+    if matches and all(n == 0 for n in matches):
+        return "The item could not be found on the screen."
+    if matches and all(n >= 2 for n in matches):
+        return "More than one matching item was on the screen, so the test could not tell which one to use."
+    if matches:
+        return "The item could not be found on the screen, or more than one matched."
+    if "no suggestion matches" in text:
+        return "The value to choose was not among the suggestions the screen offered."
+    if "Timeout" in text:
+        return "The screen did not respond in time."
+    if "ended" in text and "job" in text:
+        return "The scheduled process did not finish successfully."
+    return "The step could not be completed. See Technical details for the error."
 
 
 def _screenshot_setting(mode: str) -> str:
     return {
-        "every-step": "taken after every step",
-        "on-failure": "taken only when a step fails",
-        "off": "switched off for this run",
+        "every-step": "Taken after every step",
+        "on-failure": "Taken only when a step fails",
+        "off": "Not taken in this run",
     }.get(mode, mode)
 
 
@@ -521,7 +569,7 @@ def _video_line(run: dict[str, Any]) -> str:
     videos = run.get("videos") or []
     mode = run.get("video", "off")
     if videos:
-        return f"Recorded, {len(videos)} file(s) in the run folder (listed at the end)"
+        return f"Recorded, {len(videos)} file(s) in the run folder"
     if mode == "on-failure":
         return "Recorded only on failure; this run passed, so none was kept"
     return "Not recorded"
@@ -531,10 +579,10 @@ def _default_expected(step: dict[str, Any]) -> str:
     action, value = step.get("action", ""), step.get("value") or ""
     return {
         "navigate": "The page opens.",
-        "click": "The click is accepted and the next screen or state appears.",
-        "fill": f"The field accepts the value {value}." if value else "The field accepts the value.",
-        "select": f"{value} is chosen." if value else "The value is chosen.",
-        "assert_visible": "The item is shown on the screen.",
-        "assert_text": f"The text shows {value}." if value else "The expected text is shown.",
+        "click": "The click works.",
+        "fill": f"\"{value}\" can be entered." if value else "The value can be entered.",
+        "select": f"\"{value}\" can be chosen." if value else "The value can be chosen.",
+        "assert_visible": "It is shown on the screen.",
+        "assert_text": f"It shows \"{value}\"." if value else "It shows the expected text.",
         "login_as": f"Signed in as {value}." if value else "Signed in.",
     }.get(action, "The step completes.")
