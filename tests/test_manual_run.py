@@ -34,11 +34,18 @@ marks = {}
 total = sum(len(c['steps']) for c in guide['cases'])
 if '--prepare' in rest:  # the AI does the steps; a model called "stuck" gives up at step 2
     assert opt['--ai-provider'] and opt['--ai-key-env']
-    stuck = opt['--ai-model'] == 'stuck'
+    stuck = opt['--ai-model'] == 'stuck' or (opt['--ai-model'] == 'mixed' and guide['ref'] == 'ESS-003')
     open(os.path.join(run_dir, 'ai-diary.txt'), 'w').write('Step 1: Login\n  AI answered: {"do": "done"}\n')
     marks = {n: 'failed' if stuck and n == 2 else 'passed' for n in range(1, 3 if stuck else total + 1)}
     if stuck:
         print('The AI stopped: Step 2: it would have to click "Delete"')
+    steps = []
+    for n, v in marks.items():
+        open(os.path.join(run_dir, 'screenshots', 'step-%02d.png' % n), 'wb').write(b'png')
+        steps.append({'intent': 'Step %d' % n, 'status': v, 'evidence': ['screenshots/step-%02d.png' % n]})
+    json.dump({'steps': steps}, open(os.path.join(run_dir, 'run.json'), 'w'))
+    if opt['--ai-model'] == 'slow':
+        sys.stdin.readline()  # until Stop
 while '--prepare' not in rest:
     line = sys.stdin.readline().strip()
     if line in ('', 'stop'):
@@ -214,3 +221,45 @@ def test_the_ai_gives_up_and_nothing_is_saved_to_run(app: App, monkeypatch: pyte
     assert contact["review"] is None and contact["automated"] is False
     with pytest.raises(ApiError, match="no prepared version"):
         app.handle("POST", "/api/manual/approve", json.dumps({"id": contact["id"]}).encode())
+
+
+def test_prepare_all_then_approve_selected(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ApiError, match="Choose an AI provider"):
+        app.handle("POST", "/api/manual/prepare-all", b"{}")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    call(app, "POST", "/api/settings", {"ai_provider": "openrouter", "ai_model": "mixed"})
+
+    started = call(app, "POST", "/api/manual/prepare-all", {})
+    assert started["status"] == "running" and [i["ref"] for i in started["items"]] == ["ESS-001", "ESS-003"]
+    with pytest.raises(ApiError, match="already running"):
+        app.handle("POST", "/api/manual/prepare-all", b"{}")
+    done = wait(lambda: (lambda b: b if b["status"] == "done" else None)(call(app, "GET", "/api/manual/prepare-all")))
+    assert [i["outcome"] for i in done["items"]] == ["prepared", "stopped"]  # one after another, without anyone
+    assert "Delete" in done["items"][1]["why"] and done["counts"] == {"prepared": 1, "stopped": 1}
+
+    review = call(app, "GET", "/api/manual/review")["scenarios"]
+    assert [s["ref"] for s in review] == ["ESS-001"]  # only what was prepared waits for a person
+    assert [st["name"] for st in review[0]["steps"]][:2] == ["Step 1", "Step 2"]
+    assert review[0]["steps"][0]["picture_url"].endswith("/r1/screenshots/step-01.png")
+
+    # again: what waits for review is left alone, what stopped is tried again
+    again = call(app, "POST", "/api/manual/prepare-all", {})
+    assert [i["ref"] for i in again["items"]] == ["ESS-003"]
+    wait(lambda: call(app, "GET", "/api/manual/prepare-all")["status"] == "done")
+    approved = call(app, "POST", "/api/manual/approve", {"ids": [review[0]["id"]]})
+    assert approved["approved"] == [review[0]["id"]] and scenario(app, "ESS-001")["review"] == "approved"
+    assert call(app, "GET", "/api/manual/review")["scenarios"] == []
+
+
+def test_prepare_all_can_be_stopped(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    call(app, "POST", "/api/settings", {"ai_provider": "openrouter", "ai_model": "slow"})
+    call(app, "POST", "/api/manual/prepare-all", {})
+    wait(lambda: call(app, "GET", "/api/recording").get("status") == "recording")
+    with pytest.raises(ApiError, match="Prepare all is running"):  # the browser is busy
+        app.handle(
+            "POST", "/api/manual/run", json.dumps({"id": scenario(app, "ESS-003")["id"], "by_hand": True}).encode()
+        )
+    call(app, "POST", "/api/manual/prepare-all/stop")
+    done = wait(lambda: (lambda b: b if b["status"] == "done" else None)(call(app, "GET", "/api/manual/prepare-all")))
+    assert [i["outcome"] for i in done["items"]][1] == "not_started"

@@ -22,14 +22,20 @@ export async function manualRunPage() {
   }
   const crumbs = [{label: "Tests", href: "#/tests?view=manual"}, {label: rec.title}];
   if (rec.status === "recording" || rec.status === "saving") {
-    if (!ws || !ws.el.isConnected) { ws = workspace(rec); show(crumbs, ws.el); }
+    if (!ws || !ws.el.isConnected || ws.started !== rec.started_at) { ws = workspace(rec); show(crumbs, ws.el); }
     ws.update(rec);
     schedule(manualRunPage, 1000);
     return;
   }
   ws = null;
-  show(crumbs, outcome(rec));
-  if (rec.status === "saved" && !rec.run_id) schedule(manualRunPage, 1000); // the run is being added to the history
+  // During Prepare all the next scenario starts by itself: keep following it.
+  const batch = rec.mode === "ai" ? await api("/api/manual/prepare-all") : null;
+  if (state.page !== "manual-run") return;
+  const batchRunning = batch && (batch.status === "running" || batch.status === "stopping");
+  show(crumbs, batchRunning ? h("div", {class: "stack"},
+    callout("info", "Prepare all is running.", "The next scenario starts by itself in a moment. ",
+      h("a", {href: "#/tests?view=review"}, "See progress and what is ready to review")), outcome(rec)) : outcome(rec));
+  if ((rec.status === "saved" && !rec.run_id) || batchRunning) schedule(manualRunPage, 1500);
 }
 
 function outcome(rec) {
@@ -168,5 +174,5 @@ function workspace(rec) {
       text: "It signs in to Oracle Fusion for you."}))]));
     list.querySelector(".current")?.scrollIntoView({block: "nearest", behavior: "smooth"});
   };
-  return {el, update};
+  return {el, update, started: rec.started_at}; // a new scenario (Prepare all) gets a new workspace
 }

@@ -6,6 +6,7 @@ import {
 } from "./ui.js";
 import {loadCommon, runLink, state} from "./state.js";
 import {show} from "./app.js";
+import {startPrepareAll} from "./page-review.js";
 
 const filters = {q: "", module: "all"};
 
@@ -62,8 +63,9 @@ export function manualLink(id) {
 
 // The Automated / Manual switch at the top of the Tests page.
 export function testsViewSwitch(current, counts) {
-  return chips([["automated", "Automated", counts.automated], ["manual", "Manual scenarios", counts.manual]], current,
-    (v) => { location.hash = v === "manual" ? "#/tests?view=manual" : "#/tests"; }, "Kind of test");
+  const views = [["automated", "Automated", counts.automated], ["manual", "Manual scenarios", counts.manual]];
+  if (counts.review || current === "review") views.push(["review", "To review", counts.review || 0]);
+  return chips(views, current, (v) => { location.hash = v === "automated" ? "#/tests" : `#/tests?view=${v}`; }, "Kind of test");
 }
 
 export async function manualPage() {
@@ -117,6 +119,11 @@ export async function manualPage() {
         }}))),
       h("div", {class: "hint", style: "padding:6px 8px 0"}, "Import a workbook again to replace it.")))}) : null;
 
+  const batch = data.prepare_all || {items: [], counts: {}};
+  const batchRunning = batch.status === "running" || batch.status === "stopping";
+  const batchDone = (batch.counts.prepared || 0) + (batch.counts.stopped || 0);
+  // what Prepare all would do: not playing by itself yet, not waiting for review, test data given
+  const toPrepare = all.filter((s) => !s.automated && !s.review && !s.blank_data);
   const totals = {cases: all.reduce((a, s) => a + s.case_count, 0), steps: all.reduce((a, s) => a + s.step_count, 0)};
   show([{label: "Tests", href: "#/tests"}, {label: "Manual scenarios"}],
     h("div", {class: "page-head"},
@@ -124,8 +131,15 @@ export async function manualPage() {
         h("p", {class: "lead"}, all.length
           ? `${plural(all.length, "manual scenario")}, ${plural(totals.cases, "test case")} and ${plural(totals.steps, "step")} from ${plural(data.files.length, "workbook")}.`
           : "Manual test scripts imported from Excel.")),
-      h("div", {class: "row"}, filesBtn, button("Import manual scripts", {kind: all.length ? "" : "primary", ic: "download", onClick: () => openManualImport()}))),
-    h("div", {class: "toolbar"}, testsViewSwitch("manual", {automated: state.tests.length, manual: all.length})),
+      h("div", {class: "row"}, filesBtn,
+        aiReady() && toPrepare.length && !batchRunning ? button(`Prepare all (${toPrepare.length})`, {ic: "target", disabled: !state.status.ready,
+          title: "The AI prepares every scenario that does not play by itself yet, one after another; you review them after",
+          onClick: () => startPrepareAll(toPrepare.length)}) : null,
+        button("Import manual scripts", {kind: all.length ? "" : "primary", ic: "download", onClick: () => openManualImport()}))),
+    h("div", {class: "toolbar"}, testsViewSwitch("manual", {automated: state.tests.length, manual: all.length,
+      review: all.filter((s) => s.review === "needs_review").length})),
+    batchRunning ? callout("info", "Prepare all is running.", `${batchDone} of ${batch.total} done. The AI is using the browser, so Run by hand and Prepare wait until it has finished. `,
+      h("a", {href: "#/tests?view=review"}, "See progress")) : null,
     all.length ? h("div", {class: "toolbar"},
       h("div", {class: "search"}, icon("search"), input({type: "search", value: filters.q, placeholder: "Search scenario, product or file",
         "aria-label": "Search manual scenarios", oninput: (e) => { filters.q = e.target.value; draw(); }})),

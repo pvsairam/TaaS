@@ -10,6 +10,7 @@ import {recordPage} from "./page-record.js";
 import {settingsPage} from "./page-settings.js";
 import {impactPage} from "./page-impact.js";
 import {manualPage} from "./page-manual.js";
+import {reviewPage} from "./page-review.js";
 import {manualRunPage} from "./page-manual-run.js";
 
 const NAV = [
@@ -168,6 +169,7 @@ export async function route() {
     else if (page === "runs") await runsPage();
     else if (page === "tests" && arg) await testPage(arg);
     else if (page === "tests" && state.query.view === "manual") await manualPage();
+    else if (page === "tests" && state.query.view === "review") await reviewPage();
     else if (page === "tests") await testsPage();
     else if (page === "attention") await attentionPage();
     else if (page === "impact") await impactPage();

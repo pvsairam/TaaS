@@ -82,6 +82,9 @@ class Recording:
         self.feed = work_dir / "feed.json"
         # Called with the final state when a manual scenario done by hand has been saved.
         self.on_manual_done: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
+        # Called with the final state whenever a session has ended (saved or not), e.g. to start the
+        # next scenario of Prepare all.
+        self.on_finished: Callable[[dict[str, Any]], None] | None = None
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         out, fields = check_request(request, self.tests_root)
@@ -225,6 +228,8 @@ class Recording:
             if run:
                 with self._lock:
                     self._state["run_id"] = run.get("id")
+        if self.on_finished is not None:
+            self.on_finished(self.state())
 
 
 def _after(lines: list[str], prefix: str) -> str:

@@ -221,6 +221,22 @@ by hand.
 chose and what did not work. Send it when you report a problem with Prepare. It is also kept in the
 run's folder in `evidence\` as `ai-diary.txt`.
 
+**Prepare many at once (optional)**
+
+14. In **Manual scenarios**, click **Prepare all (N)**. N is the number of scenarios that do not
+    play by themselves yet, are not waiting for review, and have no missing test data. Click OK.
+15. The **To review** page opens. It shows each scenario: waiting, preparing now, ready to review,
+    or stopped (with the reason). You do not need to watch; **Watch the AI** shows the browser
+    steps, and **Stop** stops after the scenario being prepared now. While it runs, Prepare and
+    Run by hand wait, because the AI uses the browser.
+16. When it has finished, every prepared scenario is listed with the picture of each step. Click a
+    picture to see it full size. Tick the scenarios where every picture is right (or **Select all**
+    and untick the wrong ones), then click **Approve selected**.
+
+You should see: the approved scenarios now say **Run** in Manual scenarios. Stopped ones still say
+**Prepare** and **By hand**. Clicking **Prepare all** again tries the stopped ones again. For a
+scenario whose pictures are wrong, click **Do it by hand** in To review.
+
 **Choosing an AI**
 
 1. In **Settings**, **AI assistant**, choose the **Provider** and type the **Model** name your

@@ -32,7 +32,11 @@ computers and other web sites cannot start runs.
     POST /api/manual/run             {"id", "by_hand", "prepare", "release", "tester"} run a scenario: it plays
                                      by itself once done by hand (or prepared by AI and approved); otherwise it is
                                      done by hand now, or with "prepare" an AI does it and it waits for review
-    POST /api/manual/approve         {"id"} a person checked what the AI prepared: Run may now play it
+    POST /api/manual/approve         {"id"} or {"ids": [...]} a person checked what the AI prepared: Run may now play it
+    GET  /api/manual/review          scenarios an AI prepared that wait for review, with each step's picture
+    GET  /api/manual/prepare-all     progress of Prepare all
+    POST /api/manual/prepare-all     {"ids"?} the AI prepares each scenario that still needs it, one by one
+    POST /api/manual/prepare-all/stop   stop after the scenario being prepared now
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -61,6 +65,7 @@ from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
 from quartermaster.service.manual import ManualScripts
+from quartermaster.service.prepare_all import PrepareAll
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
 from quartermaster.service.settings import Settings, check_pod
@@ -123,6 +128,11 @@ class App:
         self.releases = Releases(releases_root, data_dir / "releases")
         self.manual = ManualScripts(data_dir / "manual")
         self.recording.on_manual_done = self._manual_done
+        self.prepare_all = PrepareAll(
+            start=lambda sid: self.run_manual({"id": sid, "prepare": True}, batch=True),
+            stop_current=self.recording.stop,
+        )
+        self.recording.on_finished = self.prepare_all.finished
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -244,6 +254,7 @@ class App:
             if method == "GET" and not route:
                 summary = self.manual.summary()
                 self._with_results(summary["scenarios"])
+                summary["prepare_all"] = self.prepare_all.view()
                 return _json(summary)
             if method == "GET" and route == ["scenario"]:
                 scenario = self.manual.get(str((query.get("id") or [""])[0]))
@@ -252,7 +263,20 @@ class App:
             if method == "POST" and route == ["run"]:
                 return _json(self.run_manual(data), HTTPStatus.CREATED)
             if method == "POST" and route == ["approve"]:
+                if isinstance(data.get("ids"), list):  # Approve selected
+                    ids = [self.manual.get(str(i))["id"] for i in data["ids"]]
+                    for i in ids:
+                        self.manual.approve(i)
+                    return _json({"approved": ids})
                 return _json(self.manual.approve(self.manual.get(str(data.get("id") or ""))["id"]))
+            if method == "GET" and route == ["review"]:
+                return _json(self.review_list())
+            if method == "GET" and route == ["prepare-all"]:
+                return _json(self.prepare_all.view())
+            if method == "POST" and route == ["prepare-all"]:
+                return _json(self.start_prepare_all(data), HTTPStatus.CREATED)
+            if method == "POST" and route == ["prepare-all", "stop"]:
+                return _json(self.prepare_all.stop())
             if method == "POST" and route == ["import"]:
                 return _json(self.manual.import_files(data))
             if method == "POST" and route == ["remove"]:
@@ -308,10 +332,17 @@ class App:
 
     # ------------------------------------------------------------------ manual scenarios run
 
-    def run_manual(self, data: dict[str, Any]) -> dict[str, Any]:
+    def run_manual(self, data: dict[str, Any], batch: bool = False) -> dict[str, Any]:
         """Once a scenario has been done by hand, Run plays it by itself; before that (or when asked
         with by_hand) the tester does it by hand while Quartermaster takes pictures and records."""
         scenario = self.manual.get(str(data.get("id") or ""))
+        guided = (
+            data.get("prepare")
+            or data.get("by_hand")
+            or not (self.tests_root / self.manual.test_file(scenario["id"])).is_file()
+        )
+        if guided and not batch and self.prepare_all.running:
+            raise ValueError("Prepare all is running and uses the browser. Wait for it, or stop it in To review.")
         rel = self.manual.test_file(scenario["id"])
         release = str(data.get("release") or self.settings.get()["release"] or "").strip()
         tester = str(data.get("tester") or "").strip()
@@ -344,6 +375,53 @@ class App:
             scenario, test_id=self.manual.test_id(scenario["id"]), rel_file=rel, release=release, tester=tester
         )
         return {"mode": "by_hand", "recording": state}
+
+    def start_prepare_all(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Prepare every scenario that still needs preparing (or the ones asked for), one by one."""
+        config = ai_providers.config_from(self.settings.get())
+        problem = config.problem() if config.provider else "Choose an AI provider in Settings first."
+        if problem:
+            raise ValueError(problem)
+        if self.prepare_all.running:
+            raise ValueError("Prepare all is already running")
+        if self.recording.state().get("status") in ("recording", "saving"):
+            raise ValueError("a scenario or recording is in progress; finish it first")
+        scenarios = self.manual.summary()["scenarios"]
+        self._with_results(scenarios)
+        todo = [s for s in scenarios if not s["automated"] and not s["review"] and not s.get("blank_data")]
+        if isinstance(data.get("ids"), list):
+            wanted = [str(i) for i in data["ids"]]
+            todo = sorted((s for s in todo if s["id"] in wanted), key=lambda s: wanted.index(s["id"]))
+        return self.prepare_all.begin(todo)
+
+    def review_list(self) -> dict[str, Any]:
+        """The scenarios an AI prepared that wait for a person, each with the picture of every step."""
+        scenarios = self.manual.summary()["scenarios"]
+        self._with_results(scenarios)
+        out = []
+        for s in scenarios:
+            if s["review"] != "needs_review":
+                continue
+            run = self.queue.store.get(str(s["prepared"]["run_id"]))
+            results = self._suite_results(run) if run else []
+            folder = results[0]["folder"] if results else ""
+            record = insights.read_json(self.evidence_root / folder / "run.json") if folder else None
+            steps = [
+                {
+                    "name": str(st.get("intent") or ""),
+                    "status": st.get("status"),
+                    "picture_url": self._url_rel(f"{folder}/{st['evidence'][0]}") if st.get("evidence") else None,
+                }
+                for st in (record or {}).get("steps", [])
+            ]
+            out.append(
+                {
+                    **{k: s.get(k) for k in ("id", "title", "ref", "module", "product", "file")},
+                    "prepared": s["prepared"],
+                    "steps": steps,
+                }
+            )
+        return {"scenarios": out, "prepare_all": self.prepare_all.view()}
 
     def _manual_done(self, state: dict[str, Any]) -> dict[str, Any] | None:
         """A scenario done by hand has been saved: put it in the run history like any other run."""

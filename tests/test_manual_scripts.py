@@ -186,7 +186,8 @@ def test_import_list_open_remove_and_match_to_a_release(tmp_path: Path) -> None:
         {"name": "notes.xlsx", "content": b64(b"not a workbook")},
     ]
     preview = call(app, "POST", "/api/manual/import", {"files": files})
-    assert preview["saved"] == 0 and call(app, "GET", "/api/manual") == {"files": [], "scenarios": []}
+    listed = call(app, "GET", "/api/manual")
+    assert preview["saved"] == 0 and (listed["files"], listed["scenarios"]) == ([], [])
     ap, ess, unnamed, broken = preview["files"]
     assert (ap["scenarios"], ap["cases"], ap["steps"], ap["blank_data"]) == (4, 4, 6, 1)
     assert ess["product"] == "Global Human Resources" and broken["problem"]
