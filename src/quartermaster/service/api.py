@@ -369,7 +369,7 @@ class App:
             # the evidence choices remembered from New run (screenshots, video, show the browser)
             raw = data.get("options")
             chosen: dict[str, Any] = raw if isinstance(raw, dict) else {}
-            options = {k: chosen[k] for k in ("screenshots", "video", "headed") if k in chosen}
+            options: dict[str, Any] = {k: chosen[k] for k in ("screenshots", "video", "headed") if k in chosen}
             options.update(label=f"Automatic: {scenario['title']}"[:80], release=release, tester=tester)
             return {"mode": "automatic", "run": self._run_view(self.queue.submit(rel, options))}
         state = self.recording.start_guided(
