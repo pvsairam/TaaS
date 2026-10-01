@@ -175,3 +175,27 @@ def test_cli_run_of_a_folder_writes_suite_record_and_summary(
     rebuilt = tmp_path / "again.docx"
     assert main(["document", str(suite_dir), "--out", str(rebuilt)]) == 0
     assert zipfile.is_zipfile(rebuilt)
+
+
+def test_cli_run_only_some_tests_of_a_folder(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from conftest import FakeDriver
+
+    from quartermaster import cli
+
+    specs = tmp_path / "suite"
+    specs.mkdir()
+    login = (EXAMPLES / "smoke" / "login.yaml").read_text()
+    for name in ("a", "b", "c"):
+        (specs / f"{name}.yaml").write_text(login.replace("id: smoke.login", f"id: smoke.{name}"))
+    monkeypatch.setenv("QM_FUSION_URL", "https://abcd-dev2.fa.us6.oraclecloud.com")
+    page = {("role", "link:Navigator"): 1, ("xpath", "//*[starts-with(normalize-space(text()), 'Welcome,')]"): 1}
+    monkeypatch.setattr(cli, "driver_factory", lambda args, run_dir: FakeDriver(page, evidence_dir=run_dir))
+    evidence = str(tmp_path / "evidence")
+    assert main(["run", str(specs), "--evidence", evidence, "--only", "smoke.c,smoke.a"]) == 0
+    out = capsys.readouterr().out
+    assert "smoke.a" in out and "smoke.c" in out and "smoke.b" not in out and "2/2 passed" in out
+
+    assert main(["run", str(specs), "--evidence", evidence, "--only", "smoke.a,smoke.nope"]) == 2
+    assert "no test with id smoke.nope" in capsys.readouterr().err

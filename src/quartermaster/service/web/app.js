@@ -8,12 +8,14 @@ import {testPage, testsPage} from "./page-tests.js";
 import {attentionPage} from "./page-attention.js";
 import {recordPage} from "./page-record.js";
 import {settingsPage} from "./page-settings.js";
+import {impactPage} from "./page-impact.js";
 
 const NAV = [
   {section: "Testing"},
   {id: "", label: "Overview", ic: "overview"},
   {id: "runs", label: "Runs", ic: "runs"},
   {id: "tests", label: "Tests", ic: "tests"},
+  {id: "impact", label: "Release impact", ic: "target"},
   {id: "attention", label: "Needs attention", ic: "attention"},
   {section: "Create"},
   {id: "record", label: "Record a test", ic: "record"},
@@ -153,6 +155,7 @@ export async function route() {
     else if (page === "tests" && arg) await testPage(arg);
     else if (page === "tests") await testsPage();
     else if (page === "attention") await attentionPage();
+    else if (page === "impact") await impactPage();
     else if (page === "record") await recordPage();
     else if (page === "settings") await settingsPage();
     else await overviewPage();

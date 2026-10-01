@@ -20,6 +20,9 @@ computers and other web sites cannot start runs.
     GET  /api/recording              the recording in progress, or the last one
     POST /api/recording              {"id", "title", "module", "product", "persona", "file"} start recording
     POST /api/recording/<command>    pause, resume, check, undo, note {"text"}, mask, stop
+    GET  /api/releases               release feature lists (the releases folder and imported ones)
+    GET  /api/releases/plan?name=<file>&budget=<minutes>&opt_in=<feature id>   tests to run, and why
+    POST /api/releases/import        {"name", "content" (base64), "release_id", "save"} a feature list
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -45,6 +48,7 @@ import yaml
 from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
+from quartermaster.service.impact import Releases
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
 from quartermaster.service.settings import Settings, check_pod
@@ -83,6 +87,7 @@ class App:
         run_command: CommandBuilder = qm_run_command,
         record_command: RecordCommandBuilder = qm_record_command,
         cwd: Path | None = None,
+        releases_root: Path | None = None,
     ):
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
@@ -98,6 +103,7 @@ class App:
         self.backups = data_dir / "backups"
         self.settings = Settings(data_dir / "settings.json")
         self.pod_check: dict[str, Any] | None = None
+        self.releases = Releases(releases_root, data_dir / "releases")
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -184,8 +190,27 @@ class App:
                     return _json(self.recording.send(route[1], str(data.get("text") or "")))
                 except ValueError as e:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
+        if route[:1] == ["releases"]:
+            return self._releases(method, route[1:], query, data)
         if method == "POST" and route == ["open"]:
             return _json({"opened": str(self._open(str(data.get("path") or "")))})
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _releases(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
+        try:
+            if method == "GET" and not route:
+                return _json(self.releases.list())
+            if method == "GET" and route == ["plan"]:
+                budget = str((query.get("budget") or [""])[0]).strip()
+                opt_ins = {o for v in query.get("opt_in") or [] for o in v.split(",") if o}
+                name = str((query.get("name") or [""])[0])
+                return _json(self.releases.plan(name, self.tests_root, float(budget) if budget else None, opt_ins))
+            if method == "POST" and route == ["import"]:
+                return _json(self.releases.import_file(data), HTTPStatus.CREATED if data.get("save") else HTTPStatus.OK)
+        except LookupError as e:
+            raise ApiError(HTTPStatus.NOT_FOUND, str(e).strip("'\"")) from e
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
     # ------------------------------------------------------------------ views
@@ -203,6 +228,7 @@ class App:
             "user": os.environ.get("QM_FUSION_USER", ""),
             "password_set": bool(os.environ.get("QM_FUSION_PASSWORD")),
             "tests_folder": str(self.tests_root),
+            "releases_folder": str(self.releases.folder or ""),
             "evidence_folder": str(self.evidence_root),
             "default_options": DEFAULT_OPTIONS,
             "ready": bool(url and os.environ.get("QM_FUSION_USER") and os.environ.get("QM_FUSION_PASSWORD")),

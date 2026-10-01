@@ -4,7 +4,7 @@ import {
   toast, took, when,
 } from "./ui.js";
 import {evidenceViewer, executionTimeline, openFolder, openRunDrawer, releaseBadge} from "./components.js";
-import {active, loadCommon, runLink, schedule, state, targetModule, testLink, testName} from "./state.js";
+import {active, loadCommon, runLink, runName, schedule, state, targetModule, testLink} from "./state.js";
 import {show} from "./app.js";
 
 const filters = {q: "", status: "all", release: "all"};
@@ -21,7 +21,7 @@ export async function runsPage() {
     const shown = runs.filter((r) =>
       (filters.status === "all" || r.status === filters.status || (filters.status === "active" && active(r))) &&
       (filters.release === "all" || r.release === filters.release) &&
-      (!q || [testName(r.target), r.target, r.executed_by, r.release, r.environment, targetModule(r.target)].join(" ").toLowerCase().includes(q)));
+      (!q || [runName(r), r.target, r.executed_by, r.release, r.environment, targetModule(r.target)].join(" ").toLowerCase().includes(q)));
     body.replaceChildren(shown.length ? table({
       caption: "Runs, newest first",
       rows: shown,
@@ -29,7 +29,7 @@ export async function runsPage() {
       rowHref: (r) => runLink(r.id),
       columns: [
         {label: "Result", render: (r) => statusBadge(r.status)},
-        {label: "Test", render: (r) => [h("div", {class: "primary-cell"}, testName(r.target)),
+        {label: "Test", render: (r) => [h("div", {class: "primary-cell"}, runName(r)),
           h("div", {class: "sub"}, r.target === "." ? "Every test" : /\.ya?ml$/.test(r.target) ? r.target : `Folder ${r.target}`)]},
         {label: "Module", render: (r) => targetModule(r.target) || "–"},
         {label: "Release", render: (r) => r.release ? h("span", {class: "release"}, r.release) : h("span", {class: "muted"}, "–")},
@@ -126,7 +126,7 @@ export async function runPage(id) {
       h("div", {style: "min-width:0"},
         h("div", {class: "row", style: "margin-bottom:6px"}, statusBadge(run.status), module ? h("span", {class: "tag"}, module) : null,
           run.release ? releaseBadge(run.release) : null),
-        h("h1", {}, testName(run.target)),
+        h("h1", {}, runName(run)),
         h("p", {class: "lead"}, results.length ? `${passedTests} of ${plural(results.length, "test")} passed` :
           isActive ? `${live.filter((t) => !["waiting", "running"].includes(t.status)).length} of ${plural(live.length || 1, "test")} done` : "")),
       h("div", {class: "row"},
@@ -196,7 +196,7 @@ export async function runPage(id) {
         h("span", {class: "meta"}, STATUS[i.status]?.label || i.status, i.sub ? ` · ${i.sub}` : "")))))) : null;
 
   const outputOpen = document.querySelector("details.run-output")?.open || false;
-  show([{label: "Runs", href: "#/runs"}, {label: testName(run.target)}],
+  show([{label: "Runs", href: "#/runs"}, {label: runName(run)}],
     head,
     run.status === "error" ? h("div", {class: "section"}, callout("danger", "The run could not finish.", run.error || "")) : null,
     h("div", {class: `section ${list ? "split" : ""}`}, list, detail),

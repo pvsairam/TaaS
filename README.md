@@ -29,6 +29,7 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
 | Evidence per run: screenshots (off / on failure / every step), video, `run.json`, Word document | `src/quartermaster/evidence/` |
 | `qm` CLI (`validate`, `plan`, `run`, `record`, `document`, `serve`) | `src/quartermaster/cli.py` |
+| Release feature list import (Oracle feature-listing .xlsx, .csv, .json/.yaml), standard library only | `src/quartermaster/importers/` |
 | Web UI on your own computer (`qm serve`): start runs, follow them live, record, open evidence | `src/quartermaster/service/` |
 
 ## Quick start
@@ -149,6 +150,7 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 | **Overview** | Managers first, everyone | Pass rate, test coverage, what needs attention and runs this week. Release readiness for the pod's Oracle release (passed on it, failed on it, passed only on an earlier release, never passed), a comparison of releases once tests have run on two, recent activity and coverage by module. |
 | **Runs** | Testers | Every run with its result, module, release, environment, start, duration, who ran it and tests passed; search and filter. A run shows live progress in words ("Executing step 3 of 10…"), then each test's steps with screenshots, expected and observed values, video, documents and details. Technical detail stays folded away until asked for. |
 | **Tests** | Functional team, testers | Every test with its module and last result; search, filter by module or result, and choose extra columns (process, job role, owner, release validated, environment, last run, duration, tags, updated). A test's own page reads its steps in plain words with the real test data. |
+| **Release impact** | Release managers, test leads | Import an Oracle update's feature list (the Readiness feature-listing spreadsheet, any .xlsx or .csv with a Feature column, or a release .json/.yaml). See which tests the update puts at risk and why, which features no test covers yet, and a suggested run under an optional time limit (critical tests always included). Tick opt-ins you have switched on, choose tests, and run just those. |
 | **Needs attention** | Test team | Failures grouped by kind (checks that did not match, items not found, screens that did not respond, sign-in problems, runs that could not start, unreadable files) with the failed step, expected and observed, the screenshot and the last release it passed on. Oracle screen changes are accepted with one click (the old file is kept). |
 | **Record a test** | Functional team | Name the test and start. A browser opens already signed in. While recording: a timer, the steps so far, Pause and Resume, Add check, Add note (what should happen at a step), Mask value, Undo and Finish. |
 | **Settings** | Everyone | The environment's name and Oracle release, the pod address and a connection check, sign-in (the password is never shown), folders, theme and keyboard shortcuts. |
@@ -167,6 +169,9 @@ From a terminal, `qm record` takes the same commands typed and followed by Enter
 `undo`, `note <text>`, `mask`, and an empty line to finish.
 
 The pages use the Inter font when the computer can reach Google Fonts, and the system font otherwise.
+
+Release feature lists are read from `examples/releases` (change it with `qm serve --releases <folder>`); imported
+lists are kept in `.qm/releases`. From a terminal, `qm run <folder> --only id1,id2` runs just those tests of a folder.
 
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer

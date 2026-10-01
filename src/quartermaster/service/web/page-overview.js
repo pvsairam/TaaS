@@ -3,7 +3,7 @@ import {api, button, callout, card, h, plural, statusBadge, toast, when} from ".
 import {
   checkPod, metric, moduleCoverage, openRunDrawer, recentActivity, releaseComparison, releaseReadiness, stackedBar,
 } from "./components.js";
-import {active, connection, envName, loadCommon, runLink, schedule, state, testName} from "./state.js";
+import {active, connection, envName, loadCommon, runLink, runName, schedule, state} from "./state.js";
 import {show} from "./app.js";
 
 export async function overviewPage() {
@@ -72,7 +72,8 @@ export async function overviewPage() {
       h("div", {}, h("h1", {}, "Overview"),
         h("p", {class: "lead"}, "Oracle Fusion release testing", envName(st) ? ` on ${envName(st)}` : "", st.release ? ` · Release ${st.release}` : "")),
       h("div", {class: "row"},
-        latestSummary ? button("Latest summary", {ic: "download", href: latestSummary.summary_url, title: `Summary of ${testName(latestSummary.target)}`}) : null,
+        latestSummary ? button("Latest summary", {ic: "download", href: latestSummary.summary_url, title: `Summary of ${runName(latestSummary)}`}) : null,
+        button("Release impact", {ic: "target", href: "#/impact", title: "Which tests a new Oracle update puts at risk"}),
         button("Run all tests", {kind: "primary", ic: "runs", disabled: !st.ready, onClick: () => openRunDrawer(".")}))),
     firstRun ? h("div", {style: "margin-bottom:16px"}, firstRun) : null,
     metrics,

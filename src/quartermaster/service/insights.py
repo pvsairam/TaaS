@@ -104,6 +104,7 @@ def dashboard(tests: list[dict[str, Any]], runs: list[dict[str, Any]], release: 
                     "at": run.get("started_at"),
                     "finished_at": run.get("finished_at"),
                     "target": run["target"],
+                    "label": str((run.get("options") or {}).get("label") or ""),
                     "status": run["status"],
                     "release": str(suite.get("release") or ""),
                     **counts,

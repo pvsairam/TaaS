@@ -136,3 +136,14 @@ def test_the_real_command_line() -> None:
     ):
         assert part in joined, part
     assert json.dumps(options)  # stored as JSON in the history
+
+
+def test_a_run_of_chosen_tests() -> None:
+    options = check_options({"only": ["hcm.view-worker", "hcm.hire-page-opens", "hcm.view-worker"], "label": " 26C "})
+    assert options["only"] == ["hcm.view-worker", "hcm.hire-page-opens"] and options["label"] == "26C"
+    cmd = qm_run_command("/tests", options, Path("/evidence"), Path("/events.jsonl"))
+    assert cmd[-2:] == ["--only", "hcm.view-worker,hcm.hire-page-opens"]
+    assert "--only" not in qm_run_command("/tests", check_options({}), Path("/evidence"), Path("/events.jsonl"))
+    for bad in ("hcm.view-worker", ["a b"], [1]):
+        with pytest.raises(ValueError, match="list of test ids"):
+            check_options({"only": bad})

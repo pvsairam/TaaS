@@ -9,6 +9,7 @@ file (`qm run --events`), which the web UI reads to show steps as they happen.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -26,8 +27,12 @@ DEFAULT_OPTIONS: dict[str, Any] = {
     "release": "",
     "tester": "",
     "headed": False,
+    "only": [],  # test ids: run just these from the folder (e.g. the tests a release puts at risk)
+    "label": "",  # a name for the run, shown instead of the folder
 }
 _CHOICES = {"screenshots": ("off", "on-failure", "every-step"), "video": ("off", "on-failure", "always")}
+
+_TEST_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 CommandBuilder = Callable[[str, dict[str, Any], Path, Path], list[str]]
 
@@ -56,6 +61,8 @@ def qm_run_command(target: str, options: dict[str, Any], evidence_root: Path, ev
         cmd += ["--release", options["release"]]
     if options["tester"]:
         cmd += ["--tester", options["tester"]]
+    if options.get("only"):
+        cmd += ["--only", ",".join(options["only"])]
     return cmd
 
 
@@ -71,6 +78,13 @@ def check_options(requested: dict[str, Any]) -> dict[str, Any]:
         options[key] = bool(options[key])
     for key in ("release", "tester"):
         options[key] = str(options[key]).strip()[:60]
+    options["label"] = str(options["label"]).strip()[:80]
+    only = options["only"]
+    if not isinstance(only, list) or not all(isinstance(t, str) and _TEST_ID.match(t) for t in only):
+        raise ValueError("only must be a list of test ids")
+    if len(only) > 1000:
+        raise ValueError("too many tests in one run")
+    options["only"] = list(dict.fromkeys(only))
     return options
 
 

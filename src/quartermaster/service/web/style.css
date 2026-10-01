@@ -314,6 +314,7 @@ pre.block { margin: var(--s2) 0 0; padding: var(--s3); border-radius: var(--r-in
 .fill-success { background: var(--success); }
 .fill-danger { background: var(--danger); }
 .fill-info { background: var(--info); }
+.fill-warning { background: var(--warning); }
 .fill-neutral { background: var(--border-strong); }
 .fill-primary { background: var(--primary); }
 .legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: var(--fs-meta); color: var(--text-2); }

@@ -355,3 +355,54 @@ def test_a_run_that_could_not_start_needs_attention(app: App) -> None:
     (item,) = [i for i in call(app, "GET", "/api/attention")["items"] if i["category"] == "could_not_run"]
     assert item["title"] == "Crash" and item["error"] == "something went wrong before any test ran"
     assert item["run_id"] == run["id"]
+
+
+def test_release_impact_lists_imports_and_plans(tmp_path: Path) -> None:
+    import base64
+    import shutil
+
+    from conftest import EXAMPLES
+    from test_release_import import ORACLE_ROWS, make_xlsx
+
+    tests = tmp_path / "tests"
+    shutil.copytree(EXAMPLES / "tests", tests)
+    (tests / "broken.yaml").write_text("id: [unclosed\n")
+    a = App(
+        tests_root=tests,
+        evidence_root=tmp_path / "ev",
+        data_dir=tmp_path / ".qm",
+        releases_root=EXAMPLES / "releases",
+    )
+
+    [sample] = call(a, "GET", "/api/releases")
+    assert sample["name"] == "26D_sample.json" and sample["id"] == "26D" and sample["source"] == "folder"
+
+    plan = call(a, "GET", "/api/releases/plan?name=26D_sample.json")
+    assert plan["release"] == "26D" and plan["summary"]["features"] == len(plan["features"])
+    rows = {r["id"]: r for r in plan["tests"]}
+    assert set(rows) == {"hcm.view-worker", "hcm.view-my-personal-info", "hcm.hire-page-opens", "hcm.create-location"}
+    assert rows["hcm.view-worker"]["file"] == "hcm/view_worker.yaml" and rows["hcm.view-worker"]["reasons"]
+    assert all(r["features"] == ["HCM-CORE-005"] for r in rows.values())
+    coverage = {f["id"]: f["coverage"] for f in plan["features"]}
+    assert coverage["HCM-CORE-005"] == "covered" and coverage["SCM-OM-007"] == "none"
+    assert plan["problems"][0]["file"] == "broken.yaml"
+    tight = call(a, "GET", "/api/releases/plan?name=26D_sample.json&budget=1")
+    assert tight["budget"] == 1 and tight["summary"]["selected"] < plan["summary"]["selected"]
+
+    content = base64.b64encode(make_xlsx({"F": ORACLE_ROWS})).decode()
+    upload = {"name": "26C.xlsx", "content": content, "release_id": "26C"}
+    preview = call(a, "POST", "/api/releases/import", upload)
+    assert preview["features"] == 2 and not preview["saved"] and not (tmp_path / ".qm" / "releases").exists()
+    saved = call(a, "POST", "/api/releases/import", {**upload, "save": True})
+    assert saved["saved"] and saved["name"] == "26C.json"
+    assert [r["name"] for r in call(a, "GET", "/api/releases")] == ["26D_sample.json", "26C.json"]
+    assert call(a, "GET", "/api/releases/plan?name=26C.json")["summary"]["features"] == 2
+
+    for path, body, message in (
+        ("/api/releases/plan?name=nope.json", None, "no release list named"),
+        ("/api/releases/plan?name=26C.json&budget=lots", None, "could not convert"),
+        ("/api/releases/import", {**upload, "release_id": ""}, "release id"),
+        ("/api/releases/import", {**upload, "content": "%%%"}, "did not arrive whole"),
+    ):
+        with pytest.raises(ApiError, match=message):
+            a.handle("POST" if body else "GET", path, json.dumps(body or {}).encode())

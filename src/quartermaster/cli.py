@@ -77,6 +77,14 @@ def _run(args: argparse.Namespace) -> int:
         files: list[Path] = sorted(target.rglob("*.y*ml"))  # same order load_tests uses
     else:
         tests, files = [load_test(target)], [target]
+    if args.only:
+        wanted = [t for t in args.only.split(",") if t.strip()]
+        unknown = sorted(set(wanted) - {t.id for t in tests})
+        if unknown:
+            print(f"error: no test with id {', '.join(unknown)} in {target}", file=sys.stderr)
+            return 2
+        pairs = [(t, f) for t, f in zip(tests, files, strict=True) if t.id in wanted]
+        tests, files = [t for t, _ in pairs], [f for _, f in pairs]
     evidence_root = Path(args.evidence)
     suite_started = datetime.now().astimezone().isoformat(timespec="seconds")
     emit = _event_writer(args.events)
@@ -269,7 +277,12 @@ def _serve(args: argparse.Namespace) -> int:
     if not tests.is_dir():
         print(f"error: no tests folder at {tests}", file=sys.stderr)
         return 2
-    app = App(tests_root=tests, evidence_root=Path(args.evidence), data_dir=Path(args.data))
+    app = App(
+        tests_root=tests,
+        evidence_root=Path(args.evidence),
+        data_dir=Path(args.data),
+        releases_root=Path(args.releases),
+    )
     server = make_server(app, port=args.port)
     address = f"http://127.0.0.1:{port_of(server)}"
     app.start()
@@ -330,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
     rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")
     rn.add_argument("--report", help="write JSON results for all runs to this file")
+    rn.add_argument("--only", help="comma-separated test ids: run just these from the folder")
     rn.add_argument("--events", help="append progress events to this file as JSON lines (used by the web service)")
     rn.set_defaults(func=_run)
 
@@ -354,6 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     sv = sub.add_parser("serve", help="start the web UI on this computer")
     sv.add_argument("--tests", default="examples/tests", help="folder holding the test files")
     sv.add_argument("--evidence", default="evidence", help="root folder for run evidence")
+    sv.add_argument("--releases", default="examples/releases", help="folder holding release feature lists")
     sv.add_argument("--data", default=".qm", help="folder for the run history and run logs")
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--no-browser", action="store_true", help="do not open the web browser")

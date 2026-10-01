@@ -32,6 +32,11 @@ export function testName(target) {
   return /\.ya?ml$/.test(target) ? target : `All tests in ${target}`;
 }
 
+// A run's name: the name it was given (e.g. a release impact run), else what it ran.
+export function runName(run) {
+  return run.options?.label || testName(run.target);
+}
+
 // The module a run covered: one test's module, the modules in a folder, or all.
 export function targetModule(target) {
   const inScope = !target || target === "." ? state.tests : state.tests.filter((t) => t.file === target || t.folder === target || t.folder.startsWith(target + "/"));

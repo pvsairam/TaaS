@@ -3,7 +3,7 @@ import {
   STATUS, api, badge, button, callout, card, clock, disclose, drawer, emptyState, h, hideTip, icon, modal, plural, popover,
   remember, s, segmented, shortDate, showTip, statusNode, tabs, toast, token, when,
 } from "./ui.js";
-import {connection, envName, runLink, state, testLink, testName} from "./state.js";
+import {connection, envName, runLink, runName, state, testLink, testName} from "./state.js";
 
 // ------------------------------------------------------------------ badges
 
@@ -145,11 +145,13 @@ export function openPalette(setTheme) {
     {group: "Commands", label: "New run", ic: "plus", hint: "N", go: () => openRunDrawer()},
     {group: "Commands", label: "Run all tests", ic: "runs", go: () => openRunDrawer(".")},
     {group: "Commands", label: "Record a test", ic: "record", go: () => { location.hash = "#/record"; }},
+    {group: "Commands", label: "Import a release feature list", ic: "download", go: () => import("./page-impact.js").then((m) => m.openImport())},
     {group: "Commands", label: "Open Needs attention", ic: "attention", go: () => { location.hash = "#/attention"; }},
     {group: "Commands", label: "Check the pod connection", ic: "refresh", go: () => checkPod().catch((e) => toast(e.message))},
     {group: "Commands", label: "Open the evidence folder", ic: "folder", go: () => api("/api/open", {path: "."}).catch((e) => toast(e.message))},
     {group: "Commands", label: "Switch light or dark", ic: "moon", go: setTheme},
-    ...[["", "Overview", "overview"], ["runs", "Runs", "runs"], ["tests", "Tests", "tests"], ["attention", "Needs attention", "attention"],
+    ...[["", "Overview", "overview"], ["runs", "Runs", "runs"], ["tests", "Tests", "tests"], ["impact", "Release impact", "target"],
+      ["attention", "Needs attention", "attention"],
       ["record", "Record a test", "record"], ["settings", "Settings", "settings"]]
       .map(([id, label, ic]) => ({group: "Pages", label: `Go to ${label}`, ic, go: () => { location.hash = "#/" + id; }})),
     ...modules.map((m) => ({group: "Modules", label: `${m} tests`, ic: "layers", hint: plural(state.tests.filter((t) => t.module === m).length, "test"),
@@ -193,9 +195,9 @@ export function openPalette(setTheme) {
     const failed = runs.find((r) => r.status === "failed" || r.status === "error");
     if (failed) items.splice(2, 0, {group: "Commands", label: "Open the latest failed run", ic: "x", hint: when(failed.created_at),
       go: () => { location.hash = runLink(failed.id); }});
-    items.push(...runs.slice(0, 8).map((r) => ({group: "Runs", label: testName(r.target), ic: "runs",
+    items.push(...runs.slice(0, 8).map((r) => ({group: "Runs", label: runName(r), ic: "runs",
       hint: `${STATUS[r.status]?.label || r.status} · ${when(r.created_at)}`, go: () => { location.hash = runLink(r.id); }})));
-    items.push(...runs.filter((r) => r.summary_url).slice(0, 6).map((r) => ({group: "Evidence", label: `Summary: ${testName(r.target)}`,
+    items.push(...runs.filter((r) => r.summary_url).slice(0, 6).map((r) => ({group: "Evidence", label: `Summary: ${runName(r)}`,
       ic: "download", hint: when(r.created_at), go: () => { location.href = r.summary_url; }})));
     if (list.isConnected) draw();
   }).catch(() => {});
@@ -423,7 +425,7 @@ export function recentActivity(activity) {
   const list = h("ol", {class: "timeline"}, recent.slice(0, 6).map((a) => h("li", {},
     statusNode(a.failed ? "failed" : "passed"),
     h("a", {href: runLink(a.run_id), style: "color:inherit;min-width:0"},
-      h("div", {class: "ellipsis", style: "font-weight:500"}, testName(a.target)),
+      h("div", {class: "ellipsis", style: "font-weight:500"}, a.label || testName(a.target)),
       h("div", {class: "meta"}, `${a.passed} of ${plural(a.total, "test")} passed`, a.release ? ` · ${a.release}` : "")),
     h("span", {class: "meta"}, when(a.at)))));
   if (activity.length < 8) {
