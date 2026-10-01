@@ -506,9 +506,10 @@ document.getElementById("login").addEventListener("submit", (e) => {
   $("pi").onclick = (ev) => {
     ev.preventDefault();
     $("panel").style.display = "none";
-    $("main").innerHTML = '<h1>Personal Information</h1><a href="#" id="comp">My Compensation</a>';
+    // like Redwood's Personal Info cards: a box that reacts to a click, not a link or a button
+    $("main").innerHTML = '<h1>Personal Information</h1><div id="comp" style="cursor:pointer">' +
+      '<div><span>My Compensation</span></div><div>View your salary</div></div>';
     $("comp").onclick = (e2) => {
-      e2.preventDefault();
       $("main").innerHTML = '<h1>My Compensation</h1><h2>Current Salary</h2>';
     };
   };

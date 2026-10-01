@@ -53,7 +53,8 @@ Answer with one JSON object and nothing else:
 through the Navigator menu yourself: menu groups are headers that expand, and their items can be hidden. \
 A group name alone, for example {"do": "navigate", "value": "Me"}, opens that group and lists its pages: \
 use it when a step only names a group, then answer "done" for that step.
-- "click": a button, link, tab or tile from the list, by its number.
+- "click": a button, link, tab or tile from the list, by its number. Elements of kind "text" are cards or \
+tiles that open something when clicked (for example "Employment Info" on Personal Info).
 - "done": the step is already complete on this screen (for example "Login" when signed in, or the page \
 the step asks for is open). A later step may already be done by an earlier navigate.
 - "stuck": the step needs a value the script does not give (blank, or written as <>), needs another \
@@ -98,6 +99,18 @@ SNAPSHOT_JS = r"""() => {
     if (!name || seen.has(role + '|' + name)) continue;
     seen.add(role + '|' + name);
     items.push({role, name});
+  }
+  // Cards and tiles (for example Redwood's Personal Info cards) are often plain boxes that react to
+  // a click: their text shows the hand cursor, but they are not links or buttons.
+  const names = new Set(items.map((it) => it.name));
+  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, h6, span, div, p, li, td, label')) {
+    if (items.length >= 150) break;
+    if (el.children.length || !vis(el) || inToolbar(el) || el.closest(sel)) continue;
+    if (getComputedStyle(el).cursor !== 'pointer') continue;
+    const name = clean(el.innerText);
+    if (name.length < 2 || name.length > 60 || names.has(name)) continue;
+    names.add(name);
+    items.push({role: 'text', name});
   }
   const heads = [...document.querySelectorAll('h1, h2, h3, [role=heading]')].filter(vis)
     .map((e) => clean(e.innerText)).filter(Boolean);
@@ -161,6 +174,10 @@ class Autopilot:
             if not done:
                 self._note(f"\nStep {number}: {step['action']}")
             self._note(f"  Screen: {screen.get('title', '')} ({len(screen.get('items', []))} things to click or fill)")
+            self._note(
+                "  Shown: "
+                + " | ".join(f"[{i}] {it['role']} {it['name']}" for i, it in enumerate(screen.get("items", []), 1))
+            )
             self._say(f"Step {number}: asking the AI what to do" + (f" (try {len(done) + 1})" if done else ""))
             try:
                 answer = self.ask(SYSTEM, self._prompt(number, total, step, done, screen))
@@ -191,6 +208,7 @@ class Autopilot:
             if refusal:
                 return self._stuck(number, refusal)
             self._say(f'Step {number}: {what} {item["role"]} "{item["name"]}"{f" ({why})" if why else ""}')
+            self._note(f'  Doing: {what} {item["role"]} "{item["name"]}"')
             action = f'{what} {item["role"]} "{item["name"]}"' + (f' = "{value}"' if value else "")
             try:
                 self._act(what, item, value)
