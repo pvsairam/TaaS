@@ -26,8 +26,9 @@ FIELDS = {
     "ai_model": 120,
     "ai_base_url": 300,
     "ai_key_env": 80,
+    "ai_workspace": 100,
 }
-_AI = ("ai_provider", "ai_model", "ai_base_url", "ai_key_env")
+_AI = ("ai_provider", "ai_model", "ai_base_url", "ai_key_env", "ai_workspace")
 _RELEASE = re.compile(r"^[A-Za-z0-9 ._-]*$")
 
 

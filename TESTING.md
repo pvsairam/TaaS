@@ -226,6 +226,11 @@ again after you restart `qm serve`. To keep it across restarts, set it on the co
 like the pod password, before starting: `$env:OPENAI_API_KEY="your key"` (the variable name for
 each provider is under **Advanced**). Ollama on your own computer needs no key.
 
+If Anthropic answers "This API key is not scoped to a workspace": open the Anthropic Console,
+go to Workspaces and copy the workspace ID (it starts with `wrkspc_`). In Settings, open
+**Advanced**, paste it in **Workspace ID**, click **Save**, then **Test the AI** again. Or make a
+new key inside a workspace in the Console; then the ID is not needed.
+
 Any provider that offers an OpenAI-compatible service works: choose **Other** and enter its
 address. What is sent to the AI: the written steps and the names of the buttons, links and
 headings on the pod screen; e-mail addresses and long numbers are hidden first. Never typed

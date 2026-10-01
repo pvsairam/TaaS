@@ -34,6 +34,22 @@ class FakeProvider(BaseHTTPRequestHandler):
         FakeProvider.seen.append(
             {"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}, "body": body}
         )
+        if self.headers.get("x-api-key") == "unscoped" and not self.headers.get("anthropic-workspace-id"):
+            data = json.dumps(
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "This API key is not scoped to a workspace, so this request must include"
+                        " the anthropic-workspace-id header with the ID of the workspace to use.",
+                    },
+                }
+            ).encode()
+            self.send_response(400)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.headers.get("x-api-key") == "bad" or self.headers.get("Authorization") == "Bearer bad":
             self.send_response(401)
             self.end_headers()
@@ -85,6 +101,23 @@ def test_any_openai_compatible_provider_and_anthropic(server: str, monkeypatch: 
     with pytest.raises(AIError, match="refused the key"):
         chat(openai_like, "sys", "hi")
     assert providers.check(openai_like)["ok"] is False
+
+
+def test_an_anthropic_key_not_tied_to_a_workspace(server: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MY_KEY", "unscoped")
+    claude = AIConfig("anthropic", "claude-sonnet-5-5", server, "MY_KEY")
+    with pytest.raises(AIError, match="Workspace ID in Settings"):
+        chat(claude, "sys", "hi")
+    config = config_from(
+        {"ai_provider": "anthropic", "ai_base_url": server, "ai_key_env": "MY_KEY", "ai_workspace": "wrkspc_01X"}
+    )
+    assert chat(config, "sys", "hi") == "OK from claude"
+    assert FakeProvider.seen[-1]["headers"]["anthropic-workspace-id"] == "wrkspc_01X"
+    # only Anthropic uses it; other providers never get the header
+    assert config_from({"ai_provider": "openai", "ai_workspace": "wrkspc_01X"}).workspace == ""
+    assert check_settings({"ai_workspace": " wrkspc_01X "}) == {"ai_workspace": "wrkspc_01X"}
+    with pytest.raises(ValueError, match="workspace ID"):
+        check_settings({"ai_workspace": "wrk space"})
 
 
 def test_settings_choose_a_provider_but_never_store_a_key() -> None:

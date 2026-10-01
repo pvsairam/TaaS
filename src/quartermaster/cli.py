@@ -261,7 +261,7 @@ def _prepare(args: argparse.Namespace, driver: Any, recorder: Any, env: Environm
         print("error: --prepare needs --guide (the scenario to prepare)", file=sys.stderr)
         driver.close()
         return 2
-    config = AIConfig(args.ai_provider, args.ai_model, args.ai_base_url.rstrip("/"), args.ai_key_env)
+    config = AIConfig(args.ai_provider, args.ai_model, args.ai_base_url.rstrip("/"), args.ai_key_env, args.ai_workspace)
     problem = config.problem()
     if problem:
         print(f"error: {problem}", file=sys.stderr)
@@ -530,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--ai-model", default="")
     rc.add_argument("--ai-base-url", default="")
     rc.add_argument("--ai-key-env", default="", help="NAME of the environment variable with the AI key")
+    rc.add_argument("--ai-workspace", default="", help="Anthropic only: workspace ID, for a key not tied to one")
     rc.set_defaults(func=_record)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")

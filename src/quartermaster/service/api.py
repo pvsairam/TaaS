@@ -292,11 +292,12 @@ class App:
             "model": config.model,
             "base_url": config.base_url,
             "key_env": config.key_env,
+            "workspace": config.workspace,
             "key_set": bool(config.key()),
             "label": config.label if config.provider else "",
             "problem": config.problem() if config.provider else "No AI provider is chosen.",
             "presets": [
-                {"id": k, "label": v[0], "base_url": v[2], "key_env": v[3], "model": v[4]}
+                {"id": k, "label": v[0], "format": v[1], "base_url": v[2], "key_env": v[3], "model": v[4]}
                 for k, v in ai_providers.PRESETS.items()
             ],
         }
@@ -320,6 +321,7 @@ class App:
                 "model": config.model,
                 "base_url": config.base_url,
                 "key_env": config.key_env,
+                "workspace": config.workspace,
             }
             state = self.recording.start_guided(
                 scenario, test_id=self.manual.test_id(scenario["id"]), rel_file=rel, release=release, ai=ai

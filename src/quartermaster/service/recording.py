@@ -21,7 +21,17 @@ from quartermaster.service.store import now
 RecordCommandBuilder = Callable[[Path, dict[str, str], Path, Path], list[str]]
 COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop", "result")
 # Extra settings for doing a manual scenario by hand (see qm record --guide).
-GUIDE_FIELDS = ("guide", "process", "release", "tester", "ai_provider", "ai_model", "ai_base_url", "ai_key_env")
+GUIDE_FIELDS = (
+    "guide",
+    "process",
+    "release",
+    "tester",
+    "ai_provider",
+    "ai_model",
+    "ai_base_url",
+    "ai_key_env",
+    "ai_workspace",
+)
 
 FIELDS = ("id", "title", "module", "product", "persona")
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -88,7 +98,7 @@ class Recording:
         ai: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Do a manual scenario by hand: the tester marks each step Pass or Fail while the clicks are
-        recorded. With `ai` (provider, model, base_url, key_env) an AI does the steps instead and the
+        recorded. With `ai` (provider, model, base_url, key_env, workspace) an AI does the steps instead and the
         result is a draft to review. Saving replaces the scenario's earlier recording, if any."""
         out = (self.tests_root / rel_file).resolve()
         if self.tests_root not in out.parents:

@@ -48,6 +48,7 @@ PRESETS: dict[str, tuple[str, str, str, str, str]] = {
     "custom": ("Other (OpenAI-compatible)", "openai", "", "QM_AI_API_KEY", ""),
 }
 _ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,80}$")
+_WORKSPACE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
 
 class AIError(RuntimeError):
@@ -60,6 +61,7 @@ class AIConfig:
     model: str
     base_url: str
     key_env: str
+    workspace: str = ""  # Anthropic only: the workspace ID, for a key that is not tied to one
 
     @property
     def label(self) -> str:
@@ -94,6 +96,7 @@ def config_from(settings: dict[str, Any]) -> AIConfig:
         model=str(settings.get("ai_model") or preset[4]),
         base_url=str(settings.get("ai_base_url") or preset[2]).rstrip("/"),
         key_env=str(settings.get("ai_key_env") or preset[3]),  # Ollama needs none
+        workspace=str(settings.get("ai_workspace") or "") if preset[1] == "anthropic" else "",
     )
 
 
@@ -117,6 +120,11 @@ def check_settings(changes: dict[str, Any]) -> dict[str, str]:
         if name and not _ENV.match(name):
             raise ValueError("the key setting is the NAME of an environment variable, e.g. OPENAI_API_KEY")
         out["ai_key_env"] = name
+    if "ai_workspace" in changes:
+        ws = str(changes["ai_workspace"] or "").strip()
+        if ws and not _WORKSPACE.match(ws):
+            raise ValueError("the workspace ID has letters, digits, _ and - only, e.g. wrkspc_01AbC...")
+        out["ai_workspace"] = ws
     return out
 
 
@@ -130,6 +138,8 @@ def chat(config: AIConfig, system: str, prompt: str, *, max_tokens: int = 800, t
     if config.format == "anthropic":
         url = f"{config.base_url}/messages"
         headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+        if config.workspace:
+            headers["anthropic-workspace-id"] = config.workspace
         body: dict[str, Any] = {
             "model": config.model,
             "max_tokens": max_tokens,
@@ -172,6 +182,12 @@ def _post(url: str, body: dict[str, Any], headers: dict[str, str], timeout: floa
                 continue
             if e.code in (401, 403):
                 raise AIError("The AI provider refused the key. Check the key and that it is for this provider.") from e
+            if "scoped to a workspace" in detail:
+                raise AIError(
+                    "Anthropic wants to know which workspace this key is for. Either make a key inside a"
+                    " workspace in the Anthropic Console, or enter the Workspace ID in Settings, AI"
+                    " assistant, Advanced."
+                ) from e
             if e.code == 404:
                 raise AIError(f"The AI provider does not know this model or address ({detail}).") from e
             raise AIError(f"The AI provider answered with an error ({e.code}): {detail}") from e

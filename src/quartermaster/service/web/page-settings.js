@@ -80,6 +80,10 @@ function aiCard(ai) {
   const key = input({type: "password", autocomplete: "off", placeholder: ai.key_set ? "Saved (hidden). Paste a new key to change it" : "Paste your API key", "aria-label": "API key"});
   const baseUrl = input({value: ai.provider ? ai.base_url : "", placeholder: "https://…", maxlength: "300"});
   const keyEnv = input({value: ai.provider ? ai.key_env : "", placeholder: "e.g. OPENAI_API_KEY", maxlength: "80"});
+  const workspace = input({value: ai.workspace || "", placeholder: "e.g. wrkspc_01…", maxlength: "100"});
+  const workspaceRow = h("div", {}, field("Workspace ID (Anthropic only)", workspace,
+    "Only needed if Anthropic says the key is not scoped to a workspace. Find it in the Anthropic Console, under Workspaces.", "ai-workspace"));
+  const drawWorkspace = () => { workspaceRow.style.display = presets[provider.value]?.format === "anthropic" ? "" : "none"; };
   let previous = presets[ai.provider];
   const keyRow = h("div", {});
   const drawKeyRow = () => {
@@ -95,16 +99,18 @@ function aiCard(ai) {
     }
     previous = p;
     drawKeyRow();
+    drawWorkspace();
   };
   const keyNote = ai.key_source === "entered" ? "A key is saved. It is kept in memory only: paste it again after you restart Quartermaster."
     : ai.key_source === "computer" ? `A key is set on this computer (${ai.key_env}).` : "Kept in memory only, until Quartermaster stops. Never written to a file or shown again.";
   keyRow.append(field("API key", key, keyNote, "ai-key-value"));
   drawKeyRow();
+  drawWorkspace();
   const result = h("div", {class: "meta", role: "status", "aria-live": "polite"});
   const save = button("Save", {kind: "primary", onClick: async (e) => {
     e.currentTarget.disabled = true;
     try {
-      await api("/api/settings", {ai_provider: provider.value, ai_model: model.value.trim(), ai_base_url: baseUrl.value.trim(), ai_key_env: keyEnv.value.trim()});
+      await api("/api/settings", {ai_provider: provider.value, ai_model: model.value.trim(), ai_base_url: baseUrl.value.trim(), ai_key_env: keyEnv.value.trim(), ai_workspace: workspace.value.trim()});
       if (key.value.trim()) await api("/api/ai/key", {key: key.value.trim()});
       key.value = "";
       toast("Saved.");
@@ -132,9 +138,10 @@ function aiCard(ai) {
         h("span", {class: `icon-tile tone-${ai.problem ? "danger" : "success"}`}, icon(ai.problem ? "x" : "check")),
         h("span", {class: "meta"}, ai.problem || `Ready: ${ai.label}.${ai.key_env ? " Key saved (hidden)." : ""}`)) : null,
       h("div", {class: "row"}, save, test, forget), result,
-      h("details", {class: "disclose"}, h("summary", {}, icon("right"), "Advanced: web address and key variable"),
+      h("details", {class: "disclose"}, h("summary", {}, icon("right"), "Advanced: web address, key variable, workspace"),
         h("div", {class: "fields", style: "margin-top:12px"},
           h("div", {class: "wide"}, field("Web address", baseUrl, "Filled in for the providers in the list. For Other, use the provider's OpenAI-compatible address.", "ai-url")),
-          field("Key variable", keyEnv, "Instead of pasting the key, you can set this variable on the computer before starting qm serve; then it is remembered after a restart.", "ai-key"))),
+          field("Key variable", keyEnv, "Instead of pasting the key, you can set this variable on the computer before starting qm serve; then it is remembered after a restart.", "ai-key"),
+          h("div", {class: "wide"}, workspaceRow))),
       h("p", {class: "hint"}, "What is sent to the AI: the scenario's written steps and the names of the buttons, links and headings on the pod screen. E-mail addresses and long numbers are hidden first. Never typed values, never the pod password. Use a test pod."))});
 }
