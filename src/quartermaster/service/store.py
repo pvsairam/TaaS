@@ -59,6 +59,23 @@ class Store:
             )
         return self.get(run_id) or {}
 
+    def add_finished(self, target: str, options: dict[str, Any], **fields: Any) -> dict[str, Any]:
+        """Remember a run that has already ended (a manual scenario done by hand), never queued."""
+        run = self.create_with_status(target, options, str(fields.pop("status", "error")))
+        self.update(run["id"], **fields)
+        return self.get(run["id"]) or {}
+
+    def create_with_status(self, target: str, options: dict[str, Any], status: str) -> dict[str, Any]:
+        if status not in FINISHED:
+            raise ValueError(f"not a finished status: {status}")
+        run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2).upper()}"
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT INTO runs (id, target, options, status, created_at) VALUES (?, ?, ?, ?, ?)",
+                (run_id, target, json.dumps(options), status, now()),
+            )
+        return self.get(run_id) or {}
+
     def update(self, run_id: str, **fields: Any) -> None:
         if not fields:
             return

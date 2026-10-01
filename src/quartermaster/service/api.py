@@ -27,6 +27,8 @@ computers and other web sites cannot start runs.
     GET  /api/manual/scenario?id=<id>   one manual scenario with its test cases and steps
     POST /api/manual/import          {"files": [{"name", "content" (base64), "module", "product"}], "save"}
     POST /api/manual/remove          {"key"} forget one imported workbook
+    POST /api/manual/run             {"id", "by_hand", "release", "tester"} run a scenario: it plays by itself
+                                     once it has been done by hand; otherwise it is done by hand now
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -110,6 +112,7 @@ class App:
         self.pod_check: dict[str, Any] | None = None
         self.releases = Releases(releases_root, data_dir / "releases")
         self.manual = ManualScripts(data_dir / "manual")
+        self.recording.on_manual_done = self._manual_done
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -185,7 +188,7 @@ class App:
                 return _json(self._run_view(self.queue.cancel(run["id"]) or run))
         if route[:1] == ["recording"]:
             if method == "GET" and len(route) == 1:
-                return _json(self.recording.state())
+                return _json(self._recording_view())
             if method == "POST" and len(route) == 1:
                 try:
                     return _json(self.recording.start(data), HTTPStatus.CREATED)
@@ -225,9 +228,15 @@ class App:
     def _manual(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
         try:
             if method == "GET" and not route:
-                return _json(self.manual.summary())
+                summary = self.manual.summary()
+                self._with_results(summary["scenarios"])
+                return _json(summary)
             if method == "GET" and route == ["scenario"]:
-                return _json(self.manual.get(str((query.get("id") or [""])[0])))
+                scenario = self.manual.get(str((query.get("id") or [""])[0]))
+                self._with_results([scenario], history=True)
+                return _json(scenario)
+            if method == "POST" and route == ["run"]:
+                return _json(self.run_manual(data), HTTPStatus.CREATED)
             if method == "POST" and route == ["import"]:
                 return _json(self.manual.import_files(data))
             if method == "POST" and route == ["remove"]:
@@ -237,6 +246,73 @@ class App:
         except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    # ------------------------------------------------------------------ manual scenarios run
+
+    def run_manual(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Once a scenario has been done by hand, Run plays it by itself; before that (or when asked
+        with by_hand) the tester does it by hand while Quartermaster takes pictures and records."""
+        scenario = self.manual.get(str(data.get("id") or ""))
+        rel = self.manual.test_file(scenario["id"])
+        release = str(data.get("release") or self.settings.get()["release"] or "").strip()
+        tester = str(data.get("tester") or "").strip()
+        if (self.tests_root / rel).is_file() and not data.get("by_hand"):
+            options = {"label": f"Automatic: {scenario['title']}"[:80], "release": release, "tester": tester}
+            return {"mode": "automatic", "run": self._run_view(self.queue.submit(rel, options))}
+        state = self.recording.start_guided(
+            scenario, test_id=self.manual.test_id(scenario["id"]), rel_file=rel, release=release, tester=tester
+        )
+        return {"mode": "by_hand", "recording": state}
+
+    def _manual_done(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        """A scenario done by hand has been saved: put it in the run history like any other run."""
+        if not state.get("suite_dir"):
+            return None
+        options = {
+            **DEFAULT_OPTIONS,
+            "release": state.get("release", ""),
+            "tester": state.get("tester", ""),
+            "headed": True,
+            "label": f"By hand: {state.get('title', '')}"[:80],
+        }
+        return self.queue.store.add_finished(
+            str(state.get("file", "")),
+            options,
+            status="passed" if state.get("result") == "passed" else "failed",
+            started_at=state.get("started_at"),
+            finished_at=state.get("finished_at"),
+            suite_dir=state.get("suite_dir"),
+            summary=state.get("summary") or None,
+        )
+
+    def _recording_view(self) -> dict[str, Any]:
+        state = self.recording.state()
+        feed = state.get("feed") or {}
+        folder = self._relative(feed.get("guide_folder"))
+        for step in feed.get("guide") or []:
+            picture = step.get("picture")
+            step["picture_url"] = self._url_rel(f"{folder}/{picture}") if folder and picture else None
+        if state.get("run_id"):
+            run = self.queue.store.get(str(state["run_id"]))
+            results = self._suite_results(run) if run else []
+            state["document_url"] = results[0]["document_url"] if results else None
+        return state
+
+    def _with_results(self, scenarios: list[dict[str, Any]], history: bool = False) -> None:
+        """Each scenario's own results in Quartermaster (not what the workbook says): the latest, and
+        whether it now plays by itself."""
+        runs = self.queue.store.list(limit=500)
+        results = insights.test_results(runs)
+        by_test: dict[str, list[dict[str, Any]]] = {}
+        for r in results:
+            by_test.setdefault(r["test_id"], []).append(r)
+        for s in scenarios:
+            mine = by_test.get(self.manual.test_id(str(s.get("id", ""))), [])
+            s["automated"] = (self.tests_root / self.manual.test_file(str(s.get("id", "")))).is_file()
+            s["test_file"] = self.manual.test_file(str(s.get("id", "")))
+            s["qm_result"] = _result_view(mine[0]) if mine else None
+            if history:
+                s["qm_history"] = [_result_view(r) for r in mine[:20]]
 
     # ------------------------------------------------------------------ views
 
@@ -511,6 +587,16 @@ class App:
         if not isinstance(data, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "the request must be a JSON object")
         return data
+
+
+def _result_view(r: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": r.get("status"),
+        "at": r.get("at"),
+        "run_id": r.get("service_run_id"),
+        "release": r.get("release"),
+        "by_hand": r.get("mode") == "manual",
+    }
 
 
 def _fill(text: str, data: dict[str, Any]) -> str:

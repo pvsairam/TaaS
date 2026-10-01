@@ -32,6 +32,7 @@ def events_to_test(
     product: str,
     persona: str = "",
     priority: Priority = Priority.MEDIUM,
+    process: str = "",
 ) -> TestCase:
     """Turn captured events into a test (conversion rules: `recorder.steps`)."""
     steps, data = events_to_steps(events, secret_prefix(test_id))
@@ -44,6 +45,7 @@ def events_to_test(
             "module": module,
             "product": product,
             "persona": persona,
+            "process": process,
             "priority": priority,
             "tags": ["recorded"],
             "data": data,
@@ -99,6 +101,7 @@ class Recorder:
         note <text>         what should happen at the last step (its expected result)
         mask                do not save the last typed value; replay reads it from an
                             environment variable instead
+        result <n> pass|fail [note]   doing a manual scenario by hand: mark step n (see Guide)
         stop (or an empty line)
 
     With a `feed` file, the steps so far are written there after every change (the web UI
@@ -117,6 +120,7 @@ class Recorder:
         self._paused_total = 0.0
         self._paused_at: float | None = None
         self._paused_since = ""
+        self.guide: Any = None  # a Guide when a manual scenario is being done by hand
         self.write_feed()
 
     def _receive(self, payload: dict[str, Any]) -> None:
@@ -175,6 +179,8 @@ class Recorder:
             else:
                 self.events.append({"kind": "note", "value": text})
                 self.message = "Note added to the last step."
+        elif word == "result" and self.guide is not None:
+            self.message = self.guide.mark(rest, self._page)
         elif word == "mask":
             typed = [e for e in self.events if e.get("kind") in ("fill", "select")]
             if typed:
@@ -207,6 +213,9 @@ class Recorder:
             "message": self.message,
             "stopped": self.stopped,
         }
+        if self.guide is not None:
+            snapshot["guide"] = self.guide.state()
+            snapshot["guide_folder"] = str(self.guide.run_dir)
         self.feed.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.feed.with_suffix(".tmp")
         tmp.write_text(json.dumps(snapshot), encoding="utf-8")

@@ -3,10 +3,27 @@
 import {
   api, badge, button, callout, chips, drawer, emptyState, h, icon, input, plural, popover, statusBadge, table, toast, when,
 } from "./ui.js";
-import {loadCommon, state} from "./state.js";
+import {loadCommon, runLink, state} from "./state.js";
 import {show} from "./app.js";
 
 const filters = {q: "", module: "all"};
+
+// Run a scenario: by hand the first time (or when asked), by itself once it has been done by hand.
+export async function runScenario(id, {byHand = false} = {}) {
+  if (!state.status?.ready) { toast("Set up the pod and its sign-in in Settings first."); return; }
+  try {
+    const r = await api("/api/manual/run", {id, by_hand: byHand});
+    document.querySelector(".scrim")?.click(); // close the scenario panel, if open
+    location.hash = r.mode === "automatic" ? runLink(r.run.id) : "#/manual-run";
+  } catch (err) { toast(err.message); }
+}
+
+function resultCell(s) {
+  if (!s.qm_result) return h("span", {class: "muted"}, "Not run yet");
+  const r = s.qm_result;
+  return h("a", {href: runLink(r.run_id), style: "color:inherit;text-decoration:none", class: "stack", title: "Open the run"},
+    statusBadge(r.status), h("span", {class: "sub"}, `${r.by_hand ? "By hand" : "By itself"} · ${when(r.at)}`));
+}
 
 export function manualLink(id) {
   return "#/tests?view=manual&open=" + encodeURIComponent(id);
@@ -39,14 +56,16 @@ export async function manualPage() {
         {label: "Module", render: (s) => [h("div", {}, s.module), h("div", {class: "sub"}, s.product)]},
         {label: "Cases", cls: "num", render: (s) => s.case_count},
         {label: "Steps", cls: "num", render: (s) => s.step_count},
-        // Only what someone typed in the workbook's Pass / Fail column; Quartermaster has not run these.
-        {label: "Result in workbook", render: (s) => s.status
-          ? h("span", {title: `Typed in the workbook${s.tester ? ` by ${s.tester}` : ""}. Not a Quartermaster run.`},
-            statusBadge(s.status, s.status === "passed" ? "Pass in workbook" : "Fail in workbook"))
-          : h("span", {class: "muted"}, "None")},
+        {label: "Result", render: resultCell},
+        // What someone typed in the workbook's Pass / Fail column is only a note: Quartermaster did not run it.
         {label: "Notes", render: (s) => h("div", {class: "row", style: "gap:4px"},
           s.blank_data ? badge("Test data missing", "warning") : null,
-          s.releases?.length ? badge(`Workbook: ${s.releases.join(", ")}`, "neutral") : null)},
+          s.status ? h("span", {title: `Typed in the workbook${s.tester ? ` by ${s.tester}` : ""}. Not a Quartermaster run.`},
+            badge(`Workbook: ${s.status === "passed" ? "Pass" : "Fail"}${s.releases?.length ? ` (${s.releases.join(", ")})` : ""}`, "neutral")) : null)},
+        {srLabel: "Run", cls: "actions", render: (s) => button(s.automated ? "Run" : "Run by hand", {size: "sm", kind: s.automated ? "" : "primary",
+          ic: "play", disabled: !state.status.ready,
+          title: s.automated ? `Plays ${s.title} by itself` : `Do ${s.title} by hand; next time it plays by itself`,
+          onClick: () => runScenario(s.id)})},
       ],
     }) : emptyState(all.length
       ? {ic: "search", title: "No scenarios match", text: "Try another search or module."}
@@ -100,8 +119,16 @@ export async function openScenario(id) {
   ].filter(Boolean);
   drawer({
     title: s.title,
-    sub: `${plural(s.case_count, "test case")} · ${plural(s.step_count, "step")} · manual: follow the steps on the pod`,
+    sub: `${plural(s.case_count, "test case")} · ${plural(s.step_count, "step")}`,
+    foot: () => [
+      h("span", {class: "meta grow"}, s.automated ? "Done by hand before: Run plays it by itself." : "Run it once by hand; after that it plays by itself."),
+      s.automated ? button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}) : null,
+      button(s.automated ? "Run" : "Run by hand", {kind: "primary", ic: "play", disabled: !state.status.ready, onClick: () => runScenario(s.id)}),
+    ],
     body: () => [
+      s.qm_history?.length ? h("div", {}, h("div", {class: "caption", style: "margin-bottom:6px"}, "RESULTS IN QUARTERMASTER"),
+        h("div", {class: "stack", style: "gap:6px"}, s.qm_history.slice(0, 5).map((r) => h("a", {href: runLink(r.run_id), class: "row", style: "gap:8px;color:inherit"},
+          statusBadge(r.status), h("span", {class: "meta"}, `${r.by_hand ? "By hand" : "By itself"} · ${when(r.at)}${r.release ? ` · ${r.release}` : ""}`))))) : null,
       s.status ? callout("info", `The workbook says ${s.status === "passed" ? "Pass" : "Fail"}.`,
         `Someone typed this in its Pass / Fail column${s.tester ? ` (tester ${s.tester})` : ""}${s.releases?.length ? `, for ${s.releases.join(" and ")}` : ""}. Quartermaster has not run this scenario.`) : null,
       h("dl", {class: "kv"}, facts.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),

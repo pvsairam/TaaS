@@ -212,6 +212,12 @@ def _record(args: argparse.Namespace) -> int:
 
     driver = PlaywrightDriver(headless=False, evidence_dir=args.evidence)
     recorder = Recorder(feed=Path(args.events) if args.events else None, test_id=args.id)
+    run_id = new_run_id()
+    if args.guide:  # a manual scenario done by hand: Pass or Fail per step, with a picture each
+        from quartermaster.recorder.guided import Guide
+
+        recorder.guide = Guide.load(Path(args.guide), run_folder(Path(args.evidence), args.id, run_id))
+        recorder.write_feed()
     driver.open(env, args.persona)  # sign-in is done for you and never recorded
     try:
         recorder.attach(driver.page)
@@ -223,6 +229,8 @@ def _record(args: argparse.Namespace) -> int:
     finally:
         driver.close()
 
+    if recorder.guide is not None:
+        return _finish_by_hand(args, recorder, env, run_id)
     test = events_to_test(
         recorder.events,
         test_id=args.id,
@@ -239,6 +247,70 @@ def _record(args: argparse.Namespace) -> int:
     secrets = [v[6:-1] for v in test.data.values() if v.startswith("${env:")]
     if secrets:
         print("Masked values were not saved. Before running it, set: " + ", ".join(secrets))
+    return 0
+
+
+def _finish_by_hand(args: argparse.Namespace, recorder: Any, env: Environment, run_id: str) -> int:
+    """Save a manual scenario done by hand: the evidence of what the tester marked (run record, Word
+    document, suite record and summary, as for `qm run`), and the clicks as a test that can play by
+    itself next time."""
+    from quartermaster.recorder.recorder import events_to_test, to_yaml
+
+    guide = recorder.guide
+    if not guide.marked:
+        print("error: no step was marked Pass or Fail, so nothing was saved", file=sys.stderr)
+        return 2
+    out: Path | None = Path(args.out)
+    try:
+        test = events_to_test(
+            recorder.events,
+            test_id=args.id,
+            title=args.title,
+            module=args.module,
+            product=args.product,
+            persona=args.persona,
+            process=args.process or "",
+        )
+    except ValueError:
+        print("No clicks were recorded, so the automatic version was not saved.")
+        out = None
+    else:
+        assert out is not None
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(to_yaml(test), encoding="utf-8")
+        load_test(out)
+        print(f"Saved {len(test.steps)} step(s) to {out}. Replay with: qm run {out}")
+
+    evidence_root = Path(args.evidence)
+    run_dir = guide.run_dir
+    result = guide.result(
+        test_id=args.id,
+        title=args.title,
+        environment=env.name,
+        environment_url=env.url,
+        release=args.release,
+        run_id=run_id,
+    )
+    record = build_record(result, run_dir=run_dir, test_file=out, video_mode="off", videos=[], executed_by=args.tester)
+    record["mode"] = "manual"  # done by a person; the document says so
+    write_record(record, run_dir)
+    doc = write_evidence_document(record, run_dir, run_dir / f"{args.id}_{run_id}_evidence.docx")
+    suite_id = new_run_id()
+    suite = build_suite_record(
+        [(record, run_dir, doc)],
+        suite_id=suite_id,
+        evidence_root=evidence_root,
+        target=str(out or args.out),
+        started_at=result.started_at or "",
+        finished_at=result.finished_at or "",
+    )
+    suite_dir = suite_folder(evidence_root, suite_id)
+    write_suite_record(suite, suite_dir)
+    summary = write_suite_document(suite, evidence_root, suite_dir / f"suite_{suite_id}_summary.docx")
+    print(f"Evidence document: {doc}")
+    print(f"Manual run: {suite_dir}")
+    print(f"Summary document: {summary}")
+    print(f"Result: {result.status.value}")
     return 0
 
 
@@ -363,6 +435,10 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--env-name", default="fusion")
     rc.add_argument("--evidence", default="evidence")
     rc.add_argument("--events", help="keep the steps recorded so far in this file (used by the web UI)")
+    rc.add_argument("--guide", help="a manual scenario (JSON) to do by hand, marking each step Pass or Fail")
+    rc.add_argument("--process", help="what the test is part of, e.g. Manual scenario ESS-001")
+    rc.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
+    rc.add_argument("--tester", help="name shown as 'Run by' in the evidence")
     rc.set_defaults(func=_record)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")

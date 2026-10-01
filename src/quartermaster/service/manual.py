@@ -87,6 +87,18 @@ class ManualScripts:
             scenarios.extend({k: v for k, v in s.items() if k not in ("cases", "fields")} for s in items)
         return {"files": files, "scenarios": scenarios}
 
+    @staticmethod
+    def test_id(scenario_id: str) -> str:
+        """The id of the automated test a scenario becomes once done by hand, e.g. manual.ess-test-script.ess-001."""
+        key, _, ref = scenario_id.partition("/")
+        return f"manual.{slug(key)}.{slug(ref)}"
+
+    @staticmethod
+    def test_file(scenario_id: str) -> str:
+        """Where that test is kept, inside the tests folder."""
+        key, _, ref = scenario_id.partition("/")
+        return f"manual/{slug(key)}/{slug(ref)}.yaml"
+
     def get(self, scenario_id: str) -> dict[str, Any]:
         for s in self.scenarios():
             if s.get("id") == scenario_id:

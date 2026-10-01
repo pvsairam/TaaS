@@ -244,6 +244,7 @@ def _entry(record: dict[str, Any], run_dir: Path, doc: Path | None, evidence_roo
         "duration": _duration(record.get("started_at"), record.get("finished_at")),
         "failed_step": None,
         "healing": record.get("healing", []),
+        "mode": record.get("mode", "automatic"),  # "manual": done by hand by a tester
     }
     if failed:
         shots = failed.get("evidence") or []

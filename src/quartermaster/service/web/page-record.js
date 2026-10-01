@@ -12,6 +12,7 @@ export async function recordPage() {
   if (!state.status || !ws) await loadCommon();
   const rec = await api("/api/recording");
   if (state.page !== "record") return;
+  if (rec.mode === "manual" && (rec.status === "recording" || rec.status === "saving")) { location.hash = "#/manual-run"; return; }
   const crumbs = [{label: "Record a test"}];
   if (rec.status === "recording" || rec.status === "saving") {
     if (!ws || !ws.el.isConnected) {
@@ -81,6 +82,7 @@ function howItWorks() {
 }
 
 function outcome(rec) {
+  if (rec.mode === "manual") return null; // a manual scenario done by hand has its own page
   if (rec.status === "saved") {
     return h("div", {style: "margin-bottom:16px"}, card({body: h("div", {class: "stack", style: "gap:12px"},
       h("div", {class: "row"}, statusBadge("passed", "Saved"), h("strong", {}, rec.title),

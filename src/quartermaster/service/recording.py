@@ -19,7 +19,9 @@ from typing import Any
 from quartermaster.service.store import now
 
 RecordCommandBuilder = Callable[[Path, dict[str, str], Path, Path], list[str]]
-COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop")
+COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop", "result")
+# Extra settings for doing a manual scenario by hand (see qm record --guide).
+GUIDE_FIELDS = ("guide", "process", "release", "tester")
 
 FIELDS = ("id", "title", "module", "product", "persona")
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -28,7 +30,7 @@ _ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 def qm_record_command(out: Path, fields: dict[str, str], evidence_root: Path, feed: Path) -> list[str]:
     cmd = [sys.executable, "-m", "quartermaster.cli", "record", str(out), "--evidence", str(evidence_root)]
     cmd += ["--events", str(feed)]
-    for key in FIELDS:
+    for key in (*FIELDS, *GUIDE_FIELDS):
         if fields.get(key):
             cmd += [f"--{key}", fields[key]]
     return cmd
@@ -66,9 +68,46 @@ class Recording:
         self._proc: subprocess.Popen[bytes] | None = None
         self._state: dict[str, Any] = {"status": "idle"}
         self.feed = work_dir / "feed.json"
+        # Called with the final state when a manual scenario done by hand has been saved.
+        self.on_manual_done: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         out, fields = check_request(request, self.tests_root)
+        return self._launch(out, fields, {})
+
+    def start_guided(
+        self, scenario: dict[str, Any], *, test_id: str, rel_file: str, release: str = "", tester: str = ""
+    ) -> dict[str, Any]:
+        """Do a manual scenario by hand: the tester marks each step Pass or Fail while the clicks are
+        recorded. Saving replaces the scenario's earlier recording, if any."""
+        out = (self.tests_root / rel_file).resolve()
+        if self.tests_root not in out.parents:
+            raise ValueError("the file must be inside the tests folder")
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        guide = self.work_dir / "guide.json"
+        guide.write_text(json.dumps(scenario), encoding="utf-8")
+        fields = {
+            "id": test_id,
+            "title": str(scenario.get("title") or scenario.get("ref") or test_id)[:200],
+            "module": str(scenario.get("module") or "Manual"),
+            "product": str(scenario.get("product") or "Manual"),
+            "persona": "",
+            "guide": str(guide),
+            "process": f"Manual scenario {scenario.get('ref', '')}".strip(),
+            "release": release.strip()[:20],
+            "tester": tester.strip()[:60],
+        }
+        extra = {
+            "mode": "manual",
+            "scenario_id": scenario.get("id"),
+            "ref": scenario.get("ref", ""),
+            "workbook": scenario.get("file", ""),
+            "release": fields["release"],
+            "tester": fields["tester"],
+        }
+        return self._launch(out, fields, extra)
+
+    def _launch(self, out: Path, fields: dict[str, str], extra: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             if self._proc is not None:
                 raise ValueError("a recording is already in progress; stop it first")
@@ -91,6 +130,7 @@ class Recording:
                 "title": fields["title"],
                 "started_at": now(),
                 "log": str(log),
+                **extra,
             }
         threading.Thread(target=self._wait, args=(proc, log), daemon=True).start()
         return self.state()
@@ -138,7 +178,17 @@ class Recording:
         with self._lock:
             self._proc = None
             self._state.update(finished_at=now(), exit_code=code)
-            if code == 0:
+            if code == 0 and self._state.get("mode") == "manual":
+                found = {k: _after(lines, f"{k}: ") for k in ("Manual run", "Summary document", "Result")}
+                self._state.update(
+                    status="saved",
+                    result=found["Result"] or "failed",
+                    suite_dir=found["Manual run"],
+                    summary=found["Summary document"],
+                    automated=bool(saved),
+                    message="" if saved else "No clicks were recorded, so the automatic version was not saved.",
+                )
+            elif code == 0:
                 masked = next((ln for ln in lines if ln.startswith("Masked values")), "")
                 count = saved.split(" to ")[0] if saved else "Saved"  # the file is shown separately
                 self._state.update(status="saved", message=f"{count}.", masked=masked)
@@ -146,3 +196,13 @@ class Recording:
                 errors = [ln for ln in lines if ln.startswith("error:")]
                 message = errors[-1][len("error:") :].strip() if errors else "\n".join(lines[-5:])
                 self._state.update(status="error", message=message or f"The recorder stopped with exit code {code}.")
+            done = dict(self._state) if self._state.get("mode") == "manual" and code == 0 else None
+        if done is not None and self.on_manual_done is not None:
+            run = self.on_manual_done(done)  # outside the lock: it reads the run history
+            if run:
+                with self._lock:
+                    self._state["run_id"] = run.get("id")
+
+
+def _after(lines: list[str], prefix: str) -> str:
+    return next((ln[len(prefix) :].strip() for ln in reversed(lines) if ln.startswith(prefix)), "")

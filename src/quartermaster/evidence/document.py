@@ -135,9 +135,13 @@ class _Doc:
             _p(
                 [
                     _r(
-                        "This document is the record of an automated test run in Oracle Fusion. For each step it shows "
-                        "what was done, what should happen, what did happen and, where taken, a picture of the screen "
-                        "afterwards. A red box in a picture marks the item the step used."
+                        "This document is the record of a test done by hand in Oracle Fusion. For each step it shows "
+                        "what the tester did, what should happen, whether it did, and a picture of the screen taken "
+                        "when the tester marked the step."
+                        if run.get("mode") == "manual"
+                        else "This document is the record of an automated test run in Oracle Fusion. For each step it "
+                        "shows what was done, what should happen, what did happen and, where taken, a picture of the "
+                        "screen afterwards. A red box in a picture marks the item the step used."
                     )
                 ],
                 after=200,
@@ -196,6 +200,8 @@ class _Doc:
             first = False
             add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
             rows_kv: list[tuple[str, Any]] = [("Result", _status_label(st))]
+            if s.get("action") == "manual":
+                rows_kv[0] = ("Result", "Passed (marked by the tester)" if st == "passed" else _status_label(st))
             if s.get("value") and s.get("action") in ("fill", "select", "navigate", "login_as"):
                 rows_kv.append(("Value entered" if s.get("action") in ("fill", "select") else "Opened", s["value"]))
             rows_kv.append(("What should happen", s.get("expected") or _default_expected(s)))
@@ -548,6 +554,8 @@ def plain_error(error: str | None) -> str:
     if not error:
         return ""
     text = " ".join(error.split())
+    if text.startswith("Tester: "):  # written by the person who did the test: shown as they wrote it
+        return text[len("Tester: ") :]
     m = re.search(r"expected text '(.*)', found '(.*)'$", text)
     m = m or re.search(r'expected text "(.*)", found "(.*)"$', text)
     if m:
