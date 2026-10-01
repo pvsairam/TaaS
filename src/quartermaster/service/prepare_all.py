@@ -16,7 +16,7 @@ from quartermaster.service.store import now
 
 
 class PrepareAll:
-    def __init__(self, start: Callable[[str], None], stop_current: Callable[[], None]):
+    def __init__(self, start: Callable[[str], Any], stop_current: Callable[[], Any]):
         self._start = start  # prepares one scenario (raises ValueError when it cannot start)
         self._stop_current = stop_current
         self._lock = threading.Lock()

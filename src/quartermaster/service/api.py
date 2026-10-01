@@ -367,7 +367,8 @@ class App:
             if review and not review.get("approved_at"):
                 raise ValueError("An AI prepared this scenario. Check its pictures and approve it before it runs.")
             # the evidence choices remembered from New run (screenshots, video, show the browser)
-            chosen = data.get("options") if isinstance(data.get("options"), dict) else {}
+            raw = data.get("options")
+            chosen: dict[str, Any] = raw if isinstance(raw, dict) else {}
             options = {k: chosen[k] for k in ("screenshots", "video", "headed") if k in chosen}
             options.update(label=f"Automatic: {scenario['title']}"[:80], release=release, tester=tester)
             return {"mode": "automatic", "run": self._run_view(self.queue.submit(rel, options))}
