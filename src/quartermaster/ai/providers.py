@@ -55,6 +55,20 @@ class AIError(RuntimeError):
     """The AI could not be reached or did not answer usefully. The message is for people."""
 
 
+class _Refused(AIError):
+    """The provider rejected the request itself (HTTP 400); `detail` says which part."""
+
+    def __init__(self, message: str, detail: str):
+        super().__init__(message)
+        self.detail = detail
+
+
+# Newer OpenAI models (reasoning models such as the gpt-5 family and o-series) reject max_tokens
+# (they want max_completion_tokens, which also counts their thinking) and any temperature but the
+# default. What a model rejected once is remembered while Quartermaster runs.
+_ADAPTED: dict[tuple[str, str], set[str]] = {}
+
+
 @dataclass(frozen=True)
 class AIConfig:
     provider: str
@@ -155,13 +169,34 @@ def chat(config: AIConfig, system: str, prompt: str, *, max_tokens: int = 800, t
             "temperature": 0,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         }
-    data = _post(url, body, headers, timeout)
+    data = _post_adapting(config, url, body, headers, timeout)
     try:
         if config.format == "anthropic":
             return "".join(b.get("text", "") for b in data["content"] if b.get("type") == "text")
         return str(data["choices"][0]["message"]["content"] or "")
     except (KeyError, IndexError, TypeError) as e:
         raise AIError(f"The AI answered in an unexpected form: {str(data)[:200]}") from e
+
+
+def _post_adapting(config: AIConfig, url: str, body: dict[str, Any], headers: dict[str, str], timeout: float) -> Any:
+    """Send, and when the model rejects a setting it does not support, send again without it."""
+    adapted = _ADAPTED.setdefault((config.base_url, config.model), set())
+    for _ in range(3):
+        if "max_completion_tokens" in adapted and "max_tokens" in body:
+            # room for the model's thinking as well as its short answer
+            body["max_completion_tokens"] = max(int(body.pop("max_tokens")), 4000)
+        if "no_temperature" in adapted:
+            body.pop("temperature", None)
+        try:
+            return _post(url, body, headers, timeout)
+        except _Refused as e:
+            if "max_tokens" in body and "max_completion_tokens" in e.detail:
+                adapted.add("max_completion_tokens")
+            elif "temperature" in body and "temperature" in e.detail:
+                adapted.add("no_temperature")
+            else:
+                raise
+    return _post(url, body, headers, timeout)
 
 
 def _post(url: str, body: dict[str, Any], headers: dict[str, str], timeout: float) -> Any:
@@ -188,6 +223,8 @@ def _post(url: str, body: dict[str, Any], headers: dict[str, str], timeout: floa
                     " workspace in the Anthropic Console, or enter the Workspace ID in Settings, AI"
                     " assistant, Advanced."
                 ) from e
+            if e.code == 400:
+                raise _Refused(f"The AI provider answered with an error (400): {detail}", detail) from e
             if e.code == 404:
                 raise AIError(f"The AI provider does not know this model or address ({detail}).") from e
             raise AIError(f"The AI provider answered with an error ({e.code}): {detail}") from e

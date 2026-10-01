@@ -50,6 +50,21 @@ class FakeProvider(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if body.get("model") == "reasoner" and ("max_tokens" in body or "temperature" in body):
+            # like OpenAI's newer models: one unsupported parameter at a time
+            param = "max_tokens" if "max_tokens" in body else "temperature"
+            message = (
+                "Unsupported parameter: 'max_tokens' is not supported with this model."
+                " Use 'max_completion_tokens' instead."
+                if param == "max_tokens"
+                else "Unsupported value: 'temperature' does not support 0 with this model."
+            )
+            data = json.dumps({"error": {"message": message, "param": param, "code": "unsupported_parameter"}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.headers.get("x-api-key") == "bad" or self.headers.get("Authorization") == "Bearer bad":
             self.send_response(401)
             self.end_headers()
@@ -101,6 +116,20 @@ def test_any_openai_compatible_provider_and_anthropic(server: str, monkeypatch: 
     with pytest.raises(AIError, match="refused the key"):
         chat(openai_like, "sys", "hi")
     assert providers.check(openai_like)["ok"] is False
+
+
+def test_newer_openai_models_without_max_tokens_or_temperature(server: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MY_KEY", "secret-key")
+    reasoner = AIConfig("openai", "reasoner", server, "MY_KEY")
+    assert chat(reasoner, "sys", "hi", max_tokens=10) == "OK from reasoner"
+    sent = FakeProvider.seen[-1]["body"]
+    assert "max_tokens" not in sent and "temperature" not in sent and sent["max_completion_tokens"] >= 4000
+    calls = len(FakeProvider.seen)
+    assert chat(reasoner, "sys", "again") == "OK from reasoner"
+    assert len(FakeProvider.seen) == calls + 1  # remembered: no rejected request the second time
+    older = AIConfig("openai", "older-model", server, "MY_KEY")
+    assert chat(older, "sys", "hi") == "OK from older-model"
+    assert FakeProvider.seen[-1]["body"]["max_tokens"] == 800  # other models are sent the same as before
 
 
 def test_an_anthropic_key_not_tied_to_a_workspace(server: str, monkeypatch: pytest.MonkeyPatch) -> None:
