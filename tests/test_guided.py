@@ -228,7 +228,8 @@ def test_by_hand_in_a_real_browser_then_it_plays_by_itself(tmp_path: Path) -> No
     out = tmp_path / "ess-001.yaml"
     out.write_text(to_yaml(test))
     saved = load_test(out)
-    assert [s.action.value for s in saved.steps] == ["click", "click", "click", "assert_visible"]
+    # A short value clicked after Add check is checked word for word (long text: only that it is shown).
+    assert [s.action.value for s in saved.steps] == ["click", "click", "click", "assert_text"]
 
     # Next quarter: the same scenario plays by itself.
     play = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve)
