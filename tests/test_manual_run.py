@@ -35,6 +35,7 @@ total = sum(len(c['steps']) for c in guide['cases'])
 if '--prepare' in rest:  # the AI does the steps; a model called "stuck" gives up at step 2
     assert opt['--ai-provider'] and opt['--ai-key-env']
     stuck = opt['--ai-model'] == 'stuck'
+    open(os.path.join(run_dir, 'ai-diary.txt'), 'w').write('Step 1: Login\n  AI answered: {"do": "done"}\n')
     marks = {n: 'failed' if stuck and n == 2 else 'passed' for n in range(1, 3 if stuck else total + 1)}
     if stuck:
         print('The AI stopped: Step 2: it would have to click "Delete"')
@@ -172,6 +173,7 @@ def test_prepared_by_ai_waits_for_review_then_runs(app: App, monkeypatch: pytest
     assert started["mode"] == "prepare" and started["recording"]["mode"] == "ai"
     done = wait(lambda: (lambda s: s if s.get("run_id") else None)(call(app, "GET", "/api/recording")))
     assert (done["result"], done["automated"]) == ("passed", True)
+    assert done["diary_url"] and done["diary_url"].endswith("/r1/ai-diary.txt")  # also after it is saved
     run = call(app, "GET", "/api/runs")[0]
     assert run["options"]["label"] == "Prepared by AI: My Compensation" and run["executed_by"] == "AI"
 

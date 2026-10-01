@@ -380,12 +380,13 @@ class App:
         for step in feed.get("guide") or []:
             picture = step.get("picture")
             step["picture_url"] = self._url_rel(f"{folder}/{picture}") if folder and picture else None
-        diary = f"{folder}/ai-diary.txt" if folder else ""
-        state["diary_url"] = self._url_rel(diary) if diary and (self.evidence_root / diary).is_file() else None
         if state.get("run_id"):
             run = self.queue.store.get(str(state["run_id"]))
             results = self._suite_results(run) if run else []
             state["document_url"] = results[0]["document_url"] if results else None
+            folder = folder or (results[0]["folder"] if results else None)  # the feed is gone once it is saved
+        diary = f"{folder}/ai-diary.txt" if folder else ""
+        state["diary_url"] = self._url_rel(diary) if diary and (self.evidence_root / diary).is_file() else None
         return state
 
     def _with_results(self, scenarios: list[dict[str, Any]], history: bool = False) -> None:
