@@ -182,13 +182,19 @@ class PlaywrightDriver:
 
     # ------------------------------------------------------------------ actions
 
-    def navigate(self, path: str) -> None:
-        """Open a page via the Navigator, e.g. 'Payables > Invoices'."""
-        # Classic pages show the Navigator as the ☰ icon with a "Navigator" title.
+    def navigate(self, path: str, timeout_ms: float | None = None) -> None:
+        """Open a page via the Navigator, e.g. 'Payables > Invoices'.
+
+        `timeout_ms` limits each click (default: the action timeout), so a path that is not in
+        this Navigator fails quickly when an AI is trying it.
+        """
+        # Classic pages show the Navigator as the ☰ icon with a "Navigator" title. Clicking it
+        # again would close the panel, so it is only clicked when the panel is not open already.
         p = self.page
-        p.get_by_role("link", name="Navigator", exact=True).first.click()
+        if p.locator("div.navmenu-header").locator("visible=true").count() == 0:
+            p.get_by_role("link", name="Navigator", exact=True).first.click(timeout=timeout_ms)
         with suppress(Exception):  # playwright TimeoutError: no grouped Navigator on this page
-            p.locator("div.navmenu-header").first.wait_for(timeout=self._settle_ms)
+            p.locator("div.navmenu-header").first.wait_for(timeout=min(self._settle_ms, timeout_ms or self._settle_ms))
         parts = [part.strip() for part in path.split(">")]
         for part, child in zip(parts, parts[1:], strict=False):
             # Groups are headers that expand in place, and the Navigator remembers which are
@@ -197,10 +203,10 @@ class PlaywrightDriver:
             header = p.locator(f"div.navmenu-header[title='{part}']")
             if header.count() == 1:
                 if child_link.count() == 0:
-                    header.click()
+                    header.click(timeout=timeout_ms)
             else:
-                p.get_by_role("link", name=part, exact=True).locator("visible=true").first.click()
-        p.get_by_role("link", name=parts[-1], exact=True).locator("visible=true").first.click()
+                p.get_by_role("link", name=part, exact=True).locator("visible=true").first.click(timeout=timeout_ms)
+        p.get_by_role("link", name=parts[-1], exact=True).locator("visible=true").first.click(timeout=timeout_ms)
         self._settle()
 
     def click(self, strategy: LocatorStrategy, value: str) -> None:

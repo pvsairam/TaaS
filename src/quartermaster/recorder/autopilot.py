@@ -158,6 +158,7 @@ class Autopilot:
             if not done:
                 self._note(f"\nStep {number}: {step['action']}")
             self._note(f"  Screen: {screen.get('title', '')} ({len(screen.get('items', []))} things to click or fill)")
+            self._say(f"Step {number}: asking the AI what to do" + (f" (try {len(done) + 1})" if done else ""))
             try:
                 answer = self.ask(SYSTEM, self._prompt(number, total, step, done, screen))
                 self._note(f"  AI answered: {' '.join(answer.split())[:400]}")
@@ -174,8 +175,17 @@ class Autopilot:
                 try:
                     self.navigate(value)
                 except Exception as e:  # the path is not in this Navigator: let the AI try another way
-                    done.append(f'navigate "{value}" DID NOT WORK ({_first_line(e)})')
-                    self._note(f"  Did not work: {_first_line(e)}")
+                    groups = self._navigator_groups()
+                    done.append(
+                        f'navigate "{value}" DID NOT WORK ({_first_line(e)}).'
+                        + (f" The Navigator's groups are: {', '.join(groups)}." if groups else "")
+                        + " Use the exact names shown, or click an element from the list."
+                    )
+                    self._note(
+                        f"  Did not work: {_first_line(e)}"
+                        + (f"; Navigator groups: {', '.join(groups)}" if groups else "")
+                    )
+                    self._say(f"Step {number}: {value} is not in the Navigator. Trying another way.")
                     continue
                 self.recorder.events.append({"kind": "navigate", "value": value})
                 done.append(f'navigate "{value}"')
@@ -196,6 +206,7 @@ class Autopilot:
             except Exception as e:  # hidden, covered or gone: tell the AI and let it try another way
                 done.append(f"{action} DID NOT WORK ({_first_line(e)})")
                 self._note(f"  Did not work: {_first_line(e)}")
+                self._say(f"Step {number}: that did not work. Trying another way.")
                 continue
             self.settle()
             done.append(action)
@@ -253,6 +264,17 @@ class Autopilot:
         if what in ("fill", "select") and (not value or "<" in value or value.lower() not in written):
             return "the step does not give the value to enter"
         return ""
+
+    def _navigator_groups(self) -> list[str]:
+        """The names of the Navigator's groups, so the AI can use the pod's exact words."""
+        try:
+            names = self.page.evaluate(
+                "() => [...document.querySelectorAll('div.navmenu-header')]"
+                ".map((e) => (e.getAttribute('title') || e.innerText || '').trim()).filter(Boolean)"
+            )
+        except Exception:
+            return []
+        return [str(n)[:60] for n in names][:40] if isinstance(names, list) else []
 
     def _note(self, line: str) -> None:
         if self.diary is None:

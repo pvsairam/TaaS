@@ -467,7 +467,10 @@ document.getElementById("login").addEventListener("submit", (e) => {
     <a href="#" style="display:none">Personal Information</a>
     <main id="main"><h1>Welcome</h1></main>`;
   const $ = (id) => document.getElementById(id);
-  $("nav").onclick = (ev) => { ev.preventDefault(); $("panel").style.display = ""; };
+  $("nav").onclick = (ev) => {  // like Fusion: a second click closes the Navigator
+    ev.preventDefault();
+    $("panel").style.display = $("panel").style.display === "none" ? "" : "none";
+  };
   document.querySelector(".navmenu-header").onclick = () => { $("me-items").style.display = ""; };
   $("pi").onclick = (ev) => {
     ev.preventDefault();
@@ -492,7 +495,9 @@ def navigator_ai(system: str, prompt: str) -> str:
     if step == "Login" or (step == "Personal Information" and "Personal Information" in headings):
         return json.dumps({"do": "done"})
     if step == "Me":
-        if "nothing yet" in prompt:
+        if "nothing yet" in prompt:  # a first guess with words that are not in this Navigator
+            return json.dumps({"do": "navigate", "value": "About Me > Personal Info", "why": "a guess"})
+        if "DID NOT WORK" in prompt and "groups are: Me." in prompt and 'navigate "Me >' not in prompt:
             return json.dumps(
                 {"do": "navigate", "value": "Me > Personal Information", "why": "Me is a Navigator group"}
             )
@@ -525,9 +530,16 @@ def test_prepared_with_the_navigator_in_a_real_browser_then_it_plays_by_itself(t
     recorder.guide = Guide(SCENARIO, tmp_path / "run")
     try:
         pilot = Autopilot(
-            driver.page, recorder.guide, recorder, navigator_ai, settle=driver._settle, navigate=driver.navigate
+            driver.page,
+            recorder.guide,
+            recorder,
+            navigator_ai,
+            settle=driver._settle,
+            navigate=lambda path: driver.navigate(path, timeout_ms=2_000),
         )
         assert pilot.run() is True, pilot.reason
+        diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
+        assert "Did not work" in diary and "Navigator groups: Me" in diary
     finally:
         driver.close()
 
