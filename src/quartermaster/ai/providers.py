@@ -82,7 +82,7 @@ class AIConfig:
         if not self.base_url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             return "The provider's web address must start with https:// (or be on this computer)."
         if self.key_env and not self.key(environ):
-            return f"The key is not set. Set {self.key_env} on this computer, like the pod password, and restart."
+            return f"No API key yet. Paste it in Settings, AI assistant (or set {self.key_env} on this computer)."
         return ""
 
 

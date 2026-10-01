@@ -337,3 +337,31 @@ def test_prepared_in_a_real_browser_then_it_plays_by_itself(tmp_path: Path) -> N
     play = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve)
     result = run_test(saved, env, play)
     assert result.status is StepStatus.PASSED, [s.error for s in result.steps]
+
+
+def test_a_key_pasted_in_settings_is_kept_in_memory_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from test_service_api import call
+
+    from quartermaster.service.api import ApiError, App
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)  # also undoes what the test sets
+    (tmp_path / "tests").mkdir()
+    app = App(tests_root=tmp_path / "tests", evidence_root=tmp_path / "ev", data_dir=tmp_path / ".qm")
+    with pytest.raises(ApiError, match="choose and save an AI provider first"):
+        call(app, "POST", "/api/ai/key", {"key": "sk-pasted-secret-1"})
+    call(app, "POST", "/api/settings", {"ai_provider": "openai", "ai_model": "gpt-x"})
+    assert "Paste it in Settings" in call(app, "GET", "/api/status")["ai"]["problem"]
+    with pytest.raises(ApiError, match="does not look like an API key"):
+        call(app, "POST", "/api/ai/key", {"key": "sk pasted with spaces"})
+
+    ai = call(app, "POST", "/api/ai/key", {"key": "  sk-pasted-secret-1 "})
+    assert (ai["key_set"], ai["key_source"], ai["problem"]) == (True, "entered", "")
+    assert "sk-pasted-secret-1" not in json.dumps(call(app, "GET", "/api/status"))
+    assert all(b"sk-pasted-secret-1" not in f.read_bytes() for f in (tmp_path / ".qm").rglob("*") if f.is_file())
+
+    ai = call(app, "POST", "/api/ai/key", {"key": ""})  # forget it
+    assert (ai["key_set"], ai["key_source"]) == (False, "")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-computer")
+    assert call(app, "GET", "/api/status")["ai"]["key_source"] == "computer"
+    call(app, "POST", "/api/ai/key", {"key": ""})  # a key set on the computer is not removed from here
+    assert call(app, "GET", "/api/status")["ai"]["key_set"] is True

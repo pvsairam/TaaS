@@ -8,6 +8,7 @@ computers and other web sites cannot start runs.
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
     POST /api/check-pod              can this computer reach the pod now?
     POST /api/ai/check               does the AI chosen in Settings answer? (a one-word question)
+    POST /api/ai/key                 {"key"} the AI key, kept in memory only until Quartermaster stops ("" forgets it)
     GET  /api/dashboard              pass rate, coverage, release readiness, activity
     GET  /api/attention              what needs a person, by kind
     GET  /api/tests                  test files in the tests folder, with their last result
@@ -114,6 +115,7 @@ class App:
         self.backups = data_dir / "backups"
         self.settings = Settings(data_dir / "settings.json")
         self.pod_check: dict[str, Any] | None = None
+        self.keys_entered: set[str] = set()  # AI keys pasted in Settings: in memory only, never on disk
         self.releases = Releases(releases_root, data_dir / "releases")
         self.manual = ManualScripts(data_dir / "manual")
         self.recording.on_manual_done = self._manual_done
@@ -155,6 +157,8 @@ class App:
                 except ValueError as e:
                     raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
             return _json(self.settings.get())
+        if method == "POST" and route == ["ai", "key"]:
+            return _json(self.set_ai_key(str(data.get("key") or "")))
         if method == "POST" and route == ["ai", "check"]:
             return _json(ai_providers.check(ai_providers.config_from(self.settings.get())))
         if method == "POST" and route == ["check-pod"]:
@@ -255,11 +259,35 @@ class App:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
-    @staticmethod
-    def _ai_view(settings: dict[str, Any]) -> dict[str, Any]:
-        """The AI choice for the Settings page: never the key itself, only whether it is set."""
+    def set_ai_key(self, key: str) -> dict[str, Any]:
+        """Keep the AI key pasted in Settings for as long as Quartermaster runs. It is put in this
+        process's environment, where the AI runs started from here find it, and is never written to
+        a file or sent back to the page."""
+        config = ai_providers.config_from(self.settings.get())
+        if not config.provider:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "choose and save an AI provider first")
+        if not config.key_env:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "this provider needs no key")
+        key = key.strip()
+        if not key:
+            if config.key_env in self.keys_entered:
+                os.environ.pop(config.key_env, None)
+                self.keys_entered.discard(config.key_env)
+            return self._ai_view(self.settings.get())
+        if len(key) < 8 or len(key) > 500 or any(c.isspace() for c in key):
+            raise ApiError(
+                HTTPStatus.BAD_REQUEST, "that does not look like an API key (no spaces, at least 8 characters)"
+            )
+        os.environ[config.key_env] = key
+        self.keys_entered.add(config.key_env)
+        return self._ai_view(self.settings.get())
+
+    def _ai_view(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """The AI choice for the Settings page: never the key itself, only whether it is set and where from."""
         config = ai_providers.config_from(settings)
+        has_key = bool(config.key())
         return {
+            "key_source": ("entered" if config.key_env in self.keys_entered else "computer") if has_key else "",
             "provider": config.provider,
             "model": config.model,
             "base_url": config.base_url,

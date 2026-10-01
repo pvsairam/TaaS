@@ -70,53 +70,71 @@ export async function settingsPage() {
     h("div", {class: "grid g-2"}, h("div", {class: "stack"}, environment, signin, ai), h("div", {class: "stack"}, storage, appearance, shortcuts)));
 }
 
-// The AI that prepares manual scenarios. Any provider: the key stays in an environment variable.
+// The AI that prepares manual scenarios. Any provider. The key is pasted here (kept in memory only,
+// until Quartermaster stops) or set on the computer; it is never stored or shown again.
 function aiCard(ai) {
   const presets = Object.fromEntries(ai.presets.map((p) => [p.id, p]));
   const provider = h("select", {class: "input", "aria-label": "AI provider"},
     h("option", {value: ""}, "None (no AI)"), ai.presets.map((p) => h("option", {value: p.id, selected: p.id === ai.provider}, p.label)));
   const model = input({value: ai.provider ? ai.model : "", placeholder: "The model name, as your provider writes it", maxlength: "120"});
+  const key = input({type: "password", autocomplete: "off", placeholder: ai.key_set ? "Saved (hidden). Paste a new key to change it" : "Paste your API key", "aria-label": "API key"});
   const baseUrl = input({value: ai.provider ? ai.base_url : "", placeholder: "https://…", maxlength: "300"});
   const keyEnv = input({value: ai.provider ? ai.key_env : "", placeholder: "e.g. OPENAI_API_KEY", maxlength: "80"});
   let previous = presets[ai.provider];
+  const keyRow = h("div", {});
+  const drawKeyRow = () => {
+    const p = presets[provider.value];
+    const needsKey = provider.value && (keyEnv.value || (p && p.key_env));
+    keyRow.style.display = needsKey ? "" : "none";
+  };
   provider.onchange = () => {
     const p = presets[provider.value];
     // Fill in what the provider uses, unless the reader typed something of their own.
-    for (const [el, key] of [[baseUrl, "base_url"], [keyEnv, "key_env"], [model, "model"]]) {
-      if (!el.value || (previous && el.value === previous[key])) el.value = p ? p[key] : "";
+    for (const [el, k] of [[baseUrl, "base_url"], [keyEnv, "key_env"], [model, "model"]]) {
+      if (!el.value || (previous && el.value === previous[k])) el.value = p ? p[k] : "";
     }
     previous = p;
-    hint.textContent = keyHint();
+    drawKeyRow();
   };
-  const keyHint = () => keyEnv.value ? `Set it like the pod password: $env:${keyEnv.value}="your key", then restart qm serve.` : "This provider needs no key.";
-  const hint = h("span", {}, keyHint());
-  keyEnv.oninput = () => { hint.textContent = keyHint(); };
+  const keyNote = ai.key_source === "entered" ? "A key is saved. It is kept in memory only: paste it again after you restart Quartermaster."
+    : ai.key_source === "computer" ? `A key is set on this computer (${ai.key_env}).` : "Kept in memory only, until Quartermaster stops. Never written to a file or shown again.";
+  keyRow.append(field("API key", key, keyNote, "ai-key-value"));
+  drawKeyRow();
   const result = h("div", {class: "meta", role: "status", "aria-live": "polite"});
   const save = button("Save", {kind: "primary", onClick: async (e) => {
     e.currentTarget.disabled = true;
     try {
       await api("/api/settings", {ai_provider: provider.value, ai_model: model.value.trim(), ai_base_url: baseUrl.value.trim(), ai_key_env: keyEnv.value.trim()});
+      if (key.value.trim()) await api("/api/ai/key", {key: key.value.trim()});
+      key.value = "";
       toast("Saved.");
       settingsPage();
     } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
   }});
-  const test = button("Test the AI", {ic: "refresh", disabled: !ai.provider, title: "Ask the saved AI a one-word question", onClick: async (e) => {
+  const test = button("Test the AI", {ic: "refresh", disabled: !ai.provider || Boolean(ai.problem), title: ai.problem || "Ask the saved AI a one-word question", onClick: async (e) => {
     e.currentTarget.disabled = true;
     result.textContent = "Asking…";
+    result.style.color = "";
     try { const r = await api("/api/ai/check", {}); result.textContent = r.message; result.style.color = r.ok ? "var(--success)" : "var(--danger)"; }
     catch (err) { result.textContent = err.message; }
     e.currentTarget.disabled = false;
   }});
+  const forget = ai.key_source === "entered" ? button("Forget the key", {kind: "ghost", onClick: async () => {
+    try { await api("/api/ai/key", {key: ""}); toast("The key is forgotten."); settingsPage(); } catch (err) { toast(err.message); }
+  }}) : null;
   return card({title: "AI assistant", sub: "Prepares manual scenarios automatically. Choose any provider.",
     body: h("div", {class: "stack"},
       h("div", {class: "fields"},
-        h("div", {class: "wide"}, field("Provider", provider, "OpenAI-compatible services (most of them) work with Other.", "ai-provider")),
-        field("Model", model, "For example the model id shown in your provider's account.", "ai-model"),
-        field("Key variable", keyEnv, hint, "ai-key"),
-        h("div", {class: "wide"}, field("Web address", baseUrl, "Filled in for the providers above. For Other, use the provider's OpenAI-compatible address.", "ai-url"))),
-      ai.provider ? h("div", {class: "row", style: "gap:8px"},
+        field("Provider", provider, "Any OpenAI-compatible service works with Other.", "ai-provider"),
+        field("Model", model, "The model name shown in your provider's account.", "ai-model"),
+        h("div", {class: "wide"}, keyRow)),
+      ai.provider ? h("div", {class: "row", style: "gap:8px;flex-wrap:nowrap"},
         h("span", {class: `icon-tile tone-${ai.problem ? "danger" : "success"}`}, icon(ai.problem ? "x" : "check")),
-        h("span", {class: "meta"}, ai.problem || `Ready: ${ai.label}. Key ${ai.key_env ? "set (hidden)" : "not needed"}.`)) : null,
-      h("div", {class: "row"}, save, test), result,
-      h("p", {class: "hint"}, "What is sent to the AI: the scenario's written steps and the names of the buttons, links and headings on the pod screen. E-mail addresses and long numbers are hidden first. Use a test pod. The key is never stored by Quartermaster."))});
+        h("span", {class: "meta"}, ai.problem || `Ready: ${ai.label}.${ai.key_env ? " Key saved (hidden)." : ""}`)) : null,
+      h("div", {class: "row"}, save, test, forget), result,
+      h("details", {class: "disclose"}, h("summary", {}, icon("right"), "Advanced: web address and key variable"),
+        h("div", {class: "fields", style: "margin-top:12px"},
+          h("div", {class: "wide"}, field("Web address", baseUrl, "Filled in for the providers in the list. For Other, use the provider's OpenAI-compatible address.", "ai-url")),
+          field("Key variable", keyEnv, "Instead of pasting the key, you can set this variable on the computer before starting qm serve; then it is remembered after a restart.", "ai-key"))),
+      h("p", {class: "hint"}, "What is sent to the AI: the scenario's written steps and the names of the buttons, links and headings on the pod screen. E-mail addresses and long numbers are hidden first. Never typed values, never the pod password. Use a test pod."))});
 }

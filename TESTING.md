@@ -216,12 +216,15 @@ by hand.
 
 **Choosing an AI**
 
-1. In PowerShell, set the key of your AI provider like the pod password, for example
-   `$env:OPENAI_API_KEY="your key"`, then start `qm serve` again. (Ollama on your own computer
-   needs no key.)
-2. In **Settings**, **AI assistant**: choose the provider, type the model name your account offers,
-   and click **Save**. The web address and the key variable name are filled in for you.
+1. In **Settings**, **AI assistant**, choose the **Provider** and type the **Model** name your
+   account offers (for example the model id shown in your OpenAI or OpenRouter account).
+2. Paste your key in **API key** and click **Save**. You should see "Ready: ... Key saved (hidden)".
 3. Click **Test the AI**. You should see "... answered in ... ms".
+
+The key is kept in memory only: it is never written to a file and never shown again, so paste it
+again after you restart `qm serve`. To keep it across restarts, set it on the computer instead,
+like the pod password, before starting: `$env:OPENAI_API_KEY="your key"` (the variable name for
+each provider is under **Advanced**). Ollama on your own computer needs no key.
 
 Any provider that offers an OpenAI-compatible service works: choose **Other** and enter its
 address. What is sent to the AI: the written steps and the names of the buttons, links and
