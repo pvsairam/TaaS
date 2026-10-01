@@ -1,7 +1,8 @@
 // Manual scenarios: test scripts imported from Excel, listed next to the automated tests and
 // matched to release features. They cannot run by themselves; they tell testers what to do by hand.
 import {
-  api, badge, button, callout, chips, drawer, emptyState, h, icon, input, plural, popover, statusBadge, table, toast, when,
+  api, badge, button, callout, chips, drawer, emptyState, h, icon, input, plural, popover, remember, statusBadge, table,
+  toast, when,
 } from "./ui.js";
 import {loadCommon, runLink, state} from "./state.js";
 import {show} from "./app.js";
@@ -12,7 +13,9 @@ const filters = {q: "", module: "all"};
 export async function runScenario(id, {byHand = false, prepare = false} = {}) {
   if (!state.status?.ready) { toast("Set up the pod and its sign-in in Settings first."); return; }
   try {
-    const r = await api("/api/manual/run", {id, by_hand: byHand, prepare});
+    const saved = remember("options") || {}; // what New run was last started with
+    const options = {screenshots: saved.screenshots || "every-step", video: saved.video || "off", headed: Boolean(saved.headed)};
+    const r = await api("/api/manual/run", {id, by_hand: byHand, prepare, options});
     document.querySelector(".scrim")?.click(); // close the scenario panel, if open
     location.hash = r.mode === "automatic" ? runLink(r.run.id) : "#/manual-run";
   } catch (err) { toast(err.message); }

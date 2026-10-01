@@ -185,8 +185,11 @@ def test_prepared_by_ai_waits_for_review_then_runs(app: App, monkeypatch: pytest
 
     assert call(app, "POST", "/api/manual/approve", {"id": pay["id"]})["approved_at"]
     assert scenario(app, "ESS-001")["review"] == "approved"
-    again = call(app, "POST", "/api/manual/run", {"id": pay["id"]})
+    options = {"video": "always", "headed": True, "label": "ignored"}  # as last chosen in New run
+    again = call(app, "POST", "/api/manual/run", {"id": pay["id"], "options": options})
     assert again["mode"] == "automatic"
+    assert again["run"]["options"]["video"] == "always" and again["run"]["options"]["headed"] is True
+    assert again["run"]["options"]["label"] == "Automatic: My Compensation"
     wait(lambda: call(app, "GET", f"/api/runs/{again['run']['id']}")["status"] == "passed")
 
     # Done by a person afterwards: nothing left to review.

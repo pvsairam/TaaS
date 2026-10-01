@@ -194,6 +194,10 @@ evidence document, and **Open the run**. The run is in **Runs** as "By hand: My 
 You should see: the run page, named "Automatic: My Compensation". Quartermaster plays your
 clicks from step 6 and 7 without you, and makes a new evidence document.
 
+**Run** uses the evidence choices you last used in **New run**: to watch the browser or keep a
+video, open **New run**, tick **Show the browser while it runs** and choose **Video**, and start one
+run. From then on **Run** on a scenario does the same.
+
 To do a scenario by hand again (for example after Oracle changed the screen), open it and click
 **Do it by hand**. Only run scenarios by hand that are safe to repeat on the test pod: whatever
 you click, including Save or Submit, is played again every time.
