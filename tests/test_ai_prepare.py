@@ -221,7 +221,7 @@ def test_the_ai_does_each_step_and_adds_checks(tmp_path: Path) -> None:
     [
         ([{"do": "done"}, {"do": "click", "element": 2}], 'click "Delete", which can change data'),
         ([{"do": "done"}, {"do": "fill", "element": 1, "value": "12345"}], "does not give the value"),
-        ([{"do": "done"}, {"do": "click", "element": 9}], "not on the screen"),
+        ([{"do": "done"}] + [{"do": "click", "element": 9}] * 5, "not finished after 5 actions"),  # told, then gives up
         ([{"do": "done"}, {"do": "stuck", "why": "needs a supplier name"}], "needs a supplier name"),
         ([{"do": "done"}] + [{"do": "click", "element": 1}] * 5, "not finished after 5 actions"),
     ],
@@ -365,3 +365,147 @@ def test_a_key_pasted_in_settings_is_kept_in_memory_only(tmp_path: Path, monkeyp
     assert call(app, "GET", "/api/status")["ai"]["key_source"] == "computer"
     call(app, "POST", "/api/ai/key", {"key": ""})  # a key set on the computer is not removed from here
     assert call(app, "GET", "/api/status")["ai"]["key_set"] is True
+
+
+class BrokenLocator(Locator):
+    def click(self, timeout: float) -> None:
+        raise TimeoutError("Locator.click: Timeout 8000ms exceeded.\nCall log: ...")
+
+
+def test_a_failed_click_is_reported_and_the_navigator_is_used(tmp_path: Path) -> None:
+    screens = {
+        "home": screen("Expand Me", "Me"),
+        "Personal Information": screen("My Compensation"),
+        "My Compensation": screen(texts=("Current Salary",)),
+    }
+    page = ScriptedPage(
+        screens, "home", {"role:link:Expand Me": 1, "role:link:My Compensation": 1, "text:Current Salary": 1}
+    )
+    page.get_by_role = lambda role, name, exact: (BrokenLocator if name == "Expand Me" else Locator)(  # type: ignore[method-assign]
+        page, f"role:{role}:{name}"
+    )
+    opened: list[str] = []
+
+    def navigate(path: str) -> None:
+        if path == "Wrong > Path":
+            raise RuntimeError("no such Navigator entry")
+        opened.append(path)
+        page.screen = "Personal Information"
+
+    recorder = Recorder(test_id="t")
+    ask = scripted_ai(
+        [
+            {"do": "done"},
+            {"do": "click", "element": 1},  # "Expand Me" times out...
+            {"do": "navigate", "value": "Wrong > Path"},  # ...a wrong path fails too...
+            {"do": "navigate", "value": "Me > Personal Information"},  # ...then the Navigator works
+            {"do": "done"},
+            {"do": "done"},  # step 3 was done by the navigate
+            {"do": "click", "element": 1},
+            {"do": "done"},
+            {"check": [1]},
+        ]
+    )
+    assert Autopilot(page, Guide(SCENARIO, tmp_path / "r"), recorder, ask, navigate=navigate).run() is True
+    assert opened == ["Me > Personal Information"]
+    assert 'click link "Expand Me" DID NOT WORK (Locator.click: Timeout 8000ms exceeded.)' in ask.prompts[2]
+    assert 'navigate "Wrong > Path" DID NOT WORK (no such Navigator entry)' in ask.prompts[3]
+    assert [e["kind"] for e in recorder.events] == ["navigate", "click", "assert_visible"]
+    assert recorder.events[0] == {"kind": "navigate", "value": "Me > Personal Information"}
+
+
+NAVIGATOR_PAGE = """<!doctype html><html><body>
+<form id="login">
+  <label for="userid">User ID</label><input id="userid">
+  <label for="password">Password</label><input id="password" type="password">
+  <button type="submit">Sign In</button>
+</form>
+<script>
+document.getElementById("login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  document.body.innerHTML = `
+    <a href="#" title="Navigator" aria-label="Navigator" id="nav">&#9776;</a>
+    <div id="panel" style="display:none">
+      <div class="navmenu-header" title="Me">Me <button aria-label="Expand Me" style="width:0;height:0"></button></div>
+      <div id="me-items" style="display:none"><a href="#" id="pi">Personal Information</a></div>
+    </div>
+    <a href="#" style="display:none">Personal Information</a>
+    <main id="main"><h1>Welcome</h1></main>`;
+  const $ = (id) => document.getElementById(id);
+  $("nav").onclick = (ev) => { ev.preventDefault(); $("panel").style.display = ""; };
+  document.querySelector(".navmenu-header").onclick = () => { $("me-items").style.display = ""; };
+  $("pi").onclick = (ev) => {
+    ev.preventDefault();
+    $("panel").style.display = "none";
+    $("main").innerHTML = '<h1>Personal Information</h1><a href="#" id="comp">My Compensation</a>';
+    $("comp").onclick = (e2) => {
+      e2.preventDefault();
+      $("main").innerHTML = '<h1>My Compensation</h1><h2>Current Salary</h2>';
+    };
+  };
+});
+</script></body></html>"""
+
+
+def navigator_ai(system: str, prompt: str) -> str:
+    """Like an AI that knows Fusion: opens pages with the Navigator, clicks what is on the screen."""
+    if '"check"' in system:
+        texts = re.findall(r"^\[(\d+)\] (.+)$", prompt, re.M)
+        return json.dumps({"check": [int(n) for n, t in texts if t == "Current Salary"]})
+    step = re.search(r"^Step \d+ of \d+: (.+)$", prompt, re.M).group(1)  # type: ignore[union-attr]
+    headings = re.search(r"^Headings: (.*)$", prompt, re.M).group(1)  # type: ignore[union-attr]
+    if step == "Login" or (step == "Personal Information" and "Personal Information" in headings):
+        return json.dumps({"do": "done"})
+    if step == "Me":
+        if "nothing yet" in prompt:
+            return json.dumps(
+                {"do": "navigate", "value": "Me > Personal Information", "why": "Me is a Navigator group"}
+            )
+        return json.dumps({"do": "done"})
+    if "nothing yet" not in prompt:
+        return json.dumps({"do": "done"})
+    for n, _role, name in re.findall(r'^\[(\d+)\] (\w+) "(.+)"$', prompt, re.M):
+        if name == step.removeprefix("Select ").strip():
+            return json.dumps({"do": "click", "element": int(n)})
+    return json.dumps({"do": "stuck", "why": "not on the screen"})
+
+
+def test_prepared_with_the_navigator_in_a_real_browser_then_it_plays_by_itself(tmp_path: Path) -> None:
+    pytest.importorskip("playwright")
+    from quartermaster.recorder.recorder import events_to_test, to_yaml
+    from quartermaster.runner.engine import run_test
+    from quartermaster.runner.playwright_driver import PlaywrightDriver
+
+    environ = {"QM_FUSION_USER": "Mock User", "QM_FUSION_PASSWORD": "not-a-real-secret"}
+    if CHROMIUM:
+        environ["QM_CHROMIUM_PATH"] = CHROMIUM
+    env = Environment(name="mock", url=POD, kind=EnvironmentKind.DEV)
+
+    def serve(context: Any) -> None:
+        context.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=NAVIGATOR_PAGE))
+
+    driver = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve)
+    driver.open(env, "")
+    recorder = Recorder(test_id="manual.ess.ess-001")
+    recorder.guide = Guide(SCENARIO, tmp_path / "run")
+    try:
+        pilot = Autopilot(
+            driver.page, recorder.guide, recorder, navigator_ai, settle=driver._settle, navigate=driver.navigate
+        )
+        assert pilot.run() is True, pilot.reason
+    finally:
+        driver.close()
+
+    assert [e["kind"] for e in recorder.events] == ["navigate", "click", "assert_visible"]
+    test = events_to_test(
+        recorder.events,
+        test_id="manual.ess.ess-001",
+        title="My Compensation",
+        module="HCM",
+        product="Global Human Resources",
+    )
+    out = tmp_path / "ess-001.yaml"
+    out.write_text(to_yaml(test))
+    play = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve)
+    result = run_test(load_test(out), env, play)
+    assert result.status is StepStatus.PASSED, [s.error for s in result.steps]

@@ -602,6 +602,7 @@ class App:
                             "number": st.get("index", 0) + 1,
                             "intent": st.get("intent", ""),
                             "action": st.get("action", ""),
+                            "by": record.get("mode", "automatic"),  # "manual" or "ai" for manual scenarios
                             "value": st.get("value"),
                             "expected": st.get("expected", ""),
                             "status": st.get("status", ""),

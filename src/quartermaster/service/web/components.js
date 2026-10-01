@@ -277,7 +277,9 @@ export function stepResult(st, {pictures = [], context = ""} = {}) {
       h("span", {class: "meta num", style: "min-width:44px;text-align:right"}, st.status === "skipped" ? "Skipped" : st.seconds ? `${st.seconds} s` : "")));
   const detail = h("div", {class: "step-detail"},
     h("dl", {class: "kv"},
-      st.action ? [h("dt", {}, "What was done"), h("dd", {}, ACTIONS[st.action] || st.action, st.value ? [" ", h("code", {}, st.value)] : "")] : null,
+      st.action ? [h("dt", {}, "What was done"), h("dd", {}, st.action === "manual"
+        ? (st.by === "ai" ? "Done by the AI, following the written step" : "Done by the tester, following the written step")
+        : [ACTIONS[st.action] || st.action, st.value ? [" ", h("code", {}, st.value)] : ""])] : null,
       expected ? [h("dt", {}, "What should happen"), h("dd", {}, expected)] : null,
       happened ? [h("dt", {}, "What happened"), h("dd", {}, happened)] : null),
     st.compare ? h("div", {class: "compare"},

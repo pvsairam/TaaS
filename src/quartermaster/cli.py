@@ -288,6 +288,7 @@ def _prepare(args: argparse.Namespace, driver: Any, recorder: Any, env: Environm
         ask=lambda system, prompt: chat(config, system, prompt),
         settle=getattr(driver, "_settle", lambda: None),
         should_stop=should_stop,
+        navigate=getattr(driver, "navigate", None),
     )
     recorder.message = f"Preparing with {config.label}…"
     recorder.write_feed()

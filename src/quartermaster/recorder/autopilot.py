@@ -40,17 +40,22 @@ _ROLES = {
 
 SYSTEM = """You help test Oracle Fusion Cloud. A tester's written test script is being carried out in a \
 browser that is already signed in. You get ONE step at a time: the step, what should happen, what was \
-already done for this step, and what is on the screen (headings, and a numbered list of things that can be \
-clicked or filled).
+already done for this step (including actions that did not work), and what is on the screen (headings, and \
+a numbered list of things that can be clicked or filled).
 
 Answer with one JSON object and nothing else:
-{"do": "click" | "fill" | "select" | "done" | "stuck", "element": <number from the list>, \
-"value": "<text to type or option to choose>", "why": "<a few words>"}
+{"do": "click" | "fill" | "select" | "navigate" | "done" | "stuck", "element": <number from the list>, \
+"value": "<text to type, option to choose, or Navigator path>", "why": "<a few words>"}
 
+- "navigate": open a page from the Navigator menu by its path, for example {"do": "navigate", \
+"value": "Me > Personal Information"} or "My Client Groups > Person Management". Prefer this to clicking \
+through the Navigator menu yourself: menu groups are headers that expand, and their items can be hidden.
+- "click": a button, link, tab or tile from the list, by its number.
 - "done": the step is already complete on this screen (for example "Login" when signed in, or the page \
-the step asks for is open).
+the step asks for is open). A later step may already be done by an earlier navigate.
 - "stuck": the step needs a value the script does not give (blank, or written as <>), needs another \
-person, or nothing on the screen fits.
+person, or nothing on the screen fits even after trying another way.
+- If an action did not work, try a different way (for example navigate instead of click).
 - Only choose elements from the list. Prefer the exact words of the step.
 - Never type a value that is not written in the step.
 - One action per answer."""
@@ -117,9 +122,10 @@ class Autopilot:
         ask: Ask,
         settle: Callable[[], None] = lambda: None,
         should_stop: Callable[[], bool] = lambda: False,
+        navigate: Callable[[str], None] | None = None,
     ):
         self.page, self.guide, self.recorder, self.ask = page, guide, recorder, ask
-        self.settle, self.should_stop = settle, should_stop
+        self.settle, self.should_stop, self.navigate = settle, should_stop, navigate
         self.reason = ""  # why it stopped early, for the tester
 
     # ------------------------------------------------------------------ the loop
@@ -150,24 +156,37 @@ class Autopilot:
                 return self._stuck(number, str(e))
             what = str(reply.get("do", "")).lower()
             why = " ".join(str(reply.get("why", "")).split())[:200]
+            value = " ".join(str(reply.get("value") or "").split())
             if what == "done":
                 return True
+            if what == "navigate" and self.navigate is not None and value:
+                self._say(f"Step {number}: open {value} from the Navigator{f' ({why})' if why else ''}")
+                try:
+                    self.navigate(value)
+                except Exception as e:  # the path is not in this Navigator: let the AI try another way
+                    done.append(f'navigate "{value}" DID NOT WORK ({_first_line(e)})')
+                    continue
+                self.recorder.events.append({"kind": "navigate", "value": value})
+                done.append(f'navigate "{value}"')
+                continue
             if what not in ("click", "fill", "select"):
                 return self._stuck(number, why or "the AI could not see how to do it")
             item = self._item(screen, reply.get("element"))
             if item is None:
-                return self._stuck(number, "the AI chose something that is not on the screen")
-            value = " ".join(str(reply.get("value") or "").split())
+                done.append(f"chose element {reply.get('element')!r}, which is NOT on the screen")
+                continue
             refusal = self._refuse(what, item, value, step)
             if refusal:
                 return self._stuck(number, refusal)
             self._say(f'Step {number}: {what} {item["role"]} "{item["name"]}"{f" ({why})" if why else ""}')
+            action = f'{what} {item["role"]} "{item["name"]}"' + (f' = "{value}"' if value else "")
             try:
                 self._act(what, item, value)
-            except Exception as e:  # the element went away or did not respond
-                return self._stuck(number, f'{what} on "{item["name"]}" did not work: {str(e).splitlines()[0][:120]}')
+            except Exception as e:  # hidden, covered or gone: tell the AI and let it try another way
+                done.append(f"{action} DID NOT WORK ({_first_line(e)})")
+                continue
             self.settle()
-            done.append(f'{what} {item["role"]} "{item["name"]}"' + (f' = "{value}"' if value else ""))
+            done.append(action)
         return self._stuck(number, f"not finished after {MAX_ACTIONS} actions")
 
     def _stuck(self, number: int, why: str) -> bool:
@@ -229,7 +248,8 @@ class Autopilot:
     # ------------------------------------------------------------------ doing it, and remembering it
 
     def _locate(self, item: dict[str, str]) -> tuple[Any, list[dict[str, str]]]:
-        """The element, and how to find it again on replay (only ways that find exactly one)."""
+        """The visible element, and how to find it again on replay. Replay needs a way that finds
+        exactly one element on the whole page (hidden copies too), so those ways come first."""
         page, role, name = self.page, item["role"], item["name"]
         ways: list[tuple[str, str, Any]] = []
         if role in ("textbox", "combobox", "searchbox"):
@@ -237,21 +257,23 @@ class Autopilot:
         if role in _ROLES:
             ways.append(("role", f"{role}:{name}", page.get_by_role(role, name=name, exact=True)))
         ways.append(("text", name, page.get_by_text(name, exact=True)))
-        unique = [(s, v, loc) for s, v, loc in ways if _count(loc) == 1]
-        usable = unique or [(s, v, loc) for s, v, loc in ways if _count(loc) > 1]
-        if not usable:
-            raise LookupError(f'"{name}" is no longer on the screen')
-        candidates = [{"strategy": s, "value": v} for s, v, _ in (unique or usable)]
-        return usable[0][2].first, candidates
+        shown = [(s, v, _visible(loc)) for s, v, loc in ways]
+        clickable = [(s, v, loc) for s, v, loc in shown if _count(loc) >= 1]
+        if not clickable:
+            raise LookupError(f'"{name}" is not shown on the screen')
+        everywhere_one = [(s, v) for s, v, loc in ways if _count(loc) == 1]
+        shown_one = [(s, v) for s, v, loc in shown if _count(loc) == 1]
+        chosen = everywhere_one or shown_one or [(s, v) for s, v, _ in clickable]
+        return clickable[0][2].first, [{"strategy": s, "value": v} for s, v in chosen]
 
     def _act(self, what: str, item: dict[str, str], value: str) -> None:
         element, candidates = self._locate(item)
         if what == "click":
-            element.click(timeout=15000)
+            element.click(timeout=8000)
         elif what == "fill":
-            element.fill(value, timeout=15000)
+            element.fill(value, timeout=8000)
         else:
-            element.select_option(label=value, timeout=15000)
+            element.select_option(label=value, timeout=8000)
         event: dict[str, Any] = {"kind": what, "intent": item["name"], "candidates": candidates}
         if what in ("fill", "select"):
             event["value"] = value
@@ -287,6 +309,17 @@ class Autopilot:
                         {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
                     )
         self._say(f"Added {len(chosen[:2])} check(s) that prove the page is right.")
+
+
+def _visible(locator: Any) -> Any:
+    try:
+        return locator.locator("visible=true")
+    except Exception:  # a stand-in page without visibility filtering
+        return locator
+
+
+def _first_line(e: Exception) -> str:
+    return (str(e).splitlines() or [type(e).__name__])[0][:120]
 
 
 def _count(locator: Any) -> int:
