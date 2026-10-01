@@ -471,7 +471,9 @@ document.getElementById("login").addEventListener("submit", (e) => {
     ev.preventDefault();
     $("panel").style.display = $("panel").style.display === "none" ? "" : "none";
   };
-  document.querySelector(".navmenu-header").onclick = () => { $("me-items").style.display = ""; };
+  document.querySelector(".navmenu-header").onclick = () => {  // a group header opens and closes
+    $("me-items").style.display = $("me-items").style.display === "none" ? "" : "none";
+  };
   $("pi").onclick = (ev) => {
     ev.preventDefault();
     $("panel").style.display = "none";
@@ -497,10 +499,10 @@ def navigator_ai(system: str, prompt: str) -> str:
     if step == "Me":
         if "nothing yet" in prompt:  # a first guess with words that are not in this Navigator
             return json.dumps({"do": "navigate", "value": "About Me > Personal Info", "why": "a guess"})
-        if "DID NOT WORK" in prompt and "groups are: Me." in prompt and 'navigate "Me >' not in prompt:
-            return json.dumps(
-                {"do": "navigate", "value": "Me > Personal Information", "why": "Me is a Navigator group"}
-            )
+        if 'opened the Navigator group "Me"' in prompt:
+            return json.dumps({"do": "done", "why": "the step only names the group"})
+        if "DID NOT WORK" in prompt and "groups are: Me." in prompt:
+            return json.dumps({"do": "navigate", "value": "Me", "why": "the step names the group Me"})
         return json.dumps({"do": "done"})
     if "nothing yet" not in prompt:
         return json.dumps({"do": "done"})
@@ -540,10 +542,13 @@ def test_prepared_with_the_navigator_in_a_real_browser_then_it_plays_by_itself(t
         assert pilot.run() is True, pilot.reason
         diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
         assert "Did not work" in diary and "Navigator groups: Me" in diary
+        assert "Opened the Navigator group Me; its pages: Personal Information" in diary
     finally:
         driver.close()
 
     assert [e["kind"] for e in recorder.events] == ["navigate", "click", "assert_visible"]
+    # the page was clicked in the open group, and is remembered as a Navigator path for replays
+    assert recorder.events[0] == {"kind": "navigate", "value": "Me > Personal Information"}
     test = events_to_test(
         recorder.events,
         test_id="manual.ess.ess-001",

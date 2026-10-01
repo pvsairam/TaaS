@@ -50,7 +50,9 @@ Answer with one JSON object and nothing else:
 
 - "navigate": open a page from the Navigator menu by its path, for example {"do": "navigate", \
 "value": "Me > Personal Information"} or "My Client Groups > Person Management". Prefer this to clicking \
-through the Navigator menu yourself: menu groups are headers that expand, and their items can be hidden.
+through the Navigator menu yourself: menu groups are headers that expand, and their items can be hidden. \
+A group name alone, for example {"do": "navigate", "value": "Me"}, opens that group and lists its pages: \
+use it when a step only names a group, then answer "done" for that step.
 - "click": a button, link, tab or tile from the list, by its number.
 - "done": the step is already complete on this screen (for example "Login" when signed in, or the page \
 the step asks for is open). A later step may already be done by an earlier navigate.
@@ -132,6 +134,7 @@ class Autopilot:
         # person can see why it stopped. Only labels from the screen, never typed values or keys.
         run_dir = getattr(guide, "run_dir", None)
         self.diary = Path(run_dir) / "ai-diary.txt" if run_dir else None
+        self.nav_pages: dict[str, str] = {}  # page link -> its Navigator group, once a group was opened
 
     # ------------------------------------------------------------------ the loop
 
@@ -171,30 +174,18 @@ class Autopilot:
             if what == "done":
                 return True
             if what == "navigate" and self.navigate is not None and value:
-                self._say(f"Step {number}: open {value} from the Navigator{f' ({why})' if why else ''}")
-                try:
-                    self.navigate(value)
-                except Exception as e:  # the path is not in this Navigator: let the AI try another way
-                    groups = self._navigator_groups()
-                    done.append(
-                        f'navigate "{value}" DID NOT WORK ({_first_line(e)}).'
-                        + (f" The Navigator's groups are: {', '.join(groups)}." if groups else "")
-                        + " Use the exact names shown, or click an element from the list."
-                    )
-                    self._note(
-                        f"  Did not work: {_first_line(e)}"
-                        + (f"; Navigator groups: {', '.join(groups)}" if groups else "")
-                    )
-                    self._say(f"Step {number}: {value} is not in the Navigator. Trying another way.")
-                    continue
-                self.recorder.events.append({"kind": "navigate", "value": value})
-                done.append(f'navigate "{value}"')
+                self._open(number, value, why, done)
                 continue
             if what not in ("click", "fill", "select"):
                 return self._stuck(number, why or "the AI could not see how to do it")
             item = self._item(screen, reply.get("element"))
             if item is None:
                 done.append(f"chose element {reply.get('element')!r}, which is NOT on the screen")
+                continue
+            group = self.nav_pages.get(item["name"]) if what == "click" and item["role"] == "link" else None
+            if group and self.navigate is not None:
+                # A page in an open Navigator group: replays open it the same way, from the Navigator
+                self._open(number, f"{group} > {item['name']}", why, done)
                 continue
             refusal = self._refuse(what, item, value, step)
             if refusal:
@@ -264,6 +255,73 @@ class Autopilot:
         if what in ("fill", "select") and (not value or "<" in value or value.lower() not in written):
             return "the step does not give the value to enter"
         return ""
+
+    def _open(self, number: int, value: str, why: str, done: list[str]) -> None:
+        """Open a page from the Navigator ("Me > Personal Information"), or a group on its own ("Me")."""
+        assert self.navigate is not None
+        self._say(f"Step {number}: open {value} from the Navigator{f' ({why})' if why else ''}")
+        if ">" not in value:
+            try:
+                group, pages = self._open_group(value)
+            except Exception as e:  # not a group, or it would not open: say so, like a failed path
+                group, pages = "", []
+                self._note(f"  Could not open the group: {_first_line(e)}")
+            if group:
+                shown = ", ".join(pages) if pages else "none could be read"
+                done.append(
+                    f'opened the Navigator group "{group}". Its pages: {shown}. If the step only names this group,'
+                    f' it is done. To open one of its pages, navigate "{group} > <page>".'
+                )
+                self._note(f"  Opened the Navigator group {group}; its pages: {shown}")
+                return
+        try:
+            self.navigate(value)
+        except Exception as e:  # the path is not in this Navigator: let the AI try another way
+            groups = self._navigator_groups()
+            done.append(
+                f'navigate "{value}" DID NOT WORK ({_first_line(e)}).'
+                + (f" The Navigator's groups are: {', '.join(groups)}." if groups else "")
+                + ' Use the exact names shown, as "Group > Page", or the group name alone to see its pages.'
+            )
+            self._note(
+                f"  Did not work: {_first_line(e)}" + (f"; Navigator groups: {', '.join(groups)}" if groups else "")
+            )
+            self._say(f"Step {number}: {value} is not in the Navigator. Trying another way.")
+            return
+        self.recorder.events.append({"kind": "navigate", "value": value})
+        done.append(f'navigate "{value}"')
+
+    def _links(self) -> list[str]:
+        return [it["name"] for it in self._screen().get("items", []) if it.get("role") == "link"]
+
+    def _open_group(self, name: str) -> tuple[str, list[str]]:
+        """Expand one Navigator group (opening the Navigator first) and return its exact name and the
+        pages it shows. ("", []) when there is no such group. Nothing is recorded: a replay opens the
+        group itself when it navigates to one of its pages."""
+        page = self.page
+        headers = page.locator("div.navmenu-header")
+        if headers.locator("visible=true").count() == 0:
+            page.get_by_role("link", name="Navigator", exact=True).first.click(timeout=10_000)
+            self.settle()
+        group = next((g for g in self._navigator_groups() if g.lower() == name.strip().lower()), "")
+        if not group:
+            return "", []
+        header = headers.filter(has_text=re.compile(rf"^\s*{re.escape(group)}\s*$")).locator("visible=true")
+        exact = page.locator("div.navmenu-header[title=" + _css_string(group) + "]").locator("visible=true")
+        if exact.count():
+            header = exact
+        before = self._links()
+        header.first.click(timeout=10_000)
+        self.settle()
+        after = self._links()
+        if len(after) < len(before):  # it was open already, and that click closed it: open it again
+            header.first.click(timeout=10_000)
+            self.settle()
+            before, after = after, self._links()
+        pages = [n for n in after if n not in before]
+        for n in pages:
+            self.nav_pages[n] = group
+        return group, pages[:40]
 
     def _navigator_groups(self) -> list[str]:
         """The names of the Navigator's groups, so the AI can use the pod's exact words."""
@@ -361,6 +419,10 @@ def _visible(locator: Any) -> Any:
         return locator.locator("visible=true")
     except Exception:  # a stand-in page without visibility filtering
         return locator
+
+
+def _css_string(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _first_line(e: Exception) -> str:
