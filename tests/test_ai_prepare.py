@@ -269,6 +269,8 @@ def test_the_ai_stops_rather_than_guess(tmp_path: Path, answers: list[dict[str, 
     assert marks[0]["status"] == "passed" and marks[1]["status"] == "failed" and "status" not in marks[2]
     result = guide.result(test_id="t", title="x", environment="e", environment_url=POD, release=None, run_id="r")
     assert result.status is StepStatus.FAILED
+    diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")  # why it stopped, for a person
+    assert "Step 2:" in diary and "AI answered:" in diary and "STOPPED:" in diary and why in diary
 
 
 def test_stop_from_the_web_page(tmp_path: Path) -> None:

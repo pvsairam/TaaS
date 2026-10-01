@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from quartermaster.ai.providers import AIError, parse_json
@@ -127,6 +128,10 @@ class Autopilot:
         self.page, self.guide, self.recorder, self.ask = page, guide, recorder, ask
         self.settle, self.should_stop, self.navigate = settle, should_stop, navigate
         self.reason = ""  # why it stopped early, for the tester
+        # What the AI answered and what happened, step by step, kept with the run's evidence so a
+        # person can see why it stopped. Only labels from the screen, never typed values or keys.
+        run_dir = getattr(guide, "run_dir", None)
+        self.diary = Path(run_dir) / "ai-diary.txt" if run_dir else None
 
     # ------------------------------------------------------------------ the loop
 
@@ -150,8 +155,13 @@ class Autopilot:
             if self.should_stop():
                 return self._stuck(number, "stopped by the tester")
             screen = self._screen()
+            if not done:
+                self._note(f"\nStep {number}: {step['action']}")
+            self._note(f"  Screen: {screen.get('title', '')} ({len(screen.get('items', []))} things to click or fill)")
             try:
-                reply = parse_json(self.ask(SYSTEM, self._prompt(number, total, step, done, screen)))
+                answer = self.ask(SYSTEM, self._prompt(number, total, step, done, screen))
+                self._note(f"  AI answered: {' '.join(answer.split())[:400]}")
+                reply = parse_json(answer)
             except AIError as e:
                 return self._stuck(number, str(e))
             what = str(reply.get("do", "")).lower()
@@ -165,6 +175,7 @@ class Autopilot:
                     self.navigate(value)
                 except Exception as e:  # the path is not in this Navigator: let the AI try another way
                     done.append(f'navigate "{value}" DID NOT WORK ({_first_line(e)})')
+                    self._note(f"  Did not work: {_first_line(e)}")
                     continue
                 self.recorder.events.append({"kind": "navigate", "value": value})
                 done.append(f'navigate "{value}"')
@@ -184,6 +195,7 @@ class Autopilot:
                 self._act(what, item, value)
             except Exception as e:  # hidden, covered or gone: tell the AI and let it try another way
                 done.append(f"{action} DID NOT WORK ({_first_line(e)})")
+                self._note(f"  Did not work: {_first_line(e)}")
                 continue
             self.settle()
             done.append(action)
@@ -191,6 +203,7 @@ class Autopilot:
 
     def _stuck(self, number: int, why: str) -> bool:
         self.reason = f"Step {number}: {why}"
+        self._note(f"  STOPPED: {why}")
         self.guide.mark(f"{number} fail The AI could not do this step: {why}", self.page)
         self._say(f"Stopped at step {number}: {why}. Do this scenario by hand instead.")
         return False
@@ -240,6 +253,16 @@ class Autopilot:
         if what in ("fill", "select") and (not value or "<" in value or value.lower() not in written):
             return "the step does not give the value to enter"
         return ""
+
+    def _note(self, line: str) -> None:
+        if self.diary is None:
+            return
+        try:
+            self.diary.parent.mkdir(parents=True, exist_ok=True)
+            with self.diary.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass  # the diary only helps to explain; never stop the AI for it
 
     def _say(self, message: str) -> None:
         self.recorder.message = message

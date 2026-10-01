@@ -213,6 +213,9 @@ You should see: before you approve, the button on the scenario says **Review**, 
 refused. If the AI cannot do a step (for example the script does not give a value to type, or the
 step would press Save or Submit), it stops, says why, and nothing is saved to run: do that scenario
 by hand.
+**What the AI answered** opens the AI's diary: for every step, what was on the screen, what the AI
+chose and what did not work. Send it when you report a problem with Prepare. It is also kept in the
+run's folder in `evidence\` as `ai-diary.txt`.
 
 **Choosing an AI**
 

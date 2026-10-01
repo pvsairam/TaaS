@@ -68,7 +68,11 @@ from quartermaster.service.store import Store
 
 WEB_DIR = Path(__file__).parent / "web"
 _WEB_FILE = re.compile(r"^/([a-z0-9-]+\.(?:js|css))$")  # the page's own scripts and styles, nothing else
-_TYPES = {".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".webm": "video/webm"}
+_TYPES = {
+    ".txt": "text/plain; charset=utf-8",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".webm": "video/webm",
+}
 
 
 class ApiError(Exception):
@@ -376,6 +380,8 @@ class App:
         for step in feed.get("guide") or []:
             picture = step.get("picture")
             step["picture_url"] = self._url_rel(f"{folder}/{picture}") if folder and picture else None
+        diary = f"{folder}/ai-diary.txt" if folder else ""
+        state["diary_url"] = self._url_rel(diary) if diary and (self.evidence_root / diary).is_file() else None
         if state.get("run_id"):
             run = self.queue.store.get(str(state["run_id"]))
             results = self._suite_results(run) if run else []

@@ -61,6 +61,7 @@ function aiOutcome(rec) {
   const links = [
     rec.run_id ? button("See what the AI did", {kind: rec.automated ? "" : "primary", ic: "runs", href: runLink(rec.run_id)}) : h("span", {class: "meta"}, "Adding it to the run history…"),
     rec.document_url ? button("Evidence document", {ic: "download", href: rec.document_url}) : null,
+    rec.diary_url ? button("What the AI answered", {kind: "ghost", ic: "file", href: rec.diary_url, attrs: {target: "_blank", rel: "noopener"}}) : null,
   ];
   return h("div", {class: "stack"},
     h("div", {class: "page-head"}, h("div", {}, h("h1", {}, rec.title), h("p", {class: "lead"}, `Prepared by AI${rec.release ? ` on ${rec.release}` : ""}.`))),
