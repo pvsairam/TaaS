@@ -39,10 +39,14 @@ export async function manualPage() {
         {label: "Module", render: (s) => [h("div", {}, s.module), h("div", {class: "sub"}, s.product)]},
         {label: "Cases", cls: "num", render: (s) => s.case_count},
         {label: "Steps", cls: "num", render: (s) => s.step_count},
-        {label: "Last result", render: (s) => s.status ? statusBadge(s.status) : h("span", {class: "muted"}, "Not recorded")},
+        // Only what someone typed in the workbook's Pass / Fail column; Quartermaster has not run these.
+        {label: "Result in workbook", render: (s) => s.status
+          ? h("span", {title: `Typed in the workbook${s.tester ? ` by ${s.tester}` : ""}. Not a Quartermaster run.`},
+            statusBadge(s.status, s.status === "passed" ? "Pass in workbook" : "Fail in workbook"))
+          : h("span", {class: "muted"}, "None")},
         {label: "Notes", render: (s) => h("div", {class: "row", style: "gap:4px"},
           s.blank_data ? badge("Test data missing", "warning") : null,
-          s.releases?.length ? badge(`Tested in ${s.releases.join(", ")}`, "neutral") : null)},
+          s.releases?.length ? badge(`Workbook: ${s.releases.join(", ")}`, "neutral") : null)},
       ],
     }) : emptyState(all.length
       ? {ic: "search", title: "No scenarios match", text: "Try another search or module."}
@@ -91,14 +95,15 @@ export async function openScenario(id) {
   try { s = await api("/api/manual/scenario?id=" + encodeURIComponent(id)); } catch (e) { toast(e.message); return; }
   const facts = [
     ["Product", `${s.module} · ${s.product}`], ["Workbook", s.file], ["Scenario", [s.use_case, s.ref].filter(Boolean).join(" · ")],
-    s.tester ? ["Tested by", s.tester] : null, s.minutes ? ["Time taken", `${s.minutes} min`] : null,
-    s.releases?.length ? ["Tested in", s.releases.join(", ")] : null,
+    s.tester ? ["Tester in workbook", s.tester] : null, s.minutes ? ["Time in workbook", `${s.minutes} min`] : null,
+    s.releases?.length ? ["Workbook says tested in", s.releases.join(", ")] : null,
   ].filter(Boolean);
   drawer({
     title: s.title,
-    sub: `${plural(s.case_count, "test case")} · ${plural(s.step_count, "step")}${s.status ? "" : " · no result recorded"}`,
+    sub: `${plural(s.case_count, "test case")} · ${plural(s.step_count, "step")} · manual: follow the steps on the pod`,
     body: () => [
-      s.status ? h("div", {}, statusBadge(s.status, s.status === "passed" ? "Passed last time" : "Failed last time")) : null,
+      s.status ? callout("info", `The workbook says ${s.status === "passed" ? "Pass" : "Fail"}.`,
+        `Someone typed this in its Pass / Fail column${s.tester ? ` (tester ${s.tester})` : ""}${s.releases?.length ? `, for ${s.releases.join(" and ")}` : ""}. Quartermaster has not run this scenario.`) : null,
       h("dl", {class: "kv"}, facts.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
       s.description ? h("p", {}, s.description) : null,
       s.blank_data ? callout("warning", "Test data missing.", "Some steps say <> where a value should be, such as a user or supplier. Fill these in before testing.") : null,

@@ -172,7 +172,11 @@ feature. The workbooks are only read. They are not changed or copied anywhere el
 
 You should see: in step 5, the scenario opens with its test cases and every step with the expected
 result. Scenarios with `<>` in their steps are marked "Test data missing". In step 6, the manual
-scenarios that cover a feature of the release, most at risk first. In the **Features** tab, a
+scenarios that cover a feature of the release, most at risk first.
+
+"Pass in workbook" only repeats what someone typed in the workbook's Pass / Fail column.
+Quartermaster does not run manual scenarios. To test one, open it and follow its steps on the
+pod. To make it run by itself, record it with **Record a test** (6.9). In the **Features** tab, a
 feature that only a manual script covers is marked "Manual only".
 
 To remove a workbook: **Imported files**, then **Remove**. To update one, import it again.
