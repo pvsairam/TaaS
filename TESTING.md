@@ -156,14 +156,35 @@ To try a real Oracle file: download the feature listing spreadsheet for an updat
 Cloud Readiness and import it the same way. The spreadsheet must have a Feature column. Product
 and Product Family columns make the matching better.
 
-### 6.7 Needs attention
+### 6.7 Manual test scripts
+
+Your Excel test scripts can be added, so Release impact also shows which manual scenario covers a
+feature. The workbooks are only read. They are not changed or copied anywhere else.
+
+1. Click **Tests**, then **Import manual scripts**.
+2. Choose one or more `.xlsx` files. You can select all of them at once.
+3. Read the preview. For each workbook it shows the number of scenarios, test cases and steps,
+   the module and product it guessed from the file name, and any notes (for example a scenario
+   that has test cases but is missing from the Test Scenarios sheet).
+4. If a module or product is empty or wrong, type the right one. Click **Save**.
+5. The page now shows **Manual scenarios**. Search for `invoice`. Click a scenario.
+6. Click **Release impact**. Open the **Manual scenarios** tab.
+
+You should see: in step 5, the scenario opens with its test cases and every step with the expected
+result. Scenarios with `<>` in their steps are marked "Test data missing". In step 6, the manual
+scenarios that cover a feature of the release, most at risk first. In the **Features** tab, a
+feature that only a manual script covers is marked "Manual only".
+
+To remove a workbook: **Imported files**, then **Remove**. To update one, import it again.
+
+
 
 1. Click **Needs attention**.
 
 You should see: failed runs grouped by kind (for example "Item not found"), with the failed step,
 what was expected, what was found and a screenshot. If nothing failed it says all clear.
 
-### 6.8 Record a test
+### 6.9 Record a test
 
 1. Click **Record a test**.
 2. Fill in Test name, Module (for example `HCM`) and Product (for example `Global Human Resources`).
@@ -177,7 +198,7 @@ what was expected, what was found and a screenshot. If nothing failed it says al
 You should see: each click appears as a step while you record. After saving, the new test is
 listed under **Tests** and you can run it.
 
-### 6.9 Search and shortcuts
+### 6.10 Search and shortcuts
 
 - Press **Ctrl+K**. Type `release impact`. Press Enter. It opens Release impact.
 - Press **N**. The New run panel opens. Press Esc to close it.
@@ -190,7 +211,7 @@ Press Ctrl+C in the terminal running `qm serve`.
 Where things are kept:
 
 - `evidence\` holds screenshots, videos and Word documents of every run.
-- `.qm\` holds the run history, settings and imported feature lists.
+- `.qm\` holds the run history, settings, imported feature lists and imported manual scripts.
 
 You can delete both folders to start clean.
 

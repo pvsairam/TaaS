@@ -5,6 +5,7 @@ import {
 import {openRunDrawer, releaseBadge} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
+import {openManualImport, testsViewSwitch} from "./page-manual.js";
 
 const filters = {q: "", status: "all", module: "all"};
 
@@ -33,7 +34,7 @@ function dash() {
 }
 
 export async function testsPage() {
-  await loadCommon();
+  const [, manual] = await Promise.all([loadCommon(), api("/api/manual").catch(() => ({scenarios: []}))]);
   if (state.page !== "tests" || state.arg) return;
   if (state.query.module) filters.module = state.query.module;
   const tests = state.tests;
@@ -83,8 +84,10 @@ export async function testsPage() {
   show([{label: "Tests"}],
     h("div", {class: "page-head"},
       h("div", {}, h("h1", {}, "Tests"), h("p", {class: "lead"}, `${plural(tests.length, "test")} in `, h("code", {}, state.status.tests_folder))),
-      h("div", {class: "row"}, button("Record a test", {ic: "record", href: "#/record"}),
+      h("div", {class: "row"}, manual.scenarios.length ? null : button("Import manual scripts", {ic: "download", onClick: () => openManualImport()}),
+        button("Record a test", {ic: "record", href: "#/record"}),
         button("Run all", {kind: "primary", ic: "runs", disabled: !state.status.ready, onClick: () => openRunDrawer(".")}))),
+    manual.scenarios.length ? h("div", {class: "toolbar"}, testsViewSwitch("automated", {automated: tests.length, manual: manual.scenarios.length})) : null,
     h("div", {class: "toolbar"},
       h("div", {class: "search"}, icon("search"), input({type: "search", value: filters.q, placeholder: "Search name, module, process, role or tag",
         "aria-label": "Search tests", oninput: (e) => { filters.q = e.target.value; draw(); }})),

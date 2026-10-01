@@ -7,8 +7,10 @@ so a release manager can see *why* a test was selected. See docs/PLAN.md §7.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from quartermaster.domain.models import PRIORITY_WEIGHT, ChangeType, Feature, Priority, Release, TestCase
 
@@ -88,7 +90,29 @@ def severity(feature: Feature, enabled_opt_ins: AbstractSet[str] = frozenset()) 
     return min(s, 1.0)
 
 
-def match(feature: Feature, test: TestCase) -> tuple[float, list[str]]:
+class _Intent(Protocol):
+    @property
+    def intent(self) -> str: ...
+
+
+class Matchable(Protocol):
+    """What matching reads from a test: an automated TestCase, or a manual scenario."""
+
+    @property
+    def module(self) -> str: ...
+    @property
+    def product(self) -> str: ...
+    @property
+    def title(self) -> str: ...
+    @property
+    def process(self) -> str: ...
+    @property
+    def tags(self) -> Sequence[str]: ...
+    @property
+    def steps(self) -> Sequence[_Intent]: ...
+
+
+def match(feature: Feature, test: Matchable) -> tuple[float, list[str]]:
     """How strongly a feature relates to a test, in [0, 1], with reasons."""
     reasons: list[str] = []
     scores: list[float] = [0.0]

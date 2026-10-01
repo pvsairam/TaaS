@@ -5,15 +5,17 @@ import {
 import {metric, stackedBar} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
+import {manualLink, openManualImport, openScenario} from "./page-manual.js";
 
 const COVERAGE = {
-  covered: {label: "Covered", tone: "success", ic: "check", text: "A test exercises this feature."},
+  covered: {label: "Covered", tone: "success", ic: "check", text: "An automated test exercises this feature."},
+  manual: {label: "Manual only", tone: "info", ic: "file", text: "Only a manual script covers this feature. A candidate to automate."},
   weak: {label: "Weak", tone: "warning", ic: "minus", text: "Only loosely related tests; none really exercises it."},
   none: {label: "No test", tone: "danger", ic: "x", text: "No test relates to this feature. A candidate for a new test."},
 };
 const PRIORITY_TONE = {critical: "danger", high: "warning", medium: "neutral", low: "neutral"};
 
-let view = {tab: "tests", features: "all", picked: null, pickedFor: ""};
+let view = {tab: "tests", features: "all", manual: "covers", picked: null, pickedFor: ""};
 
 function impactLink(name, extra = {}) {
   const q = new URLSearchParams({release: name, ...extra});
@@ -60,14 +62,18 @@ export async function impactPage() {
 
   const metrics = h("div", {class: "grid g-4"},
     metric({ic: "layers", label: "Features in " + plan.release, value: s.features, accent: true,
-      bar: stackedBar([{n: s.covered, cls: "fill-success", label: "Covered"}, {n: s.weak, cls: "fill-warning", label: "Weak"},
-        {n: s.none, cls: "fill-danger", label: "No test"}], `${s.covered} covered, ${s.weak} weak, ${s.none} with no test`),
-      foot: `${s.covered} covered · ${s.weak} weak · ${s.none} with no test`}),
+      bar: stackedBar([{n: s.covered, cls: "fill-success", label: "Covered"}, {n: s.manual, cls: "fill-info", label: "Manual only"},
+        {n: s.weak, cls: "fill-warning", label: "Weak"}, {n: s.none, cls: "fill-danger", label: "No test"}],
+      `${s.covered} covered, ${s.manual} manual only, ${s.weak} weak, ${s.none} with no test`),
+      foot: [`${s.covered} covered`, s.manual ? `${s.manual} manual only` : "", `${s.weak} weak`, `${s.none} with no test`].filter(Boolean).join(" · ")}),
     metric({ic: "attention", label: "Tests at risk", value: s.at_risk, foot: `of ${plural(s.tests, "test")} relate to this update`}),
     metric({ic: "runs", label: "Suggested run", value: s.selected, unit: s.selected === 1 ? " test" : " tests",
       foot: `about ${minutes(s.minutes)}${plan.budget ? ` · limit ${minutes(plan.budget)}` : ""}`}),
     metric({ic: "x", label: "Features with no test", value: s.none,
       foot: s.none ? "Candidates for new tests" : "Every feature has a related test"}));
+  const manualNote = s.manual_scenarios ? null : h("div", {class: "section"}, callout("info", "Manual scripts are not counted yet.",
+    ["Import your Excel test scripts and this page also shows which manual scenarios cover each feature. ",
+      h("a", {href: "#", onclick: (e) => { e.preventDefault(); openManualImport(); }}, "Import manual scripts")]));
 
   const optInFeatures = plan.features.filter((f) => f.opt_in);
   const budgetInput = input({type: "number", min: "1", step: "1", value: budget, placeholder: "No limit", style: "width:110px",
@@ -100,6 +106,7 @@ export async function impactPage() {
     panel.setAttribute("aria-labelledby", `tab-${view.tab}`);
     if (view.tab === "tests") panel.replaceChildren(testsTable(plan, picked, drawRunBar));
     else if (view.tab === "features") panel.replaceChildren(featuresTable(plan, draw));
+    else if (view.tab === "manual") panel.replaceChildren(manualTable(plan, draw));
     else panel.replaceChildren(problems(plan.problems.map((p) => ({name: p.file, problem: p.problem}))));
     drawRunBar();
   };
@@ -108,9 +115,11 @@ export async function impactPage() {
   show([{label: "Release impact"}],
     head([releaseSel, importBtn]),
     metrics,
+    manualNote,
     h("div", {class: "card section"},
       h("div", {class: "toolbar", style: "padding:12px 16px 0;margin:0"},
         tabs([["tests", "Tests to run", plan.tests.length], ["features", "Features", plan.features.length],
+          ...(s.manual_scenarios ? [["manual", "Manual scenarios", plan.manual.filter((m) => m.features.length).length]] : []),
           ...(plan.problems.length ? [["problems", "Unreadable tests", plan.problems.length]] : [])], view.tab, (v) => { view.tab = v; draw(); }),
         h("span", {class: "grow"}),
         h("label", {class: "row", style: "gap:8px"}, h("span", {class: "meta"}, "Time limit (minutes)"), budgetInput),
@@ -177,7 +186,8 @@ function featuresTable(plan, redraw) {
   const byId = Object.fromEntries(plan.tests.map((t) => [t.id, t]));
   return h("div", {},
     h("div", {class: "toolbar", style: "padding:12px 16px 0;margin:0"},
-      chips([["all", "All", plan.features.length], ["none", "No test", counts.none], ["weak", "Weak", counts.weak], ["covered", "Covered", counts.covered]],
+      chips([["all", "All", plan.features.length], ["none", "No test", counts.none], ["weak", "Weak", counts.weak],
+        ...(counts.manual ? [["manual", "Manual only", counts.manual]] : []), ["covered", "Covered", counts.covered]],
         view.features, (v) => { view.features = v; redraw(); }, "Coverage")),
     shown.length ? table({
       caption: `Features of release ${plan.release}`,
@@ -188,13 +198,49 @@ function featuresTable(plan, redraw) {
         {label: "Change", render: (f) => h("div", {class: "row", style: "gap:4px"}, h("span", {class: "tag"}, f.change_type),
           f.opt_in ? badge("Opt-in", "info") : null, f.action_required ? badge("Action needed", "warning") : null)},
         {label: "Coverage", render: (f) => h("span", {title: COVERAGE[f.coverage].text}, badge(COVERAGE[f.coverage].label, COVERAGE[f.coverage].tone, COVERAGE[f.coverage].ic))},
-        {label: "Related tests", render: (f) => f.tests.length
-          ? h("div", {class: "stack", style: "gap:2px"}, f.tests.slice(0, 3).map((t) => byId[t.id]
-            ? h("a", {href: testLink(byId[t.id].file), class: "ellipsis", style: "max-width:260px"}, byId[t.id].title) : h("span", {}, t.id)),
-          f.tests.length > 3 ? h("span", {class: "meta"}, `and ${f.tests.length - 3} more`) : null)
+        {label: "Related tests", render: (f) => f.tests.length || f.manual?.length
+          ? h("div", {class: "stack", style: "gap:2px"},
+            f.tests.slice(0, 3).map((t) => byId[t.id]
+              ? h("a", {href: testLink(byId[t.id].file), class: "ellipsis", style: "max-width:260px"}, byId[t.id].title) : h("span", {}, t.id)),
+            f.tests.length > 3 ? h("span", {class: "meta"}, `and ${f.tests.length - 3} more`) : null,
+            (f.manual || []).slice(0, f.tests.length ? 1 : 2).map((m) => h("a", {href: manualLink(m.id), class: "ellipsis", style: "max-width:260px",
+              onclick: (e) => { e.preventDefault(); openScenario(m.id); }}, h("span", {class: "tag", style: "margin-right:6px"}, "Manual"), m.title)))
           : h("span", {class: "muted"}, "None")},
       ],
     }) : emptyState({ic: "check", title: "Nothing here", text: "No feature has this coverage."}));
+}
+
+function manualTable(plan, redraw) {
+  if (!plan.manual.length) return emptyState({ic: "check", title: "No manual scenario relates to this update"});
+  const covering = plan.manual.filter((m) => m.features.length);
+  const rows = view.manual === "covers" ? covering : plan.manual;
+  return h("div", {},
+    h("div", {class: "toolbar", style: "padding:12px 16px 0;margin:0"},
+      chips([["covers", "Cover a feature", covering.length], ["all", "Also loosely related", plan.manual.length]],
+        view.manual, (v) => { view.manual = v; redraw(); }, "Which manual scenarios"),
+      h("span", {class: "meta"}, "Run these by hand for this update, most at risk first.")),
+    rows.length ? manualRows(plan, rows) : emptyState({ic: "check", title: "No manual scenario covers a feature of this update",
+      text: "Some are loosely related; choose Also loosely related to see them."}));
+}
+
+function manualRows(plan, rows) {
+  return table({
+    caption: `Manual scenarios for release ${plan.release}, most at risk first`,
+    rows,
+    onRow: (m) => openScenario(m.id),
+    columns: [
+      {label: "Scenario", render: (m) => [h("div", {class: "primary-cell"}, m.title), h("div", {class: "sub"}, `${m.ref} · ${m.file}`)]},
+      {label: "Module", render: (m) => [h("div", {}, m.module), h("div", {class: "sub"}, m.product)]},
+      {label: "Cases", cls: "num", render: (m) => m.cases},
+      {label: "Steps", cls: "num", render: (m) => m.steps},
+      {label: "Risk", render: (m) => h("div", {class: "row", style: "flex-wrap:nowrap;gap:8px;min-width:120px"},
+        h("div", {class: "bar grow", role: "img", "aria-label": `Risk ${Math.round(m.risk * 100)}%`},
+          h("span", {class: m.risk >= 0.5 ? "fill-danger" : m.risk >= 0.2 ? "fill-warning" : "fill-neutral", style: `width:${Math.round(m.risk * 100)}%`})),
+        h("span", {class: "num meta", style: "width:36px;text-align:right"}, `${Math.round(m.risk * 100)}%`))},
+      {label: "Why", width: "240px", render: (m) => disclose(m.features.length ? `Covers ${m.features.join(", ")}` : "Loosely related",
+        h("ul", {class: "stack", style: "gap:6px;margin:6px 0 0;padding-left:18px"}, m.reasons.map((r) => h("li", {class: "meta"}, r))))},
+    ],
+  });
 }
 
 function problems(list) {

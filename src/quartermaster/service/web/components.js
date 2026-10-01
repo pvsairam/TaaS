@@ -146,6 +146,8 @@ export function openPalette(setTheme) {
     {group: "Commands", label: "Run all tests", ic: "runs", go: () => openRunDrawer(".")},
     {group: "Commands", label: "Record a test", ic: "record", go: () => { location.hash = "#/record"; }},
     {group: "Commands", label: "Import a release feature list", ic: "download", go: () => import("./page-impact.js").then((m) => m.openImport())},
+    {group: "Commands", label: "Import manual test scripts", ic: "download", go: () => import("./page-manual.js").then((m) => m.openManualImport())},
+    {group: "Pages", label: "Go to Manual scenarios", ic: "file", go: () => { location.hash = "#/tests?view=manual"; }},
     {group: "Commands", label: "Open Needs attention", ic: "attention", go: () => { location.hash = "#/attention"; }},
     {group: "Commands", label: "Check the pod connection", ic: "refresh", go: () => checkPod().catch((e) => toast(e.message))},
     {group: "Commands", label: "Open the evidence folder", ic: "folder", go: () => api("/api/open", {path: "."}).catch((e) => toast(e.message))},

@@ -18,8 +18,52 @@ import yaml
 
 from quartermaster.importers.release_sheet import ImportError_, parse_release
 from quartermaster.importers.xlsx import SpreadsheetError
+from quartermaster.service.manual import ManualScripts
 
 MAX_UPLOAD = 20 * 1024 * 1024
+# Words every manual script uses, which say nothing about which feature it tests.
+_SCRIPT_WORDS = frozenset(
+    [
+        "validate",
+        "verify",
+        "functionality",
+        "check",
+        "test",
+        "tests",
+        "testing",
+        "ensure",
+        "able",
+        "should",
+        "page",
+        "screen",
+        "click",
+        "enter",
+        "select",
+        "login",
+        "user",
+        "details",
+        "process",
+        "transactions",
+        "transaction",
+        "create",
+        "created",
+        "update",
+        "view",
+        "information",
+        "info",
+        "employee",
+        "employees",
+        "manager",
+        "managers",
+        "worker",
+        "workers",
+        "specialist",
+        "administrator",
+        "admin",
+        "self",
+        "service",
+    ]
+)
 _SUFFIXES = (".json", ".yaml", ".yml")
 
 
@@ -102,12 +146,23 @@ class Releases:
 
     # ------------------------------------------------------------------ plan
 
-    def plan(self, name: str, tests_root: Path, budget: float | None, opt_ins: set[str]) -> dict[str, Any]:
-        """Which tests to run for this release, why, and which features no test covers."""
+    def plan(
+        self, name: str, tests_root: Path, budget: float | None, opt_ins: set[str], manual: ManualScripts | None = None
+    ) -> dict[str, Any]:
+        """Which tests to run for this release, why, and which features no test covers. Manual
+        scenarios (imported scripts) count as coverage too, and are ranked by risk the same way."""
         # Imported here so the rest of the service does not need the analysis libraries loaded.
         from quartermaster.domain.models import Priority
         from quartermaster.dsl.loader import SpecError, load_release, load_test
-        from quartermaster.impact.analyzer import COVERAGE_THRESHOLD, MATCH_THRESHOLD, analyze, match, plan
+        from quartermaster.impact.analyzer import (
+            COVERAGE_THRESHOLD,
+            MATCH_THRESHOLD,
+            _tokens,
+            analyze,
+            match,
+            plan,
+            severity,
+        )
 
         try:
             release = load_release(self.path(name))
@@ -150,11 +205,69 @@ class Releases:
             }
             for i in [*result.selected, *sorted(result.deferred, key=lambda i: (-i.priority, -i.risk, i.test.id))]
         ]
+        manual_tests = manual.tests() if manual else []
+        info = {s["id"]: s for s in manual.summary()["scenarios"]} if manual else {}
+        manual_words = {
+            m.id: _tokens(" ".join([m.title, m.process, *(st.intent for st in m.steps)])) - _SCRIPT_WORDS
+            for m in manual_tests
+        }
+
+        def match_manual(f: Any, m: Any) -> tuple[float, list[str]]:
+            """A manual workbook holds many scenarios for one product, so the same product alone is
+            weak evidence: a scenario must also share words with the feature to count."""
+            score, why = match(f, m)
+            common = (_tokens(f"{f.title} {f.description}") - _SCRIPT_WORDS) & manual_words[m.id]
+            if not common:
+                return score * 0.4, [*why, "no words in common with the feature: weak evidence"]
+            return score, why
+
+        manual_rows: list[dict[str, Any]] = []
+        for m in manual_tests:
+            survive = 1.0
+            reasons: list[str] = []
+            covers: list[str] = []
+            for f in release.features:
+                score, why = match_manual(f, m)
+                if score < MATCH_THRESHOLD:
+                    continue
+                p = score * severity(f, opt_ins)
+                survive *= 1 - p
+                if score >= COVERAGE_THRESHOLD:
+                    covers.append(f.id)
+                reasons.append(f"{f.id} '{f.title}' (p={p:.2f}): {'; '.join(why)}")
+            risk = round(1 - survive, 4)
+            if risk >= 0.05:
+                s = info.get(m.id, {})
+                manual_rows.append(
+                    {
+                        "id": m.id,
+                        "ref": s.get("ref", ""),
+                        "title": m.title,
+                        "module": m.module,
+                        "product": m.product,
+                        "file": s.get("file", ""),
+                        "cases": s.get("case_count", 0),
+                        "steps": s.get("step_count", 0),
+                        "risk": risk,
+                        "features": covers,
+                        "reasons": reasons,
+                    }
+                )
+        manual_rows.sort(key=lambda r: (-r["risk"], r["id"]))
+
         features = []
         for f in release.features:
             scored = sorted(((match(f, t)[0], t.id) for t in tests), reverse=True)
             related = [(round(s, 2), tid) for s, tid in scored if s >= MATCH_THRESHOLD]
             best = related[0][0] if related else 0.0
+            by_hand = sorted(((round(match_manual(f, m)[0], 2), m.id) for m in manual_tests), reverse=True)
+            by_hand = [(s, mid) for s, mid in by_hand if s >= MATCH_THRESHOLD]
+            if best >= COVERAGE_THRESHOLD:
+                coverage = "covered"
+            elif by_hand and by_hand[0][0] >= COVERAGE_THRESHOLD:
+                coverage = "manual"
+            else:
+                coverage = "weak" if related or by_hand else "none"
             features.append(
                 {
                     "id": f.id,
@@ -164,17 +277,21 @@ class Releases:
                     "change_type": f.change_type.value,
                     "opt_in": f.opt_in,
                     "action_required": f.customer_action_required,
-                    "coverage": "covered" if best >= COVERAGE_THRESHOLD else "weak" if related else "none",
+                    "coverage": coverage,
                     "tests": [{"id": tid, "match": s} for s, tid in related[:5]],
+                    "manual": [
+                        {"id": mid, "title": info.get(mid, {}).get("title", mid), "match": s} for s, mid in by_hand[:5]
+                    ],
                 }
             )
-        counts = {c: sum(f["coverage"] == c for f in features) for c in ("covered", "weak", "none")}
+        counts = {c: sum(f["coverage"] == c for f in features) for c in ("covered", "manual", "weak", "none")}
         return {
             "name": name,
             "release": release.id,
             "budget": budget,
             "opt_ins": sorted(opt_ins),
             "tests": rows,
+            "manual": manual_rows,
             "features": features,
             "problems": problems,
             "summary": {
@@ -184,6 +301,8 @@ class Releases:
                 "selected": len(result.selected),
                 "minutes": result.total_minutes,
                 "at_risk": sum(i.risk >= 0.05 for i in impacts),
+                "manual_scenarios": len(manual_tests),
+                "manual_at_risk": len(manual_rows),
             },
         }
 

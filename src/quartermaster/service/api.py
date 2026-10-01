@@ -23,6 +23,10 @@ computers and other web sites cannot start runs.
     GET  /api/releases               release feature lists (the releases folder and imported ones)
     GET  /api/releases/plan?name=<file>&budget=<minutes>&opt_in=<feature id>   tests to run, and why
     POST /api/releases/import        {"name", "content" (base64), "release_id", "save"} a feature list
+    GET  /api/manual                 imported manual test scripts: their files and scenarios
+    GET  /api/manual/scenario?id=<id>   one manual scenario with its test cases and steps
+    POST /api/manual/import          {"files": [{"name", "content" (base64), "module", "product"}], "save"}
+    POST /api/manual/remove          {"key"} forget one imported workbook
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -49,6 +53,7 @@ from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
+from quartermaster.service.manual import ManualScripts
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
 from quartermaster.service.settings import Settings, check_pod
@@ -104,6 +109,7 @@ class App:
         self.settings = Settings(data_dir / "settings.json")
         self.pod_check: dict[str, Any] | None = None
         self.releases = Releases(releases_root, data_dir / "releases")
+        self.manual = ManualScripts(data_dir / "manual")
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -192,6 +198,8 @@ class App:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
         if route[:1] == ["releases"]:
             return self._releases(method, route[1:], query, data)
+        if route[:1] == ["manual"]:
+            return self._manual(method, route[1:], query, data)
         if method == "POST" and route == ["open"]:
             return _json({"opened": str(self._open(str(data.get("path") or "")))})
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
@@ -204,11 +212,28 @@ class App:
                 budget = str((query.get("budget") or [""])[0]).strip()
                 opt_ins = {o for v in query.get("opt_in") or [] for o in v.split(",") if o}
                 name = str((query.get("name") or [""])[0])
-                return _json(self.releases.plan(name, self.tests_root, float(budget) if budget else None, opt_ins))
+                limit = float(budget) if budget else None
+                return _json(self.releases.plan(name, self.tests_root, limit, opt_ins, self.manual))
             if method == "POST" and route == ["import"]:
                 return _json(self.releases.import_file(data), HTTPStatus.CREATED if data.get("save") else HTTPStatus.OK)
         except LookupError as e:
             raise ApiError(HTTPStatus.NOT_FOUND, str(e).strip("'\"")) from e
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _manual(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
+        try:
+            if method == "GET" and not route:
+                return _json(self.manual.summary())
+            if method == "GET" and route == ["scenario"]:
+                return _json(self.manual.get(str((query.get("id") or [""])[0])))
+            if method == "POST" and route == ["import"]:
+                return _json(self.manual.import_files(data))
+            if method == "POST" and route == ["remove"]:
+                return _json(self.manual.remove(str(data.get("key") or "")))
+        except LookupError as e:
+            raise ApiError(HTTPStatus.NOT_FOUND, str(e)) from e
         except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
