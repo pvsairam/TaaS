@@ -86,6 +86,12 @@ SNAPSHOT_JS = r"""() => {
     return clean(el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title')); };
   const nameOf = (el) => clean(el.getAttribute('aria-label') || el.innerText || el.getAttribute('title')
     || el.getAttribute('alt'));
+  // The whole name (a card's link holds its title and description) and its first line (the title):
+  // the list shows names cut short, but the element is found again by its whole name or its title.
+  const fullOf = (el) => (el.getAttribute('aria-label') || el.innerText || el.getAttribute('title')
+    || el.getAttribute('alt') || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const titleOf = (el) => clean((el.getAttribute('aria-label') || el.innerText || '').split('\n')
+    .map((t) => t.trim()).find(Boolean));
   const inToolbar = (el) => el.closest('[data-qm-toolbar], #__qm_toolbar, .__qm');
   const sel = 'a[href], button, input:not([type=hidden]), select, textarea, [role=button], [role=link], ' +
     '[role=menuitem], [role=tab], [role=option], [role=treeitem], [onclick]';
@@ -98,7 +104,7 @@ SNAPSHOT_JS = r"""() => {
     const name = field ? labelOf(el) : nameOf(el);
     if (!name || seen.has(role + '|' + name)) continue;
     seen.add(role + '|' + name);
-    items.push({role, name});
+    items.push(field ? {role, name} : {role, name, full: fullOf(el), title: titleOf(el)});
   }
   // Cards and tiles (for example Redwood's Personal Info cards) are often plain boxes that react to
   // a click: their text shows the hand cursor, but they are not links or buttons.
@@ -372,12 +378,16 @@ class Autopilot:
         """The visible element, and how to find it again on replay. Replay needs a way that finds
         exactly one element on the whole page (hidden copies too), so those ways come first."""
         page, role, name = self.page, item["role"], item["name"]
+        full, title = item.get("full") or name, item.get("title") or ""
         ways: list[tuple[str, str, Any]] = []
         if role in ("textbox", "combobox", "searchbox"):
             ways.append(("label", name, page.get_by_label(name, exact=True)))
         if role in _ROLES:
-            ways.append(("role", f"{role}:{name}", page.get_by_role(role, name=name, exact=True)))
-        ways.append(("text", name, page.get_by_text(name, exact=True)))
+            for n in dict.fromkeys([full, name]):  # the list may show the name cut short
+                ways.append(("role", f"{role}:{n}", page.get_by_role(role, name=n, exact=True)))
+        for n in dict.fromkeys([name, title] if title else [name]):
+            # a card's title is text inside it: a click on the title opens the card
+            ways.append(("text", n, page.get_by_text(n, exact=True)))
         shown = [(s, v, _visible(loc)) for s, v, loc in ways]
         clickable = [(s, v, loc) for s, v, loc in shown if _count(loc) >= 1]
         if not clickable:
@@ -395,7 +405,7 @@ class Autopilot:
             element.fill(value, timeout=8000)
         else:
             element.select_option(label=value, timeout=8000)
-        event: dict[str, Any] = {"kind": what, "intent": item["name"], "candidates": candidates}
+        event: dict[str, Any] = {"kind": what, "intent": item.get("title") or item["name"], "candidates": candidates}
         if what in ("fill", "select"):
             event["value"] = value
         self.recorder.events.append(event)

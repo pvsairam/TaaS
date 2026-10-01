@@ -506,10 +506,13 @@ document.getElementById("login").addEventListener("submit", (e) => {
   $("pi").onclick = (ev) => {
     ev.preventDefault();
     $("panel").style.display = "none";
-    // like Redwood's Personal Info cards: a box that reacts to a click, not a link or a button
-    $("main").innerHTML = '<h1>Personal Information</h1><div id="comp" style="cursor:pointer">' +
-      '<div><span>My Compensation</span></div><div>View your salary</div></div>';
+    // like Redwood's Personal Info cards: a link holding a title and a long description, next to
+    // a box that reacts to a click without being a link
+    $("main").innerHTML = '<h1>Personal Information</h1><a href="#" id="comp"><div><span>My Compensation' +
+      '</span></div><div>View your compensation details, such as salary and personal contributions.</div></a>' +
+      '<div style="cursor:pointer"><span>Contact Info</span></div>';
     $("comp").onclick = (e2) => {
+      e2.preventDefault();
       $("main").innerHTML = '<h1>My Compensation</h1><h2>Current Salary</h2>';
     };
   };
@@ -537,7 +540,7 @@ def navigator_ai(system: str, prompt: str) -> str:
     if "nothing yet" not in prompt:
         return json.dumps({"do": "done"})
     for n, _role, name in re.findall(r'^\[(\d+)\] (\w+) "(.+)"$', prompt, re.M):
-        if name == step.removeprefix("Select ").strip():
+        if name.startswith(step.removeprefix("Select ").strip()):  # a card's name is cut short in the list
             return json.dumps({"do": "click", "element": int(n)})
     return json.dumps({"do": "stuck", "why": "not on the screen"})
 
