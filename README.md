@@ -13,6 +13,8 @@ that is also used internally.
 The full product and architecture plan (market analysis, architecture, roadmap, risks, open
 questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 
+**New here and want to try it?** Follow **[TESTING.md](TESTING.md)**, step by step.
+
 ## What works today (Phase 0)
 
 | Area | Module |
