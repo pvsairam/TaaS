@@ -116,12 +116,12 @@ class Releases:
         tests: list[Any] = []
         files: dict[str, str] = {}
         problems: list[dict[str, str]] = []
-        for f in sorted(tests_root.rglob("*.y*ml")):
-            rel = f.relative_to(tests_root).as_posix()
+        for spec in sorted(tests_root.rglob("*.y*ml")):
+            rel = spec.relative_to(tests_root).as_posix()
             try:
-                t = load_test(f)
+                t = load_test(spec)
             except (SpecError, OSError, ValueError) as e:
-                problems.append({"file": rel, "problem": str(e).replace(str(f), rel)[:300]})
+                problems.append({"file": rel, "problem": str(e).replace(str(spec), rel)[:300]})
                 continue
             if t.id in files:
                 problems.append({"file": rel, "problem": f"the id {t.id} is also used by {files[t.id]}"})
