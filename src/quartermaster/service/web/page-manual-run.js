@@ -11,7 +11,7 @@ export async function manualRunPage() {
   if (!state.status || !ws) await loadCommon();
   const rec = await api("/api/recording");
   if (state.page !== "manual-run") return;
-  if (rec.mode !== "manual") {
+  if (rec.mode !== "manual" && rec.mode !== "ai") {
     ws = null;
     if (rec.status === "recording" || rec.status === "saving") { location.hash = "#/record"; return; }
     show([{label: "Tests", href: "#/tests?view=manual"}, {label: "Run by hand"}],
@@ -33,6 +33,7 @@ export async function manualRunPage() {
 }
 
 function outcome(rec) {
+  if (rec.mode === "ai" && rec.status !== "error") return aiOutcome(rec);
   if (rec.status === "error") {
     return h("div", {class: "stack"},
       h("div", {class: "page-head"}, h("div", {}, h("h1", {}, rec.title), h("p", {class: "lead"}, "Not saved"))),
@@ -55,7 +56,37 @@ function outcome(rec) {
         button("Back to manual scenarios", {href: "#/tests?view=manual"})))}));
 }
 
+// After the AI has prepared a scenario: what a person must do next.
+function aiOutcome(rec) {
+  const links = [
+    rec.run_id ? button("See what the AI did", {kind: rec.automated ? "" : "primary", ic: "runs", href: runLink(rec.run_id)}) : h("span", {class: "meta"}, "Adding it to the run history…"),
+    rec.document_url ? button("Evidence document", {ic: "download", href: rec.document_url}) : null,
+  ];
+  return h("div", {class: "stack"},
+    h("div", {class: "page-head"}, h("div", {}, h("h1", {}, rec.title), h("p", {class: "lead"}, `Prepared by AI${rec.release ? ` on ${rec.release}` : ""}.`))),
+    card({body: h("div", {class: "stack", style: "gap:14px"},
+      rec.automated
+        ? [callout("warning", "Check it before it runs.", "Open what the AI did and compare each picture with its step. If every picture is right, approve it: from then on Run plays it by itself. If something is wrong, do it by hand instead."),
+          h("div", {class: "row"}, ...links,
+            button("Approve", {kind: "primary", ic: "check", disabled: !rec.run_id, onClick: async () => {
+              const {approveScenario} = await import("./page-manual.js");
+              approveScenario(rec.scenario_id);
+            }}),
+            button("Do it by hand", {ic: "file", onClick: async () => {
+              const {runScenario} = await import("./page-manual.js");
+              runScenario(rec.scenario_id, {byHand: true});
+            }}))]
+        : [callout("danger", "The AI stopped, so nothing was saved to run.", `${(rec.message || "It could not finish every step").replace(/\.?\s*$/, ".")} Do this scenario by hand: it only needs doing once.`),
+          h("div", {class: "row"}, ...links,
+            button("Run by hand", {kind: "primary", ic: "play", onClick: async () => {
+              const {runScenario} = await import("./page-manual.js");
+              runScenario(rec.scenario_id, {byHand: true});
+            }}),
+            button("Back to manual scenarios", {href: "#/tests?view=manual"}))])}));
+}
+
 function workspace(rec) {
+  const byAI = rec.mode === "ai";
   const list = h("ol", {class: "guide", "aria-label": "Steps"});
   const message = h("div", {class: "meta", role: "status", "aria-live": "polite", style: "min-height:18px"});
   const progress = h("span", {class: "meta"});
@@ -66,6 +97,7 @@ function workspace(rec) {
   let steps = [];
   const checkBtn = button("Add check", {ic: "target", title: "The next click in the browser checks a value instead of doing an action",
     onClick: () => send("check")});
+  const stopBtn = button("Stop", {ic: "stop", title: "Stop the AI. Nothing is saved to run.", onClick: () => send("stop")});
   const finishBtn = button("Finish", {kind: "primary", ic: "check", onClick: () => {
     const open = steps.filter((st) => !st.status).length;
     if (open && !confirm(`${open} step${open === 1 ? " is" : "s are"} not marked yet and will count as not checked, so the run will not pass. Finish anyway?`)) return;
@@ -75,10 +107,13 @@ function workspace(rec) {
   const el = h("div", {},
     h("div", {class: "page-head"},
       h("div", {}, h("h1", {}, rec.title),
-        h("p", {class: "lead"}, `${rec.ref} · ${rec.workbook}${rec.release ? ` · Release ${rec.release}` : ""}`)),
-      h("div", {class: "row"}, checkBtn, finishBtn)),
-    callout("info", "Do each step in the browser window that opened (it is already signed in), then mark it here.",
-      "Quartermaster takes a picture of the screen when you mark a step, and remembers your clicks so the scenario can play by itself next time. Add check, then click a value on the screen, proves a page shows what it should."),
+        h("p", {class: "lead"}, `${byAI ? "Prepared by AI · " : ""}${rec.ref} · ${rec.workbook}${rec.release ? ` · Release ${rec.release}` : ""}`)),
+      h("div", {class: "row"}, ...(byAI ? [stopBtn] : [checkBtn, finishBtn]))),
+    byAI
+      ? callout("info", "The AI is doing the steps in the browser window that opened. You can watch it.",
+        "It reads each written step, chooses a button or link on the screen, and takes a picture when the step is done. It stops rather than guess, and never presses Save, Submit or Delete unless the step says so. You check its pictures at the end.")
+      : callout("info", "Do each step in the browser window that opened (it is already signed in), then mark it here.",
+        "Quartermaster takes a picture of the screen when you mark a step, and remembers your clicks so the scenario can play by itself next time. Add check, then click a value on the screen, proves a page shows what it should."),
     h("section", {class: "card section"},
       h("div", {class: "card-head"}, h("div", {class: "grow"}, h("h3", {}, "Steps"), message), progress),
       h("div", {class: "card-body"}, list)));
@@ -101,20 +136,20 @@ function workspace(rec) {
         st.case_name && st.case !== st.case_name ? h("div", {class: "caption"}, `${st.case} · ${st.case_name}`) : null,
         h("div", {style: "font-weight:500;white-space:pre-line"}, st.action),
         st.expected ? h("div", {class: "meta", style: "white-space:pre-line"}, "Expected: ", st.expected) : null,
-        st.status === "failed" && st.note ? h("div", {class: "meta", style: "color:var(--danger)"}, "Failed: ", st.note) : null,
+        st.status === "failed" && st.note ? h("div", {class: "meta", style: "color:var(--danger)"}, byAI ? "" : "Failed: ", st.note) : null,
         st.picture_note ? h("div", {class: "meta"}, st.picture_note) : null,
         failBox),
       h("div", {class: "stack", style: "gap:6px;align-items:flex-end"},
         st.picture_url ? h("a", {href: st.picture_url, target: "_blank", rel: "noopener", title: `Picture of step ${st.number}`},
           h("img", {src: st.picture_url, alt: `Screen at step ${st.number}`, class: "guide-shot"})) : null,
-        marks));
+        byAI ? null : marks));
   };
 
   const update = (r) => {
     const feed = r.feed;
     if (r.status === "saving") {
-      [checkBtn, finishBtn].forEach((b) => { b.disabled = true; });
-      message.textContent = "Saving the evidence and the steps you clicked…";
+      [checkBtn, finishBtn, stopBtn].forEach((b) => { b.disabled = true; });
+      message.textContent = byAI ? "Saving what the AI did…" : "Saving the evidence and the steps you clicked…";
       return;
     }
     steps = feed?.guide || [];
@@ -123,7 +158,7 @@ function workspace(rec) {
     checkBtn.disabled = !feed;
     finishBtn.disabled = !feed;
     const done = steps.filter((st) => st.status).length;
-    progress.textContent = steps.length ? `${done} of ${steps.length} marked` : "";
+    progress.textContent = steps.length ? `${done} of ${steps.length} ${byAI ? "done" : "marked"}` : "";
     const sig = JSON.stringify(steps);
     if (list.dataset.sig === sig) return;
     list.dataset.sig = sig;

@@ -1,7 +1,8 @@
 """Settings chosen in the web UI, kept in <data folder>/settings.json.
 
-Only descriptive settings live here: a name for the environment and the Oracle release it is on.
-The pod address and sign-in stay in environment variables, and the password is never stored.
+Only descriptive settings live here: a name for the environment, the Oracle release it is on, and
+which AI provider and model to use. The pod address and sign-in stay in environment variables, the
+password is never stored, and neither is the AI key: only the name of the variable that holds it.
 """
 
 from __future__ import annotations
@@ -16,7 +17,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-FIELDS = {"environment_name": 40, "release": 20}
+from quartermaster.ai.providers import check_settings
+
+FIELDS = {
+    "environment_name": 40,
+    "release": 20,
+    "ai_provider": 20,
+    "ai_model": 120,
+    "ai_base_url": 300,
+    "ai_key_env": 80,
+}
+_AI = ("ai_provider", "ai_model", "ai_base_url", "ai_key_env")
 _RELEASE = re.compile(r"^[A-Za-z0-9 ._-]*$")
 
 
@@ -36,7 +47,8 @@ class Settings:
         unknown = set(changes) - set(FIELDS)
         if unknown:
             raise ValueError(f"unknown settings: {', '.join(sorted(unknown))}")
-        clean = {k: " ".join(str(v or "").split())[: FIELDS[k]] for k, v in changes.items()}
+        clean = {k: " ".join(str(v or "").split())[: FIELDS[k]] for k, v in changes.items() if k not in _AI}
+        clean.update(check_settings({k: v for k, v in changes.items() if k in _AI}))
         if not _RELEASE.match(clean.get("release", "")):
             raise ValueError("the release may use letters, digits, spaces, dots and dashes, e.g. 26C")
         with self._lock:

@@ -177,6 +177,48 @@ class ManualScripts:
             results.append(view)
         return {"files": results, "saved": sum(r.get("saved", False) for r in results)}
 
+    # ------------------------------------------------------------------ drafts prepared by AI
+
+    @property
+    def _review_file(self) -> Path:
+        return self.folder / "_review" / "prepared.json"  # a sub-folder: not read as a workbook
+
+    def reviews(self) -> dict[str, dict[str, Any]]:
+        try:
+            data = json.loads(self._review_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_reviews(self, data: dict[str, dict[str, Any]]) -> None:
+        self._review_file.parent.mkdir(parents=True, exist_ok=True)
+        self._review_file.write_text(json.dumps(data, indent=1), encoding="utf-8")
+
+    def mark_prepared(self, scenario_id: str, run_id: str, by: str) -> None:
+        """An AI prepared this scenario: it waits for a person to check its pictures and approve it."""
+        data = self.reviews()
+        data[scenario_id] = {
+            "run_id": run_id,
+            "by": by,
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "approved_at": None,
+        }
+        self._save_reviews(data)
+
+    def approve(self, scenario_id: str) -> dict[str, Any]:
+        data = self.reviews()
+        if scenario_id not in data:
+            raise LookupError("this scenario has no prepared version waiting for review")
+        data[scenario_id]["approved_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        self._save_reviews(data)
+        return data[scenario_id]
+
+    def checked_by_hand(self, scenario_id: str) -> None:
+        """Done by a person: whatever an AI prepared before has been replaced, nothing to review."""
+        data = self.reviews()
+        if data.pop(scenario_id, None) is not None:
+            self._save_reviews(data)
+
     def remove(self, key: str) -> dict[str, Any]:
         if not re.fullmatch(r"[a-z0-9-]+", key or ""):
             raise ValueError("unknown file")

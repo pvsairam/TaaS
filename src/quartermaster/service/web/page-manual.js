@@ -9,10 +9,10 @@ import {show} from "./app.js";
 const filters = {q: "", module: "all"};
 
 // Run a scenario: by hand the first time (or when asked), by itself once it has been done by hand.
-export async function runScenario(id, {byHand = false} = {}) {
+export async function runScenario(id, {byHand = false, prepare = false} = {}) {
   if (!state.status?.ready) { toast("Set up the pod and its sign-in in Settings first."); return; }
   try {
-    const r = await api("/api/manual/run", {id, by_hand: byHand});
+    const r = await api("/api/manual/run", {id, by_hand: byHand, prepare});
     document.querySelector(".scrim")?.click(); // close the scenario panel, if open
     location.hash = r.mode === "automatic" ? runLink(r.run.id) : "#/manual-run";
   } catch (err) { toast(err.message); }
@@ -22,7 +22,35 @@ function resultCell(s) {
   if (!s.qm_result) return h("span", {class: "muted"}, "Not run yet");
   const r = s.qm_result;
   return h("a", {href: runLink(r.run_id), style: "color:inherit;text-decoration:none", class: "stack", title: "Open the run"},
-    statusBadge(r.status), h("span", {class: "sub"}, `${r.by_hand ? "By hand" : "By itself"} · ${when(r.at)}`));
+    statusBadge(r.status), h("span", {class: "sub"}, `${HOW[r.how] || "By itself"} · ${when(r.at)}`));
+}
+
+const HOW = {by_hand: "By hand", prepared: "Prepared by AI", automatic: "By itself"};
+
+const aiReady = () => Boolean(state.status?.ai?.provider) && !state.status.ai.problem;
+
+export async function approveScenario(id) {
+  try {
+    await api("/api/manual/approve", {id});
+    toast("Approved. Run now plays it by itself.");
+    document.querySelector(".scrim")?.click();
+    if (location.hash.startsWith("#/tests")) manualPage(); else location.hash = "#/tests?view=manual";
+  } catch (err) { toast(err.message); }
+}
+
+// The one action that fits where a scenario is: review a draft, run it, or get it ready.
+function actionButtons(s, {size} = {}) {
+  const off = !state.status.ready;
+  if (s.review === "needs_review") {
+    return [button("Review", {size, kind: "primary", ic: "search", title: "Check what the AI did, then approve it", onClick: () => openScenario(s.id)})];
+  }
+  if (s.automated) return [button("Run", {size, ic: "play", disabled: off, title: `Plays ${s.title} by itself`, onClick: () => runScenario(s.id)})];
+  return [
+    aiReady() ? button("Prepare", {size, kind: "primary", ic: "target", disabled: off, title: "An AI follows the written steps in the pod; you review it after",
+      onClick: () => runScenario(s.id, {prepare: true})}) : null,
+    button(aiReady() ? "By hand" : "Run by hand", {size, kind: aiReady() ? "" : "primary", ic: "play", disabled: off,
+      title: `Do ${s.title} by hand; next time it plays by itself`, onClick: () => runScenario(s.id, {byHand: true})}),
+  ];
 }
 
 export function manualLink(id) {
@@ -62,10 +90,8 @@ export async function manualPage() {
           s.blank_data ? badge("Test data missing", "warning") : null,
           s.status ? h("span", {title: `Typed in the workbook${s.tester ? ` by ${s.tester}` : ""}. Not a Quartermaster run.`},
             badge(`Workbook: ${s.status === "passed" ? "Pass" : "Fail"}${s.releases?.length ? ` (${s.releases.join(", ")})` : ""}`, "neutral")) : null)},
-        {srLabel: "Run", cls: "actions", render: (s) => button(s.automated ? "Run" : "Run by hand", {size: "sm", kind: s.automated ? "" : "primary",
-          ic: "play", disabled: !state.status.ready,
-          title: s.automated ? `Plays ${s.title} by itself` : `Do ${s.title} by hand; next time it plays by itself`,
-          onClick: () => runScenario(s.id)})},
+        {srLabel: "Run", cls: "actions", render: (s) => h("div", {class: "row", style: "gap:6px;flex-wrap:nowrap;justify-content:flex-end"},
+          actionButtons(s, {size: "sm"}))},
       ],
     }) : emptyState(all.length
       ? {ic: "search", title: "No scenarios match", text: "Try another search or module."}
@@ -120,15 +146,23 @@ export async function openScenario(id) {
   drawer({
     title: s.title,
     sub: `${plural(s.case_count, "test case")} · ${plural(s.step_count, "step")}`,
-    foot: () => [
-      h("span", {class: "meta grow"}, s.automated ? "Done by hand before: Run plays it by itself." : "Run it once by hand; after that it plays by itself."),
+    foot: () => s.review === "needs_review" ? [
+      h("span", {class: "grow"}),
+      button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}),
+      button("Approve", {kind: "primary", ic: "check", onClick: () => approveScenario(s.id)}),
+    ] : [
+      h("span", {class: "meta grow"}, s.automated ? "Ready: Run plays it by itself." : aiReady() ? "Prepare: an AI does it and you review. Or do it by hand once." : "Do it by hand once; after that it plays by itself."),
       s.automated ? button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}) : null,
-      button(s.automated ? "Run" : "Run by hand", {kind: "primary", ic: "play", disabled: !state.status.ready, onClick: () => runScenario(s.id)}),
+      ...actionButtons(s),
     ],
     body: () => [
+      s.review === "needs_review" ? callout("warning", "Prepared by AI. Check it before it runs.",
+        [`${s.prepared.by} did the steps ${when(s.prepared.at).toLowerCase()}. Open what it did and compare each picture with the step it belongs to. If every picture is right, Approve. If not, do it by hand. `,
+          h("a", {href: runLink(s.prepared.run_id)}, "See what the AI did")]) : null,
+      s.review === "approved" ? callout("info", "Prepared by AI and approved.", `Approved ${when(s.prepared.approved_at).toLowerCase()}.`) : null,
       s.qm_history?.length ? h("div", {}, h("div", {class: "caption", style: "margin-bottom:6px"}, "RESULTS IN QUARTERMASTER"),
         h("div", {class: "stack", style: "gap:6px"}, s.qm_history.slice(0, 5).map((r) => h("a", {href: runLink(r.run_id), class: "row", style: "gap:8px;color:inherit"},
-          statusBadge(r.status), h("span", {class: "meta"}, `${r.by_hand ? "By hand" : "By itself"} · ${when(r.at)}${r.release ? ` · ${r.release}` : ""}`))))) : null,
+          statusBadge(r.status), h("span", {class: "meta"}, `${HOW[r.how] || "By itself"} · ${when(r.at)}${r.release ? ` · ${r.release}` : ""}`))))) : null,
       s.status ? callout("info", `The workbook says ${s.status === "passed" ? "Pass" : "Fail"}.`,
         `Someone typed this in its Pass / Fail column${s.tester ? ` (tester ${s.tester})` : ""}${s.releases?.length ? `, for ${s.releases.join(" and ")}` : ""}. Quartermaster has not run this scenario.`) : null,
       h("dl", {class: "kv"}, facts.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),

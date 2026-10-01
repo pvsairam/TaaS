@@ -219,6 +219,8 @@ def _record(args: argparse.Namespace) -> int:
         recorder.guide = Guide.load(Path(args.guide), run_folder(Path(args.evidence), args.id, run_id))
         recorder.write_feed()
     driver.open(env, args.persona)  # sign-in is done for you and never recorded
+    if args.prepare:  # an AI follows the written steps instead of a person
+        return _prepare(args, driver, recorder, env, run_id)
     try:
         recorder.attach(driver.page)
         print("Recording. Do the business flow in the browser window.")
@@ -250,7 +252,58 @@ def _record(args: argparse.Namespace) -> int:
     return 0
 
 
-def _finish_by_hand(args: argparse.Namespace, recorder: Any, env: Environment, run_id: str) -> int:
+def _prepare(args: argparse.Namespace, driver: Any, recorder: Any, env: Environment, run_id: str) -> int:
+    """Let the AI chosen in Settings do the scenario's steps; save the result as a draft to review."""
+    from quartermaster.ai.providers import AIConfig, chat
+    from quartermaster.recorder.autopilot import Autopilot
+
+    if recorder.guide is None:
+        print("error: --prepare needs --guide (the scenario to prepare)", file=sys.stderr)
+        driver.close()
+        return 2
+    config = AIConfig(args.ai_provider, args.ai_model, args.ai_base_url.rstrip("/"), args.ai_key_env)
+    problem = config.problem()
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        driver.close()
+        return 2
+    lines: queue.Queue[str] = queue.Queue()
+
+    def read_lines() -> None:  # "stop" from the web page ends the preparation
+        for line in sys.stdin:
+            lines.put(line.strip().lower())
+
+    threading.Thread(target=read_lines, daemon=True).start()
+
+    def should_stop() -> bool:
+        while not lines.empty():
+            if lines.get() in ("", "stop"):
+                return True
+        return False
+
+    pilot = Autopilot(
+        driver.page,
+        recorder.guide,
+        recorder,
+        ask=lambda system, prompt: chat(config, system, prompt),
+        settle=getattr(driver, "_settle", lambda: None),
+        should_stop=should_stop,
+    )
+    recorder.message = f"Preparing with {config.label}…"
+    recorder.write_feed()
+    try:
+        finished = pilot.run()
+    finally:
+        driver.close()
+    if not finished:
+        print(f"The AI stopped: {pilot.reason}")
+    args.tester = f"AI ({config.label})"
+    return _finish_by_hand(args, recorder, env, run_id, mode="ai", save_test=finished)
+
+
+def _finish_by_hand(
+    args: argparse.Namespace, recorder: Any, env: Environment, run_id: str, mode: str = "manual", save_test: bool = True
+) -> int:
     """Save a manual scenario done by hand: the evidence of what the tester marked (run record, Word
     document, suite record and summary, as for `qm run`), and the clicks as a test that can play by
     itself next time."""
@@ -261,7 +314,12 @@ def _finish_by_hand(args: argparse.Namespace, recorder: Any, env: Environment, r
         print("error: no step was marked Pass or Fail, so nothing was saved", file=sys.stderr)
         return 2
     out: Path | None = Path(args.out)
+    if not save_test:
+        print("The AI did not finish every step, so no automatic version was saved.")
+        out = None
     try:
+        if out is None:
+            raise ValueError("not saved")
         test = events_to_test(
             recorder.events,
             test_id=args.id,
@@ -272,7 +330,8 @@ def _finish_by_hand(args: argparse.Namespace, recorder: Any, env: Environment, r
             process=args.process or "",
         )
     except ValueError:
-        print("No clicks were recorded, so the automatic version was not saved.")
+        if out is not None:
+            print("No clicks were recorded, so the automatic version was not saved.")
         out = None
     else:
         assert out is not None
@@ -292,7 +351,7 @@ def _finish_by_hand(args: argparse.Namespace, recorder: Any, env: Environment, r
         run_id=run_id,
     )
     record = build_record(result, run_dir=run_dir, test_file=out, video_mode="off", videos=[], executed_by=args.tester)
-    record["mode"] = "manual"  # done by a person; the document says so
+    record["mode"] = mode  # "manual": done by a person, "ai": prepared by an AI; the document says which
     write_record(record, run_dir)
     doc = write_evidence_document(record, run_dir, run_dir / f"{args.id}_{run_id}_evidence.docx")
     suite_id = new_run_id()
@@ -439,6 +498,11 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--process", help="what the test is part of, e.g. Manual scenario ESS-001")
     rc.add_argument("--release", help="Oracle release on the pod, e.g. 26C (shown in the evidence)")
     rc.add_argument("--tester", help="name shown as 'Run by' in the evidence")
+    rc.add_argument("--prepare", action="store_true", help="with --guide: an AI does the steps (see Settings)")
+    rc.add_argument("--ai-provider", default="", help="AI provider id, e.g. openai, anthropic, openrouter")
+    rc.add_argument("--ai-model", default="")
+    rc.add_argument("--ai-base-url", default="")
+    rc.add_argument("--ai-key-env", default="", help="NAME of the environment variable with the AI key")
     rc.set_defaults(func=_record)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")

@@ -27,11 +27,18 @@ import json, os, sys
 out, rest = sys.argv[1], sys.argv[2:]
 opt = dict(zip(rest[::2], rest[1::2]))
 tid, evidence, feed = opt['--id'], opt['--evidence'], opt['--events']
-json.load(open(opt['--guide']))  # the scenario must arrive
+guide = json.load(open(opt['--guide']))  # the scenario must arrive
 run_dir = os.path.join(evidence, tid, 'r1')
 os.makedirs(os.path.join(run_dir, 'screenshots'), exist_ok=True)
 marks = {}
-while True:
+total = sum(len(c['steps']) for c in guide['cases'])
+if '--prepare' in rest:  # the AI does the steps; a model called "stuck" gives up at step 2
+    assert opt['--ai-provider'] and opt['--ai-key-env']
+    stuck = opt['--ai-model'] == 'stuck'
+    marks = {n: 'failed' if stuck and n == 2 else 'passed' for n in range(1, 3 if stuck else total + 1)}
+    if stuck:
+        print('The AI stopped: Step 2: it would have to click "Delete"')
+while '--prepare' not in rest:
     line = sys.stdin.readline().strip()
     if line in ('', 'stop'):
         break
@@ -47,12 +54,14 @@ if not marks:
 status = 'failed' if 'failed' in marks.values() else 'passed'
 suite_dir = os.path.join(evidence, '_suites', 'S-' + tid)
 os.makedirs(suite_dir, exist_ok=True)
-entry = {'test_id': tid, 'status': status, 'run_dir': tid + '/r1', 'document': None, 'mode': 'manual',
+entry = {'test_id': tid, 'status': status, 'run_dir': tid + '/r1', 'document': None,
+         'mode': 'ai' if '--prepare' in rest else 'manual',
          'steps_total': len(marks), 'steps_passed': sum(v == 'passed' for v in marks.values())}
 json.dump({'release': opt.get('--release'), 'runs': [entry]}, open(os.path.join(suite_dir, 'suite.json'), 'w'))
-os.makedirs(os.path.dirname(out), exist_ok=True)
-open(out, 'w').write('id: ' + tid + '\n')
-print('Saved 1 step(s) to ' + out + '. Replay with: qm run ' + out)
+if status == 'passed':
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, 'w').write('id: ' + tid + '\n')
+    print('Saved 1 step(s) to ' + out + '. Replay with: qm run ' + out)
 print('Manual run: ' + suite_dir)
 print('Summary document: ' + os.path.join(suite_dir, 's.docx'))
 print('Result: ' + status)
@@ -147,3 +156,56 @@ def test_a_failed_step_fails_the_run(app: App) -> None:
     assert scenario(app, "ESS-003")["qm_result"]["status"] == "failed"
     with pytest.raises(ApiError, match="no manual scenario"):
         app.handle("POST", "/api/manual/run", json.dumps({"id": "nope"}).encode())
+
+
+def test_prepared_by_ai_waits_for_review_then_runs(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    pay = scenario(app, "ESS-001")
+    with pytest.raises(ApiError, match="Choose an AI provider"):
+        app.handle("POST", "/api/manual/run", json.dumps({"id": pay["id"], "prepare": True}).encode())
+    call(app, "POST", "/api/settings", {"ai_provider": "openrouter", "ai_model": "some/model"})
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ApiError, match="OPENROUTER_API_KEY"):
+        app.handle("POST", "/api/manual/run", json.dumps({"id": pay["id"], "prepare": True}).encode())
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+
+    started = call(app, "POST", "/api/manual/run", {"id": pay["id"], "prepare": True})
+    assert started["mode"] == "prepare" and started["recording"]["mode"] == "ai"
+    done = wait(lambda: (lambda s: s if s.get("run_id") else None)(call(app, "GET", "/api/recording")))
+    assert (done["result"], done["automated"]) == ("passed", True)
+    run = call(app, "GET", "/api/runs")[0]
+    assert run["options"]["label"] == "Prepared by AI: My Compensation" and run["executed_by"] == "AI"
+
+    pay = scenario(app, "ESS-001")
+    assert pay["review"] == "needs_review" and pay["prepared"]["run_id"] == run["id"]
+    assert pay["qm_result"]["how"] == "prepared" and "some/model" in pay["prepared"]["by"]
+    with pytest.raises(ApiError, match="approve it before it runs"):
+        app.handle("POST", "/api/manual/run", json.dumps({"id": pay["id"]}).encode())
+
+    assert call(app, "POST", "/api/manual/approve", {"id": pay["id"]})["approved_at"]
+    assert scenario(app, "ESS-001")["review"] == "approved"
+    again = call(app, "POST", "/api/manual/run", {"id": pay["id"]})
+    assert again["mode"] == "automatic"
+    wait(lambda: call(app, "GET", f"/api/runs/{again['run']['id']}")["status"] == "passed")
+
+    # Done by a person afterwards: nothing left to review.
+    call(app, "POST", "/api/manual/run", {"id": pay["id"], "by_hand": True})
+    call(app, "POST", "/api/recording/result", {"text": "1 pass"})
+    wait(lambda: (call(app, "GET", "/api/recording").get("feed") or {}).get("guide"))
+    call(app, "POST", "/api/recording/stop")
+    wait(
+        lambda: (lambda s: s if s.get("run_id") and s["mode"] == "manual" else None)(call(app, "GET", "/api/recording"))
+    )
+    assert scenario(app, "ESS-001")["review"] is None
+
+
+def test_the_ai_gives_up_and_nothing_is_saved_to_run(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    call(app, "POST", "/api/settings", {"ai_provider": "openrouter", "ai_model": "stuck"})
+    contact = scenario(app, "ESS-003")
+    call(app, "POST", "/api/manual/run", {"id": contact["id"], "prepare": True})
+    done = wait(lambda: (lambda s: s if s.get("run_id") else None)(call(app, "GET", "/api/recording")))
+    assert done["result"] == "failed" and done["automated"] is False and "Delete" in done["message"]
+    contact = scenario(app, "ESS-003")
+    assert contact["review"] is None and contact["automated"] is False
+    with pytest.raises(ApiError, match="no prepared version"):
+        app.handle("POST", "/api/manual/approve", json.dumps({"id": contact["id"]}).encode())

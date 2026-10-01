@@ -7,6 +7,7 @@ computers and other web sites cannot start runs.
     GET  /api/status                 pod, credentials set or not, environment name and release, folders
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
     POST /api/check-pod              can this computer reach the pod now?
+    POST /api/ai/check               does the AI chosen in Settings answer? (a one-word question)
     GET  /api/dashboard              pass rate, coverage, release readiness, activity
     GET  /api/attention              what needs a person, by kind
     GET  /api/tests                  test files in the tests folder, with their last result
@@ -27,8 +28,10 @@ computers and other web sites cannot start runs.
     GET  /api/manual/scenario?id=<id>   one manual scenario with its test cases and steps
     POST /api/manual/import          {"files": [{"name", "content" (base64), "module", "product"}], "save"}
     POST /api/manual/remove          {"key"} forget one imported workbook
-    POST /api/manual/run             {"id", "by_hand", "release", "tester"} run a scenario: it plays by itself
-                                     once it has been done by hand; otherwise it is done by hand now
+    POST /api/manual/run             {"id", "by_hand", "prepare", "release", "tester"} run a scenario: it plays
+                                     by itself once done by hand (or prepared by AI and approved); otherwise it is
+                                     done by hand now, or with "prepare" an AI does it and it waits for review
+    POST /api/manual/approve         {"id"} a person checked what the AI prepared: Run may now play it
     POST /api/open                   {"path": "<inside the evidence folder>"} open it in Explorer/Finder
     GET  /files/<path>               a file from the evidence folder (documents, pictures, videos)
 """
@@ -51,6 +54,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import yaml
 
+from quartermaster.ai import providers as ai_providers
 from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
@@ -151,6 +155,8 @@ class App:
                 except ValueError as e:
                     raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
             return _json(self.settings.get())
+        if method == "POST" and route == ["ai", "check"]:
+            return _json(ai_providers.check(ai_providers.config_from(self.settings.get())))
         if method == "POST" and route == ["check-pod"]:
             self.pod_check = check_pod(os.environ.get("QM_FUSION_URL", ""))
             return _json(self.pod_check)
@@ -237,6 +243,8 @@ class App:
                 return _json(scenario)
             if method == "POST" and route == ["run"]:
                 return _json(self.run_manual(data), HTTPStatus.CREATED)
+            if method == "POST" and route == ["approve"]:
+                return _json(self.manual.approve(self.manual.get(str(data.get("id") or ""))["id"]))
             if method == "POST" and route == ["import"]:
                 return _json(self.manual.import_files(data))
             if method == "POST" and route == ["remove"]:
@@ -247,6 +255,24 @@ class App:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
+    @staticmethod
+    def _ai_view(settings: dict[str, Any]) -> dict[str, Any]:
+        """The AI choice for the Settings page: never the key itself, only whether it is set."""
+        config = ai_providers.config_from(settings)
+        return {
+            "provider": config.provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "key_env": config.key_env,
+            "key_set": bool(config.key()),
+            "label": config.label if config.provider else "",
+            "problem": config.problem() if config.provider else "No AI provider is chosen.",
+            "presets": [
+                {"id": k, "label": v[0], "base_url": v[2], "key_env": v[3], "model": v[4]}
+                for k, v in ai_providers.PRESETS.items()
+            ],
+        }
+
     # ------------------------------------------------------------------ manual scenarios run
 
     def run_manual(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -256,7 +282,25 @@ class App:
         rel = self.manual.test_file(scenario["id"])
         release = str(data.get("release") or self.settings.get()["release"] or "").strip()
         tester = str(data.get("tester") or "").strip()
+        if data.get("prepare"):
+            config = ai_providers.config_from(self.settings.get())
+            problem = config.problem() if config.provider else "Choose an AI provider in Settings first."
+            if problem:
+                raise ValueError(problem)
+            ai = {
+                "provider": config.provider,
+                "model": config.model,
+                "base_url": config.base_url,
+                "key_env": config.key_env,
+            }
+            state = self.recording.start_guided(
+                scenario, test_id=self.manual.test_id(scenario["id"]), rel_file=rel, release=release, ai=ai
+            )
+            return {"mode": "prepare", "recording": state}
         if (self.tests_root / rel).is_file() and not data.get("by_hand"):
+            review = self.manual.reviews().get(scenario["id"])
+            if review and not review.get("approved_at"):
+                raise ValueError("An AI prepared this scenario. Check its pictures and approve it before it runs.")
             options = {"label": f"Automatic: {scenario['title']}"[:80], "release": release, "tester": tester}
             return {"mode": "automatic", "run": self._run_view(self.queue.submit(rel, options))}
         state = self.recording.start_guided(
@@ -275,7 +319,11 @@ class App:
             "headed": True,
             "label": f"By hand: {state.get('title', '')}"[:80],
         }
-        return self.queue.store.add_finished(
+        by_ai = state.get("mode") == "ai"
+        if by_ai:
+            options["label"] = f"Prepared by AI: {state.get('title', '')}"[:80]
+            options["tester"] = "AI"
+        run = self.queue.store.add_finished(
             str(state.get("file", "")),
             options,
             status="passed" if state.get("result") == "passed" else "failed",
@@ -284,6 +332,12 @@ class App:
             suite_dir=state.get("suite_dir"),
             summary=state.get("summary") or None,
         )
+        scenario_id = str(state.get("scenario_id") or "")
+        if by_ai and state.get("automated"):
+            self.manual.mark_prepared(scenario_id, run["id"], ai_providers.config_from(self.settings.get()).label)
+        elif not by_ai and state.get("automated"):
+            self.manual.checked_by_hand(scenario_id)
+        return run
 
     def _recording_view(self) -> dict[str, Any]:
         state = self.recording.state()
@@ -306,7 +360,11 @@ class App:
         by_test: dict[str, list[dict[str, Any]]] = {}
         for r in results:
             by_test.setdefault(r["test_id"], []).append(r)
+        reviews = self.manual.reviews()
         for s in scenarios:
+            review = reviews.get(str(s.get("id", "")))
+            s["review"] = None if not review else ("approved" if review.get("approved_at") else "needs_review")
+            s["prepared"] = review
             mine = by_test.get(self.manual.test_id(str(s.get("id", ""))), [])
             s["automated"] = (self.tests_root / self.manual.test_file(str(s.get("id", "")))).is_file()
             s["test_file"] = self.manual.test_file(str(s.get("id", "")))
@@ -332,6 +390,7 @@ class App:
             "releases_folder": str(self.releases.folder or ""),
             "evidence_folder": str(self.evidence_root),
             "default_options": DEFAULT_OPTIONS,
+            "ai": self._ai_view(settings),
             "ready": bool(url and os.environ.get("QM_FUSION_USER") and os.environ.get("QM_FUSION_PASSWORD")),
         }
 
@@ -596,6 +655,7 @@ def _result_view(r: dict[str, Any]) -> dict[str, Any]:
         "run_id": r.get("service_run_id"),
         "release": r.get("release"),
         "by_hand": r.get("mode") == "manual",
+        "how": {"manual": "by_hand", "ai": "prepared"}.get(str(r.get("mode")), "automatic"),
     }
 
 

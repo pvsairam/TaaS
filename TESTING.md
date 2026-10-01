@@ -195,6 +195,36 @@ To do a scenario by hand again (for example after Oracle changed the screen), op
 **Do it by hand**. Only run scenarios by hand that are safe to repeat on the test pod: whatever
 you click, including Save or Submit, is played again every time.
 
+**Let an AI prepare a scenario instead (optional)**
+
+This needs an AI provider, set once (see "Choosing an AI" below).
+
+11. On **Employment Info**, click **Prepare**. A browser opens, already signed in. The AI reads
+    each written step, clicks on the pod by itself, and takes a picture when a step is done.
+    Quartermaster shows which step it is on.
+12. When it has finished, click **See what the AI did** and compare each picture with its step.
+13. If every picture is right, click **Approve**. From then on **Run** plays it by itself.
+    If a picture is wrong, click **Do it by hand** instead.
+
+You should see: before you approve, the button on the scenario says **Review**, and **Run** is
+refused. If the AI cannot do a step (for example the script does not give a value to type, or the
+step would press Save or Submit), it stops, says why, and nothing is saved to run: do that scenario
+by hand.
+
+**Choosing an AI**
+
+1. In PowerShell, set the key of your AI provider like the pod password, for example
+   `$env:OPENAI_API_KEY="your key"`, then start `qm serve` again. (Ollama on your own computer
+   needs no key.)
+2. In **Settings**, **AI assistant**: choose the provider, type the model name your account offers,
+   and click **Save**. The web address and the key variable name are filled in for you.
+3. Click **Test the AI**. You should see "... answered in ... ms".
+
+Any provider that offers an OpenAI-compatible service works: choose **Other** and enter its
+address. What is sent to the AI: the written steps and the names of the buttons, links and
+headings on the pod screen; e-mail addresses and long numbers are hidden first. Never typed
+values, never the password. The key is never stored by Quartermaster.
+
 **Other things to check**
 
 - The **Result** column shows Quartermaster's own last result. "Workbook: Pass" in Notes only

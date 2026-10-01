@@ -104,7 +104,15 @@ function initShell() {
     document.removeEventListener("qm:common", first);
     if (state.status?.pod_url && !state.status.pod_check) checkPod({quiet: true}).catch(() => {});
   });
-  document.addEventListener("qm:refresh", () => { if (["", "settings"].includes(state.page) && !document.querySelector(".scrim, .popover")) route(); });
+  // A live redraw never throws away what the reader has started typing or choosing on the page.
+  main.addEventListener("input", () => { main.dataset.edited = location.hash; });
+  main.addEventListener("change", () => { main.dataset.edited = location.hash; });
+  document.addEventListener("qm:refresh", () => {
+    if (!["", "settings"].includes(state.page) || document.querySelector(".scrim, .popover")) return;
+    if (main.dataset.edited === location.hash) return;
+    state.liveRedraw = location.hash; // checked again when the page is about to be drawn
+    route();
+  });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawTheme);
 }
 
@@ -112,6 +120,9 @@ function initShell() {
 
 // Put a page on screen. Crumbs are [{label, href?}]; the last one is the current page.
 export function show(crumbs, ...children) {
+  const live = state.liveRedraw === location.hash;
+  state.liveRedraw = null;
+  if (live && main.dataset.edited === location.hash) return; // edited while the redraw was loading
   document.getElementById("crumbs").replaceChildren(...crumbs.flatMap((c, i) => [
     i ? icon("right") : null,
     c.href ? h("a", {href: c.href}, c.label) : h("span", {"aria-current": "page"}, c.label),
@@ -119,6 +130,7 @@ export function show(crumbs, ...children) {
   document.title = `${crumbs[crumbs.length - 1].label} · Quartermaster`;
   const fresh = main.dataset.page !== location.hash;
   main.dataset.page = location.hash;
+  main.dataset.edited = ""; // a page drawn anew has no edits yet
   const y = scrollY;
   main.replaceChildren(h("div", {}, children));
   if (fresh) {

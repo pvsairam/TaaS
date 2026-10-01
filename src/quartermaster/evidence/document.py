@@ -139,6 +139,11 @@ class _Doc:
                         "what the tester did, what should happen, whether it did, and a picture of the screen taken "
                         "when the tester marked the step."
                         if run.get("mode") == "manual"
+                        else "This document is the record of a test prepared automatically: an AI followed the "
+                        "written test script in Oracle Fusion. For each step it shows what was done, what should "
+                        "happen, and a picture of the screen. A person should check the pictures before the test "
+                        "is trusted."
+                        if run.get("mode") == "ai"
                         else "This document is the record of an automated test run in Oracle Fusion. For each step it "
                         "shows what was done, what should happen, what did happen and, where taken, a picture of the "
                         "screen afterwards. A red box in a picture marks the item the step used."
@@ -200,8 +205,9 @@ class _Doc:
             first = False
             add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
             rows_kv: list[tuple[str, Any]] = [("Result", _status_label(st))]
-            if s.get("action") == "manual":
-                rows_kv[0] = ("Result", "Passed (marked by the tester)" if st == "passed" else _status_label(st))
+            if s.get("action") == "manual" and st == "passed":
+                by = "done by the AI" if run.get("mode") == "ai" else "marked by the tester"
+                rows_kv[0] = ("Result", f"Passed ({by})")
             if s.get("value") and s.get("action") in ("fill", "select", "navigate", "login_as"):
                 rows_kv.append(("Value entered" if s.get("action") in ("fill", "select") else "Opened", s["value"]))
             rows_kv.append(("What should happen", s.get("expected") or _default_expected(s)))

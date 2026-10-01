@@ -21,7 +21,7 @@ from quartermaster.service.store import now
 RecordCommandBuilder = Callable[[Path, dict[str, str], Path, Path], list[str]]
 COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop", "result")
 # Extra settings for doing a manual scenario by hand (see qm record --guide).
-GUIDE_FIELDS = ("guide", "process", "release", "tester")
+GUIDE_FIELDS = ("guide", "process", "release", "tester", "ai_provider", "ai_model", "ai_base_url", "ai_key_env")
 
 FIELDS = ("id", "title", "module", "product", "persona")
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -32,7 +32,9 @@ def qm_record_command(out: Path, fields: dict[str, str], evidence_root: Path, fe
     cmd += ["--events", str(feed)]
     for key in (*FIELDS, *GUIDE_FIELDS):
         if fields.get(key):
-            cmd += [f"--{key}", fields[key]]
+            cmd += [f"--{key.replace('_', '-')}", fields[key]]
+    if fields.get("prepare"):
+        cmd.append("--prepare")  # an AI does the steps instead of a person
     return cmd
 
 
@@ -76,10 +78,18 @@ class Recording:
         return self._launch(out, fields, {})
 
     def start_guided(
-        self, scenario: dict[str, Any], *, test_id: str, rel_file: str, release: str = "", tester: str = ""
+        self,
+        scenario: dict[str, Any],
+        *,
+        test_id: str,
+        rel_file: str,
+        release: str = "",
+        tester: str = "",
+        ai: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Do a manual scenario by hand: the tester marks each step Pass or Fail while the clicks are
-        recorded. Saving replaces the scenario's earlier recording, if any."""
+        recorded. With `ai` (provider, model, base_url, key_env) an AI does the steps instead and the
+        result is a draft to review. Saving replaces the scenario's earlier recording, if any."""
         out = (self.tests_root / rel_file).resolve()
         if self.tests_root not in out.parents:
             raise ValueError("the file must be inside the tests folder")
@@ -97,8 +107,10 @@ class Recording:
             "release": release.strip()[:20],
             "tester": tester.strip()[:60],
         }
+        if ai:
+            fields.update(prepare="1", **{f"ai_{k}": v for k, v in ai.items()})
         extra = {
-            "mode": "manual",
+            "mode": "ai" if ai else "manual",
             "scenario_id": scenario.get("id"),
             "ref": scenario.get("ref", ""),
             "workbook": scenario.get("file", ""),
@@ -178,7 +190,7 @@ class Recording:
         with self._lock:
             self._proc = None
             self._state.update(finished_at=now(), exit_code=code)
-            if code == 0 and self._state.get("mode") == "manual":
+            if code == 0 and self._state.get("mode") in ("manual", "ai"):
                 found = {k: _after(lines, f"{k}: ") for k in ("Manual run", "Summary document", "Result")}
                 self._state.update(
                     status="saved",
@@ -186,7 +198,8 @@ class Recording:
                     suite_dir=found["Manual run"],
                     summary=found["Summary document"],
                     automated=bool(saved),
-                    message="" if saved else "No clicks were recorded, so the automatic version was not saved.",
+                    message=_after(lines, "The AI stopped: ")
+                    or ("" if saved else "No clicks were recorded, so the automatic version was not saved."),
                 )
             elif code == 0:
                 masked = next((ln for ln in lines if ln.startswith("Masked values")), "")
@@ -196,7 +209,7 @@ class Recording:
                 errors = [ln for ln in lines if ln.startswith("error:")]
                 message = errors[-1][len("error:") :].strip() if errors else "\n".join(lines[-5:])
                 self._state.update(status="error", message=message or f"The recorder stopped with exit code {code}.")
-            done = dict(self._state) if self._state.get("mode") == "manual" and code == 0 else None
+            done = dict(self._state) if self._state.get("mode") in ("manual", "ai") and code == 0 else None
         if done is not None and self.on_manual_done is not None:
             run = self.on_manual_done(done)  # outside the lock: it reads the run history
             if run:
