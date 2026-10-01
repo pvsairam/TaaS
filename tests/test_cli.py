@@ -199,3 +199,28 @@ def test_cli_run_only_some_tests_of_a_folder(
 
     assert main(["run", str(specs), "--evidence", evidence, "--only", "smoke.a,smoke.nope"]) == 2
     assert "no test with id smoke.nope" in capsys.readouterr().err
+
+
+def test_serve_keeps_your_tests_apart_from_the_examples(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import shutil
+
+    from quartermaster.cli import DEFAULT_TESTS, _tests_folder
+
+    shutil.copytree(EXAMPLES / "tests", tmp_path / "examples" / "tests")
+    monkeypatch.chdir(tmp_path)
+    folder = _tests_folder(DEFAULT_TESTS)  # first start: created with copies of the examples
+    assert folder == tmp_path.joinpath(DEFAULT_TESTS).relative_to(tmp_path)
+    assert sorted(p.name for p in (tmp_path / DEFAULT_TESTS / "hcm").iterdir()) == sorted(
+        p.name for p in (EXAMPLES / "tests" / "hcm").iterdir()
+    )
+    assert "Created my_tests" in capsys.readouterr().out
+    (tmp_path / DEFAULT_TESTS / "mine.yaml").write_text("id: x\n")
+    assert _tests_folder(DEFAULT_TESTS) is not None and (tmp_path / DEFAULT_TESTS / "mine.yaml").is_file()  # kept
+    assert "Created" not in capsys.readouterr().out
+
+    assert _tests_folder("examples/tests") is not None
+    assert "next to the examples" in capsys.readouterr().out
+    assert _tests_folder("nowhere") is None
+    assert "no tests folder" in capsys.readouterr().err

@@ -10,3 +10,5 @@ build/
 /evidence/
 .env
 /.qm/
+# your own tests (qm serve): they belong to your organisation, not to this repository
+/my_tests/

@@ -142,7 +142,7 @@ Everything above can also be done from web pages on your own computer. In the sa
 you set `QM_FUSION_URL`, `QM_FUSION_USER` and `QM_FUSION_PASSWORD`:
 
 ```bash
-qm serve --tests my_tests          # or --tests examples/tests
+qm serve                          # your tests: my_tests (created on first start from the examples)
 ```
 
 Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use it; Ctrl+C stops it.

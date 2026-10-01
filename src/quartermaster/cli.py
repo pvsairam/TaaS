@@ -399,14 +399,40 @@ def _wait_for_stop(recorder: Any, page: Any) -> None:
             recorder.command(lines.get())
 
 
+DEFAULT_TESTS = "my_tests"
+
+
+def _tests_folder(name: str) -> Path | None:
+    """The folder `qm serve` keeps tests in. The default one is created on first start with copies of
+    the example tests, so what you record, do by hand or prepare never lands among the examples."""
+    tests = Path(name)
+    examples = Path("examples") / "tests"
+    if not tests.is_dir() and name == DEFAULT_TESTS:
+        import shutil
+
+        if examples.is_dir():
+            shutil.copytree(examples, tests)
+        else:
+            tests.mkdir(parents=True)
+        print(f"Created {tests}: your tests are kept here (it starts with copies of the example tests).")
+    if not tests.is_dir():
+        print(f"error: no tests folder at {tests}", file=sys.stderr)
+        return None
+    if examples.is_dir() and tests.resolve() == examples.resolve():
+        print(
+            "Note: tests you record, do by hand or prepare are saved in this folder, next to the examples. "
+            f"Start with `qm serve` (folder {DEFAULT_TESTS}) to keep your own tests apart."
+        )
+    return tests
+
+
 def _serve(args: argparse.Namespace) -> int:
     import webbrowser
 
     from quartermaster.service.api import App, make_server, port_of
 
-    tests = Path(args.tests)
-    if not tests.is_dir():
-        print(f"error: no tests folder at {tests}", file=sys.stderr)
+    tests = _tests_folder(args.tests)
+    if tests is None:
         return 2
     app = App(
         tests_root=tests,
@@ -506,7 +532,9 @@ def main(argv: list[str] | None = None) -> int:
     rc.set_defaults(func=_record)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")
-    sv.add_argument("--tests", default="examples/tests", help="folder holding the test files")
+    sv.add_argument(
+        "--tests", default=DEFAULT_TESTS, help=f"folder holding your tests ({DEFAULT_TESTS}, created on first start)"
+    )
     sv.add_argument("--evidence", default="evidence", help="root folder for run evidence")
     sv.add_argument("--releases", default="examples/releases", help="folder holding release feature lists")
     sv.add_argument("--data", default=".qm", help="folder for the run history and run logs")

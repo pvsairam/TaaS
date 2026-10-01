@@ -79,11 +79,14 @@ If it says it cannot sign in, check the three values from Part 3.
 ## Part 6. Open the web app
 
 ```powershell
-qm serve --tests examples/tests
+qm serve
 ```
 
 You should see: the terminal says `Quartermaster is running at http://127.0.0.1:8765` and your
-browser opens that page. Keep this terminal open while you test. Press Ctrl+C in it to stop.
+browser opens that page. The first time, it also says `Created my_tests`: your own tests are kept
+in the `my_tests` folder, which starts with copies of the example tests. Do not start it with
+`--tests examples/tests`: your tests would then be saved among the examples, and the automatic
+checks in Part 4 would fail. Keep this terminal open while you test. Press Ctrl+C in it to stop.
 
 The left side has the menu: Overview, Runs, Tests, Release impact, Needs attention,
 Record a test, Settings.
@@ -271,7 +274,8 @@ Where things are kept:
 - `.qm\` holds the run history, settings, imported feature lists and imported manual scripts.
 
 Keep `.qm\`: deleting it also deletes your imported manual scripts and run history. The scenarios
-you did by hand are saved as tests in `examples\tests\manual\` (or in your own tests folder).
+you did by hand or prepared are saved as tests in `my_tests\manual\`. `my_tests` is yours: back it
+up. It is not part of the Quartermaster repository, so it is never committed or overwritten by a pull.
 
 ## Reporting a problem
 
