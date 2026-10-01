@@ -130,6 +130,12 @@ export function openManualImport() {
   const result = h("div", {class: "stack", "aria-live": "polite"});
   const saveBtn = button("Save", {kind: "primary", ic: "check", disabled: true});
   const overrides = {}; // file name -> {module, product} typed by the reader
+  let closeDrawer = () => {};
+  const done = (count) => {
+    toast(`Saved ${plural(count, "workbook")}. They stay in Quartermaster until you remove them.`);
+    closeDrawer();
+    if (location.hash.startsWith("#/tests?view=manual")) manualPage(); else location.hash = "#/tests?view=manual";
+  };
 
   const read = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -137,14 +143,21 @@ export function openManualImport() {
     r.onerror = () => reject(new Error(`${file.name} could not be read`));
     r.readAsDataURL(file);
   });
-  const payload = () => picked.map((f) => ({...f, ...(overrides[f.name] || {})}));
+  // Workbooks saved already are not sent again.
+  const payload = () => picked.filter((f) => !preview?.files.find((r) => r.file === f.name)?.saved)
+    .map((f) => ({...f, ...(overrides[f.name] || {})}));
 
-  async function check() {
+  // Choosing the files saves them at once. Only a workbook whose module or product could not be
+  // told from its name (or that cannot be read) keeps the dialog open.
+  async function save() {
     saveBtn.disabled = true;
+    const before = preview ? preview.files.filter((f) => f.saved) : [];
     result.replaceChildren(h("div", {class: "skel", style: "height:120px"}));
     try {
-      preview = await api("/api/manual/import", {files: payload()});
-      drawPreview();
+      const reply = await api("/api/manual/import", {files: payload(), save: true});
+      preview = {files: [...before, ...reply.files]};
+      const saved = preview.files.filter((f) => f.saved).length;
+      if (preview.files.every((f) => f.saved)) done(saved); else drawPreview();
     } catch (err) {
       result.replaceChildren(callout("danger", "These files cannot be used.", err.message));
     }
@@ -153,10 +166,13 @@ export function openManualImport() {
   function drawPreview() {
     const ok = preview.files.filter((f) => !f.problem);
     const sum = (k) => ok.reduce((a, f) => a + f[k], 0);
+    const saved = preview.files.filter((f) => f.saved);
     result.replaceChildren(
-      ok.length ? callout("info", `${plural(sum("scenarios"), "scenario")}, ${plural(sum("cases"), "test case")} and ${plural(sum("steps"), "step")} found.`,
-        `In ${plural(ok.length, "workbook")}. Check the module and product of each; they decide which release features a scenario is matched to.`) : null,
-      ...preview.files.map((f) => f.problem
+      saved.length ? callout("info", `Saved ${plural(saved.length, "workbook")}: ${plural(saved.reduce((a, f) => a + f.scenarios, 0), "scenario")}.`,
+        "They stay in Quartermaster until you remove them.") : null,
+      ok.length > saved.length ? callout("warning", "Enter the module and product of the workbooks below, then Save.",
+        "They decide which Oracle release features a scenario is matched to.") : null,
+      ...preview.files.filter((f) => !f.saved).map((f) => f.problem
         ? callout("danger", `${f.file}:`, f.problem)
         : h("section", {class: "card", style: "padding:12px 14px"},
           h("div", {class: "row", style: "gap:8px;flex-wrap:nowrap"}, icon("file"), h("strong", {class: "ellipsis grow"}, f.file),
@@ -181,7 +197,7 @@ export function openManualImport() {
   }
 
   function drawSaveState() {
-    const ok = preview.files.filter((f) => !f.problem);
+    const ok = preview.files.filter((f) => !f.problem && !f.saved);
     const ready = ok.filter((f) => (overrides[f.file]?.product ?? f.product) && (overrides[f.file]?.module ?? f.module));
     saveBtn.disabled = !ready.length;
     saveBtn.querySelector("span").textContent = ready.length ? `Save ${plural(ready.length, "workbook")}` : "Save";
@@ -191,27 +207,19 @@ export function openManualImport() {
     preview = null;
     saveBtn.disabled = true;
     try { picked = await Promise.all([...fileInput.files].map(read)); } catch (err) { result.replaceChildren(callout("danger", err.message, null)); return; }
-    if (picked.length) check(); else result.replaceChildren();
+    if (picked.length) save(); else result.replaceChildren();
   };
 
   drawer({
     title: "Import manual scripts",
     sub: "Excel test scripts, so release impact can point to the manual scenario that covers a feature.",
     body: (close) => {
-      saveBtn.onclick = async () => {
-        saveBtn.disabled = true;
-        try {
-          const saved = await api("/api/manual/import", {files: payload(), save: true});
-          const skipped = saved.files.length - saved.saved;
-          toast(`Saved ${plural(saved.saved, "workbook")}.${skipped ? ` ${skipped} left out (see the notes).` : ""}`);
-          close();
-          if (location.hash.startsWith("#/tests?view=manual")) manualPage(); else location.hash = "#/tests?view=manual";
-        } catch (err) { toast(err.message); saveBtn.disabled = false; }
-      };
+      closeDrawer = close;
+      saveBtn.onclick = save;
       return [
         h("div", {}, h("div", {class: "label"}, "Workbooks"), fileInput,
           h("div", {class: "hint", id: "mi-hint"}, "Choose one or more .xlsx files. Two layouts are read: a Test Scenarios sheet with a Test Cases sheet (Scenario ID, Test case ID, Test step description, Expected result), or a list of actions with Reference Number and Primary Navigation.")),
-        callout("info", "Nothing is saved until you choose Save.", "The workbooks are read on this computer and are not changed. A summary of each is kept in the Quartermaster data folder."),
+        callout("info", "Choosing the files saves them.", "The workbooks are read on this computer and are not changed. Quartermaster keeps what it read, so the scenarios are here next quarter too. Import a workbook again to update it."),
         result,
       ];
     },

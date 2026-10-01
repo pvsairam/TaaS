@@ -163,10 +163,10 @@ feature. The workbooks are only read. They are not changed or copied anywhere el
 
 1. Click **Tests**, then **Import manual scripts**.
 2. Choose one or more `.xlsx` files. You can select all of them at once.
-3. Read the preview. For each workbook it shows the number of scenarios, test cases and steps,
-   the module and product it guessed from the file name, and any notes (for example a scenario
-   that has test cases but is missing from the Test Scenarios sheet).
-4. If a module or product is empty or wrong, type the right one. Click **Save**.
+3. They are saved straight away and the list of scenarios opens. They stay in Quartermaster
+   (also after the next quarterly release) until you remove them.
+4. Only if Quartermaster cannot tell a workbook's module and product from its file name, the
+   window stays open: type them and click **Save**.
 5. The page now shows **Manual scenarios**. Search for `invoice`. Click a scenario.
 6. Click **Release impact**. Open the **Manual scenarios** tab.
 
