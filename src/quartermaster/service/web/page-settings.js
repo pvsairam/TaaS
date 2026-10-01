@@ -1,5 +1,5 @@
 // Settings: environment, sign-in, storage, appearance and shortcuts. Passwords are never shown.
-import {api, button, card, field, h, icon, input, segmented, toast, when} from "./ui.js";
+import {api, button, card, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
 import {checkPod, openFolder} from "./components.js";
 import {connection, envName, loadCommon, state} from "./state.js";
 import {setTheme, show} from "./app.js";
@@ -56,6 +56,26 @@ export async function settingsPage() {
       h("dt", {}, "Evidence"), h("dd", {}, h("code", {}, st.evidence_folder))),
     h("div", {class: "row"}, button("Open the evidence folder", {size: "sm", ic: "folder", onClick: () => openFolder(".")})))});
 
+  // The same choices as in New run (they are shared): every run started afterwards uses them,
+  // including Run on a manual scenario and the runs started from Release impact.
+  const opt = {...st.default_options, ...(remember("options") || {})};
+  const keep = (key, value) => {
+    remember("options", {...(remember("options") || {}), screenshots: opt.screenshots, video: opt.video, headed: Boolean(opt.headed), [key]: value});
+    opt[key] = value;
+    toast("Saved. Runs started from now on use it.");
+  };
+  const headed = h("input", {type: "checkbox", checked: Boolean(opt.headed), onchange: (e) => keep("headed", e.target.checked)});
+  const evidence = card({title: "Evidence", sub: "Screenshots, video and the browser, for every run you start",
+    body: h("div", {class: "stack"},
+      h("div", {}, h("div", {class: "label"}, "Screenshots"),
+        segmented([["every-step", "Every step"], ["on-failure", "Only failures"], ["off", "None"]], opt.screenshots, (v) => keep("screenshots", v), "Screenshots"),
+        h("div", {class: "hint"}, "Screenshots go into the Word evidence document of each test.")),
+      h("div", {}, h("div", {class: "label"}, "Video"),
+        segmented([["off", "None"], ["on-failure", "Keep on failure"], ["always", "Always"]], opt.video, (v) => keep("video", v), "Video"),
+        h("div", {class: "hint"}, "Videos are kept next to the document and shown in the run's Video tab.")),
+      h("label", {class: "switch"}, headed, "Show the browser while it runs"),
+      h("p", {class: "hint", style: "margin:0"}, "The same choices are in New run; changing them in either place changes both. Prepare and Run by hand always show the browser."))});
+
   const appearance = card({title: "Appearance",
     body: segmented([["system", "Same as this computer"], ["light", "Light"], ["dark", "Dark"]],
       document.documentElement.dataset.theme || "system", setTheme, "Theme")});
@@ -66,8 +86,8 @@ export async function settingsPage() {
     body: h("dl", {class: "kv"}, keys.flatMap(([k, d]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, d)]))});
 
   show([{label: "Settings"}],
-    h("div", {class: "page-head"}, h("div", {}, h("h1", {}, "Settings"), h("p", {class: "lead"}, "Environment, sign-in, storage and appearance."))),
-    h("div", {class: "grid g-2"}, h("div", {class: "stack"}, environment, signin, ai), h("div", {class: "stack"}, storage, appearance, shortcuts)));
+    h("div", {class: "page-head"}, h("div", {}, h("h1", {}, "Settings"), h("p", {class: "lead"}, "Environment, sign-in, AI, evidence, storage and appearance."))),
+    h("div", {class: "grid g-2"}, h("div", {class: "stack"}, environment, signin, ai), h("div", {class: "stack"}, evidence, storage, appearance, shortcuts)));
 }
 
 // The AI that prepares manual scenarios. Any provider. The key is pasted here (kept in memory only,
