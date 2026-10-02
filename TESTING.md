@@ -215,6 +215,11 @@ This needs an AI provider, set once (see "Choosing an AI" below).
 13. If every picture is right, click **Approve**. From then on **Run** plays it by itself.
     If a picture is wrong, click **Do it by hand** instead.
 
+When the script lists fields to check (for example "Current Salary (Salary, Annual Salary)"), the
+AI opens a closed section and checks those fields. If the page does not show them, for example
+"There's nothing here so far" because the test user has no salary, it stops and says so instead of
+passing: use a test user who has that data, or do it by hand.
+
 You should see: before you approve, the button on the scenario says **Review**, and **Run** is
 refused. If the AI cannot do a step (for example the script does not give a value to type, or the
 step would press Save or Submit), it stops, says why, and nothing is saved to run: do that scenario

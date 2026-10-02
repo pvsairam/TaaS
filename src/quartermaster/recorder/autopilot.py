@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,18 @@ CSS_PATH_JS = r"""(el) => {
   }
   const css = parts.join(' > ');
   return css && document.querySelectorAll(css).length === 1 ? css : '';
+}"""
+
+# Whether the section with this heading is open: True, False, or null when the page does not say.
+EXPANDED_JS = r"""(text) => {
+  const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const el = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6, span, div, a, button, [role=heading]')]
+    .find((e) => !e.children.length && clean(e.innerText) === text);
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    const t = n.matches('[aria-expanded]') ? n : n.querySelector('[aria-expanded]');
+    if (t) return t.getAttribute('aria-expanded') === 'true';
+  }
+  return null;
 }"""
 
 # What the AI is shown of the page: never values typed in fields, only labels and visible names.
@@ -181,8 +194,8 @@ class Autopilot:
             number = i + 1
             if not self._do_step(number, step, len(steps)):
                 return False
-            if number == len(steps):
-                self._add_checks(step)
+            if number == len(steps) and not self._add_checks(number, step):
+                return False
             self.guide.mark(f"{number} pass", self.page)
             self._say(f"Step {number} done.")
         self._say("Every step is done. Saving.")
@@ -465,7 +478,89 @@ class Autopilot:
             event["value"] = value
         self.recorder.events.append(event)
 
-    def _add_checks(self, step: dict[str, str]) -> None:
+    def _add_checks(self, number: int, step: dict[str, str]) -> bool:
+        """Checks that prove the last page is right. When the script lists fields to check, those
+        are checked (see _check_fields); otherwise the AI chooses. False when it must stop."""
+        groups = _field_groups(self.guide.scenario.get("fields") or [])
+        if groups:
+            return self._check_fields(number, groups)
+        self._choose_checks(step)
+        return True
+
+    def _check_fields(self, number: int, groups: list[tuple[str, list[str]]]) -> bool:
+        """The fields the script says to check, e.g. "Current Salary (Salary, Annual Salary)": a
+        collapsed section is opened, each field shown is checked, and a section that shows none of
+        its fields stops the preparation (the test user may have no data there), so a scenario never
+        passes on a page that does not show what the script asks for."""
+        added: list[str] = []
+        missing: list[str] = []
+        for section, fields in groups:
+            wanted = fields or [section]
+            found = self._shown(wanted)
+            if not found and fields:
+                self._open_section(section, wanted)
+                found = self._shown(wanted)
+            if not found:
+                missing.append(f"{section} ({', '.join(fields)})" if fields else section)
+                continue
+            for text in found[:3]:
+                if self._checkable(text) and text not in added:
+                    self.recorder.events.append(
+                        {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
+                    )
+                    added.append(text)
+        self._note(f"  Checks added from the fields to check: {', '.join(added) if added else 'none'}")
+        if missing:
+            return self._stuck(
+                number,
+                "the page does not show " + "; ".join(missing) + ", which the script says to check."
+                " The test user may have no data there: use a test user who has, or do it by hand",
+            )
+        self._say(f"Checked {len(added)} field(s) the script lists.")
+        return True
+
+    def _shown(self, wanted: list[str]) -> list[str]:
+        """The texts on the screen that are these fields (the same words, or starting with them)."""
+        texts = self._screen().get("texts", [])
+        out = []
+        for w in wanted:
+            low = w.lower()
+            hit = next((t for t in texts if t.lower() == low), None) or next(
+                (t for t in texts if t.lower().startswith(low + " ") or t.lower().startswith(low + ":")), None
+            )
+            if hit and hit not in out:
+                out.append(hit)
+        return out
+
+    def _open_section(self, section: str, wanted: list[str]) -> None:
+        """Open a collapsed section by clicking its heading, and record that so replays open it too.
+        A section that is open already is left alone (a click would close it)."""
+        heading = self.page.get_by_text(section, exact=True)
+        if _count(heading) != 1:
+            return
+        try:
+            state = self.page.evaluate(EXPANDED_JS, section)
+        except Exception:
+            state = None
+        if state is True:  # open already: its fields are simply not there
+            return
+        try:
+            heading.first.click(timeout=8000)
+        except Exception:
+            return
+        self.settle()
+        if self._shown(wanted):
+            self.recorder.events.append(
+                {"kind": "click", "intent": section, "candidates": [{"strategy": "text", "value": section}]}
+            )
+            self._note(f"  Opened the section {section}")
+        elif state is None:
+            # it could not be told whether it was open: undo the click, so the page stays as it was
+            with suppress(Exception):
+                heading.first.click(timeout=8000)
+                self.settle()
+
+    def _choose_checks(self, step: dict[str, str]) -> None:
         """Checks that prove the last page is the right one, so a replay cannot pass on a wrong page.
         The AI chooses up to two texts; when none of its choices can be used, the page's heading (or
         the name of what the last step opened) is checked instead, so a saved scenario always proves
@@ -513,6 +608,22 @@ def _visible(locator: Any) -> Any:
         return locator.locator("visible=true")
     except Exception:  # a stand-in page without visibility filtering
         return locator
+
+
+def _field_groups(lines: list[str]) -> list[tuple[str, list[str]]]:
+    """ "Current Salary (Salary, Adjustment, Start Date)" -> ("Current Salary", ["Salary", ...]);
+    "Legal Employer" -> ("Legal Employer", []). "(N/A)" means nothing to check there."""
+    groups = []
+    for line in lines:
+        m = re.match(r"^(.*?)\s*\((.*)\)\s*$", line.strip())
+        section = " ".join((m.group(1) if m else line).split()).strip(" -:")
+        inner = m.group(2) if m else ""
+        if re.fullmatch(r"\s*n\s*/?\s*a\s*", inner, re.I):
+            continue
+        fields = [" ".join(f.split()) for f in re.split(r"[,;/]", inner) if f.strip()]
+        if section and len(section) <= 60:
+            groups.append((section, [f for f in fields if len(f) <= 60]))
+    return groups
 
 
 def _css_string(text: str) -> str:

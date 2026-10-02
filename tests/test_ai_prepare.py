@@ -299,6 +299,67 @@ def test_done_is_not_taken_while_what_the_step_selects_was_not_clicked(tmp_path:
     assert 'step asks for "My Compensation"' in ask.prompts[6]
 
 
+COMP_FIELDS = [
+    "Current Salary (Salary,Adjustment,Start Date,Annual Salary)",
+    "Additional Compensation (Plan,Option,Amount)",
+    "Personal Contribution(N/A)",
+]
+
+
+def test_the_fields_to_check_are_read_from_the_script() -> None:
+    from quartermaster.recorder.autopilot import _field_groups
+
+    assert _field_groups([*COMP_FIELDS, "Legal Employer"]) == [
+        ("Current Salary", ["Salary", "Adjustment", "Start Date", "Annual Salary"]),
+        ("Additional Compensation", ["Plan", "Option", "Amount"]),
+        ("Legal Employer", []),
+    ]
+
+
+def comp_run(tmp_path: Path, last: dict[str, Any]) -> tuple[Autopilot, ScriptedPage, Recorder, Guide]:
+    """My Compensation with the script's fields to check; `last` is the Compensation page."""
+    screens = {
+        "home": screen("Me"),
+        "Me": screen("Personal Information"),
+        "Personal Information": screen("My Compensation"),
+        "My Compensation": last,
+        "open": screen(
+            texts=("Current Salary", "Salary", "Annual Salary", "Additional Compensation", "Plan", "Amount")
+        ),
+    }
+    texts = {f"text:{t}": 1 for scr in screens.values() for t in scr["texts"]}
+    page = ScriptedPage(screens, "home", {f"role:link:{n}": 1 for n in screens} | texts)
+    page.after["text:Additional Compensation"] = "open"  # clicking the heading opens the section
+    recorder = Recorder(test_id="t")
+    guide = Guide({**SCENARIO, "fields": COMP_FIELDS}, tmp_path / "run")
+    answers = [{"do": "done"}] + [{"do": "click", "element": 1}, {"do": "done"}] * 3
+    return Autopilot(page, guide, recorder, scripted_ai(answers)), page, recorder, guide
+
+
+def test_the_fields_the_script_lists_are_checked_and_a_closed_section_is_opened(tmp_path: Path) -> None:
+    closed = screen(texts=("Current Salary", "Salary", "Annual Salary", "Additional Compensation"))
+    pilot, page, recorder, _ = comp_run(tmp_path, closed)
+    assert pilot.run() is True, pilot.reason
+    checks = [e["intent"] for e in recorder.events if e["kind"] == "assert_visible"]
+    assert checks == ["Salary", "Annual Salary", "Plan", "Amount"]  # not just the section headings
+    assert {
+        "kind": "click",
+        "intent": "Additional Compensation",
+        "candidates": [{"strategy": "text", "value": "Additional Compensation"}],
+    } in recorder.events
+
+
+def test_a_page_without_the_fields_to_check_stops_instead_of_passing(tmp_path: Path) -> None:
+    # Current Salary shows "There's nothing here so far": the test user has no salary on the pod
+    empty = screen(texts=("Current Salary", "There's nothing here so far.", "Additional Compensation"))
+    pilot, page, recorder, guide = comp_run(tmp_path, empty)
+    page.after["text:Additional Compensation"] = "My Compensation"  # and the section stays empty
+    assert pilot.run() is False
+    assert "does not show Current Salary (Salary, Adjustment, Start Date, Annual Salary)" in pilot.reason
+    assert "test user may have no data" in pilot.reason
+    assert guide.state()[-1]["status"] == "failed"
+
+
 def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: Path) -> None:
     screens = {
         "home": screen("Me"),
