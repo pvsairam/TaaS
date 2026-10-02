@@ -260,6 +260,8 @@ export function stepResult(st, {pictures = [], context = ""} = {}) {
       : st.status === "skipped" ? "Not done, because an earlier step failed."
         : st.status === "running" ? "In progress…" : done ? "As expected." : "";
   const shots = st.pictures || [];
+  const after = shots.filter((src) => !isBefore(src));
+  const thumb = after[after.length - 1] || shots[0];  // the screen after the step; a click also has one before it
   const openShot = (src) => openViewer(pictures, Math.max(0, pictures.findIndex((p) => p.src === src)));
   const technical = [
     st.locator ? h("div", {}, h("span", {class: "caption"}, "FOUND WITH "), h("code", {}, st.locator)) : null,
@@ -272,8 +274,8 @@ export function stepResult(st, {pictures = [], context = ""} = {}) {
       st.status === "failed" && st.error ? h("div", {class: "meta", style: "color:var(--danger)"}, st.error) : null,
       st.status === "healed" ? h("div", {class: "meta", style: "color:var(--warning)"}, "Needs update: found in a different way than written") : null),
     h("div", {class: "row", style: "gap:12px"},
-      shots[0] ? h("img", {class: "thumb", src: shots[0], alt: `Screenshot after step ${st.number}`, loading: "lazy",
-        onclick: (e) => { e.preventDefault(); openShot(shots[0]); }}) : null,
+      thumb ? h("img", {class: "thumb", src: thumb, alt: `Screenshot after step ${st.number}`, loading: "lazy",
+        onclick: (e) => { e.preventDefault(); openShot(thumb); }}) : null,
       h("span", {class: "meta num", style: "min-width:44px;text-align:right"}, st.status === "skipped" ? "Skipped" : st.seconds ? `${st.seconds} s` : "")));
   const detail = h("div", {class: "step-detail"},
     h("dl", {class: "kv"},
@@ -285,9 +287,11 @@ export function stepResult(st, {pictures = [], context = ""} = {}) {
     st.compare ? h("div", {class: "compare"},
       h("div", {}, h("span", {class: "caption"}, "Expected"), st.compare.expected || "(empty)"),
       h("div", {}, h("span", {class: "caption"}, "Observed"), st.compare.observed || "(empty)")) : null,
-    !shots.length && st.screenshot_note ? h("div", {class: "meta row", style: "gap:6px"}, icon("image"), st.screenshot_note) : null,
-    shots.length ? h("div", {class: "row"}, shots.map((src) => h("img", {class: "shot", src, loading: "lazy", alt: `Screenshot after step ${st.number}${context}`,
-      onclick: () => openShot(src)}))) : null,
+    !after.length && st.screenshot_note ? h("div", {class: "meta row", style: "gap:6px"}, icon("image"), st.screenshot_note) : null,
+    shots.length ? h("div", {class: "row", style: "align-items:flex-start"}, shots.map((src) => h("figure", {class: "shot-fig"},
+      h("img", {class: "shot", src, loading: "lazy", alt: `${isBefore(src) ? "Before" : "Screenshot after"} step ${st.number}${context}`,
+        onclick: () => openShot(src)}),
+      h("figcaption", {class: "meta"}, isBefore(src) ? "Before: what it clicks, boxed in red" : "After the step")))) : null,
     technical.length ? disclose("Technical details", h("div", {class: "stack", style: "gap:6px;margin-top:8px"}, technical)) : null);
   const open = st.status === "failed";
   return h("li", {}, statusNode(st.status, st.number),
@@ -304,7 +308,7 @@ export function executionTimeline(steps, {total = 0, pictures = [], context = ""
 
 // Everything one test's run produced, in one place: steps, screenshots, video, documents, context.
 export function evidenceViewer(r, {run} = {}) {
-  const pictures = r.steps.flatMap((st) => st.pictures.map((src) => ({src, caption: `Step ${st.number}: ${st.intent}`,
+  const pictures = r.steps.flatMap((st) => st.pictures.map((src) => ({src, caption: `Step ${st.number}: ${st.intent}${isBefore(src) ? " (before the click)" : ""}`,
     sub: `${r.test_title || r.test_id} · ${STATUS[st.status]?.label || st.status}${st.started_at ? " · " + new Date(st.started_at).toLocaleTimeString() : ""}`})));
   const key = `ev:${r.folder}`;
   let tab = state.open[key] || "steps";
@@ -483,3 +487,8 @@ export function passRateChart(activity) {
   return h("div", {class: "chart"}, svg);
 }
 
+
+// A picture taken just before a click (step-03-before.png), not after the step.
+export function isBefore(src) {
+  return /-before\.png$/i.test(String(src).split("?")[0]);
+}

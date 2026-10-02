@@ -483,7 +483,8 @@ video.player { width: 100%; max-height: 520px; border-radius: var(--r-card); bac
 .guide-step.is-passed, .guide-step.is-failed { opacity: 0.85; }
 .review-steps { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; margin: 12px 0 0; padding: 0 0 0 28px; }
 .review-steps li { width: 132px; }
-@media (max-width: 600px) { .review-steps { padding-left: 0; } .review-steps li { width: calc(50% - 6px); } .review-steps .guide-shot { width: 100%; } }
+@media (max-width: 600px) { .review-steps { padding-left: 0; } .review-steps li { width: calc(50% - 6px); } .review-steps .shot-fig { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.guide-shot { width: 100%; } }
 .review-steps .guide-shot { width: 132px; height: 82px; }
 .review-none { display: grid; place-items: center; color: var(--text-3); font-size: 12px; }
 .guide-shot { width: 120px; height: 75px; object-fit: cover; object-position: top; border-radius: 6px; border: 1px solid var(--border); display: block; }

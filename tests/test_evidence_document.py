@@ -191,3 +191,11 @@ def test_a_missing_screenshot_is_explained(tmp_path: Path) -> None:
     _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
     assert "Screen picture" in text and "the page was still loading" in text
     assert "Screen after step 1" not in text
+
+
+def test_a_click_shows_the_screen_before_it_and_after_it(tmp_path: Path) -> None:
+    run = sample_run(tmp_path)
+    (tmp_path / "screenshots" / "step-01-before.png").write_bytes(tiny_png())
+    run["steps"][0]["evidence"] = ["screenshots/step-01-before.png", "screenshots/step-01.png"]
+    _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
+    assert text.index("Before step 1: the item about to be clicked is boxed in red") < text.index("Screen after step 1")

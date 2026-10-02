@@ -146,7 +146,8 @@ class _Doc:
                         if run.get("mode") == "ai"
                         else "This document is the record of an automated test run in Oracle Fusion. For each step it "
                         "shows what was done, what should happen, what did happen and, where taken, a picture of the "
-                        "screen afterwards. A red box in a picture marks the item the step used."
+                        "screen afterwards; a click also has a picture just before it. A red box in a picture marks "
+                        "the item the step used."
                     )
                 ],
                 after=200,
@@ -214,11 +215,16 @@ class _Doc:
             rows_kv.append(("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, "")))
             if st != "skipped":
                 rows_kv.append(("Time", _clock(s.get("started_at"))))
-            if s.get("screenshot_note") and not shots:
+            if s.get("screenshot_note") and not [r for r in shots if not _is_before(r)]:
                 rows_kv.append(("Screen picture", s["screenshot_note"]))  # says why the picture is missing
             add(_kv_table(rows_kv, status_row=("Result", st)))
             for rel in shots:
-                add(self._image(rel, n, "", caption=f"Screen after step {n}"))
+                caption = (
+                    f"Before step {n}: the item about to be clicked is boxed in red"
+                    if _is_before(rel)
+                    else f"Screen after step {n}"
+                )
+                add(self._image(rel, n, "", caption=caption))
 
         # --- sign-off, then the technical appendix
         add(_page_break())
@@ -598,3 +604,8 @@ def _default_expected(step: dict[str, Any]) -> str:
         "assert_text": f'It shows "{value}".' if value else "It shows the expected text.",
         "login_as": f"Signed in as {value}." if value else "Signed in.",
     }.get(action, "The step completes.")
+
+
+def _is_before(rel: str) -> bool:
+    """A picture taken just before a click (see the runner), not after the step."""
+    return Path(rel).stem.endswith("-before")

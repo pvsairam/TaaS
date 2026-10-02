@@ -97,7 +97,11 @@ def test_screenshot_modes(stage_env: Environment) -> None:
     page = {("label", "Save"): 1}
 
     every = run_test(_tc(*steps), stage_env, FakeDriver(page), screenshots=ScreenshotMode.EVERY_STEP)
-    assert [s.evidence for s in every.steps] == [["evidence/step-01.png"], ["evidence/step-02.png"]]
+    # a click also gets a picture just before it, with what it clicks boxed in red
+    assert [s.evidence for s in every.steps] == [
+        ["evidence/step-01-before.png", "evidence/step-01.png"],
+        ["evidence/step-02.png"],
+    ]
 
     on_failure = run_test(_tc(*steps), stage_env, FakeDriver(page))  # the default
     assert [s.evidence for s in on_failure.steps] == [[], []]
@@ -116,7 +120,7 @@ def test_a_screenshot_that_fails_does_not_end_the_run(stage_env: Environment) ->
     steps = (_click({"label": "Save"}), Step(action=Action.NAVIGATE, intent="go", value="A > B"))
     result = run_test(_tc(*steps), stage_env, SlowPage({("label", "Save"): 1}), screenshots=ScreenshotMode.EVERY_STEP)
     assert [s.status for s in result.steps] == [StepStatus.PASSED, StepStatus.PASSED]  # the run went on
-    assert [s.evidence for s in result.steps] == [[], ["evidence/step-02.png"]]
+    assert [s.evidence for s in result.steps] == [["evidence/step-01-before.png"], ["evidence/step-02.png"]]
     assert result.steps[0].screenshot_note == "The screen could not be captured: the page was still loading."
     assert result.steps[1].screenshot_note is None
 

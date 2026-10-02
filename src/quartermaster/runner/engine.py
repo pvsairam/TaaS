@@ -101,8 +101,20 @@ def run_test(
             step_started = _now()
             status, error, evidence = StepStatus.PASSED, None, []
             seen: dict[str, Resolution] = {}
+
+            def before_click(res: Resolution, i: int = i, evidence: list[str] = evidence) -> None:
+                # A picture just before a click, with the item about to be clicked boxed in red: the
+                # one taken after it often shows a new page, where that item is gone.
+                try:
+                    shot = driver.screenshot(f"step-{i + 1:02d}-before", (res.strategy, res.value))
+                except Exception:  # a busy page: the picture after the step still comes
+                    return
+                if shot:
+                    evidence.append(shot)
+
+            wants_before = step.action is Action.CLICK and screenshots is ScreenshotMode.EVERY_STEP
             try:
-                res = _execute(step, test.data, runtime, driver, seen)
+                res = _execute(step, test.data, runtime, driver, seen, before_click if wants_before else None)
                 if res is not None and res.healed:
                     status = StepStatus.HEALED
                     healing.append(
@@ -186,7 +198,12 @@ def _wants_screenshot(mode: ScreenshotMode, status: StepStatus) -> bool:
 
 
 def _execute(
-    step: Step, data: dict[str, str], runtime: dict[str, str], driver: Driver, seen: dict[str, Resolution]
+    step: Step,
+    data: dict[str, str],
+    runtime: dict[str, str],
+    driver: Driver,
+    seen: dict[str, Resolution],
+    before_click: Callable[[Resolution], None] | None = None,
 ) -> Resolution | None:
     value = render_value(step.value, data, runtime)
     a = step.action
@@ -219,6 +236,8 @@ def _execute(
     seen["res"] = res  # kept even if the action below fails, for the report and screenshot
     s, v = res.strategy, res.value
     if a is Action.CLICK:
+        if before_click is not None:
+            before_click(res)
         driver.click(s, v)
     elif a is Action.FILL:
         driver.fill(s, v, value)  # type: ignore[arg-type]

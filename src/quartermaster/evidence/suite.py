@@ -252,7 +252,8 @@ def _entry(record: dict[str, Any], run_dir: Path, doc: Path | None, evidence_roo
             "number": failed.get("index", 0) + 1,
             "intent": failed.get("intent", ""),
             "error": failed.get("error"),
-            "screenshot": _relative(run_dir / shots[0], evidence_root) if shots else None,
+            # the screen when it failed (a click also has a picture before it, listed first)
+            "screenshot": _relative(run_dir / shots[-1], evidence_root) if shots else None,
         }
     return entry
 
