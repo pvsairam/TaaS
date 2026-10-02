@@ -1,6 +1,6 @@
 // Settings: clients and environments, sign-in, AI, evidence, storage, appearance and shortcuts.
 // Passwords are never shown.
-import {api, button, card, chips, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
+import {api, button, callout, card, chips, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
 import {checkPod, openFolder} from "./components.js";
 import {connection, envName, loadCommon, schedule, state} from "./state.js";
 import {setTheme, show} from "./app.js";
@@ -68,6 +68,9 @@ export async function settingsPage() {
         h("div", {class: "hint"}, "A red box (and a red dot for a click) shows what each step clicks or fills, in the browser and the video, and a red box marks it in the screenshots. Turn off for clean pictures.")),
       h("p", {class: "hint", style: "margin:0"}, "The same choices are in New run; changing them in either place changes both. Prepare and Run by hand always show the browser."))});
 
+  const backups = tab === "general" ? await backupCard() : null;
+  if (state.page !== "settings") return;
+
   const appearance = card({title: "Appearance",
     body: segmented([["system", "Same as this computer"], ["light", "Light"], ["dark", "Dark"]],
       document.documentElement.dataset.theme || "system", setTheme, "Theme")});
@@ -81,7 +84,7 @@ export async function settingsPage() {
     environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse), h("div", {class: "stack"}, environments)),
     evidence: h("div", {style: "max-width:720px"}, evidence),
     ai: h("div", {style: "max-width:720px"}, ai),
-    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, appearance), h("div", {class: "stack"}, shortcuts)),
+    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, appearance), h("div", {class: "stack"}, shortcuts)),
   }[tab];
   show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
     h("div", {class: "page-head"},
@@ -93,6 +96,48 @@ export async function settingsPage() {
 }
 
 const TABS = [["environments", "Clients & environments"], ["evidence", "Evidence"], ["ai", "AI assistant"], ["general", "General"]];
+
+// Backup and restore: one zip with the tests, run history, clients and settings (never the passwords).
+// A restore is only stored here; the next start of Quartermaster applies it, because its databases are
+// open while it runs.
+async function backupCard() {
+  const status = await api("/api/backup/status").catch(() => ({pending: null, copies: []}));
+  const withEvidence = h("input", {type: "checkbox", id: "backup-evidence"});
+  const download = button("Download a backup", {kind: "primary", ic: "download", onClick: () => {
+    location.href = `/api/backup${withEvidence.checked ? "?evidence=1" : ""}`;
+    toast("Making the backup. It downloads in a moment.");
+  }});
+  const pick = h("input", {type: "file", accept: ".zip,application/zip", hidden: true, onchange: async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!confirm(`Restore from ${file.name}? It replaces your tests, run history, clients and settings with what is in the backup, when Quartermaster is started again. A copy of what is here now is kept first.`)) return;
+    try {
+      const content = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] || "");
+        r.onerror = () => reject(new Error("The file could not be read."));
+        r.readAsDataURL(file);
+      });
+      await api("/api/backup/restore", {content});
+      toast("The backup is ready. Close Quartermaster and start it again to finish.");
+      settingsPage();
+    } catch (err) { toast(err.message); }
+  }});
+  const waiting = status.pending ? callout("warning", "A restore is waiting.",
+    `The backup made ${when(status.pending.created_at).toLowerCase()} replaces what is here the next time Quartermaster starts. Close the black window, then start Quartermaster again.`,
+    h("div", {class: "row", style: "margin-top:8px"}, button("Cancel the restore", {size: "sm", onClick: async () => {
+      try { await api("/api/backup/cancel", {}); toast("Cancelled."); settingsPage(); } catch (err) { toast(err.message); }
+    }}))) : null;
+  return card({title: "Backup and restore", sub: "Keep a copy of your tests, run history, clients and settings",
+    body: h("div", {class: "stack"}, waiting,
+      h("div", {class: "stack", style: "gap:8px"},
+        h("div", {class: "row"}, download, button("Restore from a backup", {ic: "folder", onClick: () => pick.click()}), pick),
+        h("label", {class: "switch"}, withEvidence, "Also include evidence (screenshots, videos and documents; can be large)")),
+      h("p", {class: "hint", style: "margin:0"}, "Passwords of the test users are not in a backup, so it is safe to keep in a shared folder. After a restore on another computer, type those passwords again. The AI key and sign-ins done by hand are never saved."),
+      status.copies.length ? h("div", {}, h("div", {class: "label"}, "Copies made before a restore"),
+        h("div", {class: "hint"}, `${status.copies.map((c) => c.name).slice(0, 3).join(", ")} in the backups folder inside ${status.folders.data}. To go back, restore one of them (qm restore <file>).`)) : null)});
+}
 
 // The AI that prepares manual scenarios. Any provider. The key is pasted here (kept in memory only,
 // until Quartermaster stops) or set on the computer; it is never stored or shown again.

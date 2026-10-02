@@ -13,15 +13,26 @@ release feature lists, the AI settings and the evidence options.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 import shutil
 import threading
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
-from quartermaster.service.api import App, Reply
+from quartermaster.service import backup
+from quartermaster.service.api import ApiError, App, Reply
+from quartermaster.service.audit import AuditLog
 from quartermaster.service.environments import Environments
 from quartermaster.service.settings import Settings
+
+
+def _reply(data: Any) -> Reply:
+    return Reply(HTTPStatus.OK, json.dumps(data).encode("utf-8"))
 
 
 class Hub:
@@ -42,6 +53,7 @@ class Hub:
         self.environments = Environments(data_dir / "environments.db")
         old = Settings(data_dir / "settings.json").get()
         self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
+        self.audit = AuditLog(data_dir / "audit.jsonl")
         self._keys: set[str] = set()  # AI keys pasted in Settings, shared by all clients, in memory only
         self._apps: dict[str, App] = {}
         self._lock = threading.RLock()
@@ -106,10 +118,51 @@ class Hub:
     # ------------------------------------------------------------------ the web service
 
     def handle(self, method: str, raw_path: str, body: bytes) -> Reply:
+        if urlsplit(raw_path).path.startswith("/api/backup"):
+            return self._backup(method, raw_path, body)
         reply = self.app.handle(method, raw_path, body)
         if method == "POST" and raw_path.startswith("/api/environments"):
             self.sync()  # a client added or deleted
         return reply
+
+    # ------------------------------------------------------------------ backup and restore
+
+    def backup_folders(self) -> backup.Folders:
+        return backup.Folders(self.tests_root, self.evidence_root, self.data_dir)
+
+    def _backup(self, method: str, raw_path: str, body: bytes) -> Reply:
+        """Backup and restore cover every client, so they belong to the hub and not to one workspace."""
+        url = urlsplit(raw_path)
+        route = url.path[len("/api/backup") :].strip("/")
+        folders = self.backup_folders()
+        try:
+            if method == "GET" and route == "":
+                evidence = (parse_qs(url.query).get("evidence") or [""])[0] == "1"
+                content = backup.create(folders, include_evidence=evidence)
+                self.audit.add("Downloaded a backup", "Backup", {"evidence": "included" if evidence else "left out"})
+                return Reply(HTTPStatus.OK, content, "application/zip", f"quartermaster-backup-{backup.stamp()}.zip")
+            if method == "GET" and route == "status":
+                return _reply(
+                    {
+                        "pending": backup.pending(folders),
+                        "copies": backup.saved_copies(folders),
+                        "folders": {"tests": str(folders.tests), "data": str(folders.data)},
+                    }
+                )
+            if method == "POST" and route == "restore":
+                try:
+                    content = base64.b64decode(str(json.loads(body or b"{}").get("content") or ""), validate=True)
+                except (ValueError, binascii.Error, AttributeError) as e:
+                    raise backup.BackupError("The file could not be read. Choose the backup zip again.") from e
+                info = backup.stage(folders, content)
+                self.audit.add("Chose a backup to restore", "Backup", {"made": info.get("created_at")})
+                return _reply({"pending": info})
+            if method == "POST" and route == "cancel":
+                backup.cancel(folders)
+                return _reply({"pending": None})
+        except backup.BackupError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
     def start(self) -> None:
         with self._lock:

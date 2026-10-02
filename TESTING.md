@@ -506,6 +506,38 @@ You should see: the test is unreadable (see **Needs attention**, "Unreadable fil
 DELETE must use a value the test saved, such as `${location_id}`. Put the line back as it was,
 or delete the demo file when you are done.
 
+### 6.15 Backup and restore
+
+1. Click **Settings**, then the **General** tab. Find **Backup and restore**.
+2. Click **Download a backup**.
+
+You should see: a file named `quartermaster-backup-<date>-<time>.zip` downloads. Open it (it is a
+normal zip): there are folders `tests` and `data`, and a file `backup.json`. There is no
+`vault.key` and no `evidence` folder (you did not tick the evidence box).
+
+3. Make a change you can recognise: in the `my_tests` folder, delete one of your test files (or open
+   **Tests** and note how many there are).
+4. Back in **Backup and restore**, click **Restore from a backup**, choose the zip from step 2 and
+   click OK in the question.
+
+You should see: a yellow box, **A restore is waiting**. Nothing has changed yet. (Click **Cancel the
+restore** to try that: the box goes away.)
+
+5. Choose the zip again to bring the box back. Close the black window, then start Quartermaster
+   again (double-click the desktop icon).
+
+You should see: in the black window, "Restored the backup you chose." The test you deleted is
+back, and the yellow box is gone. Under **Backup and restore**, "Copies made before a restore" lists
+a `before-restore-...zip`: that is what was here just before, in case you restored by mistake.
+
+6. Click **Settings**, **Clients & environments**. Your clients and pods are there, and the test
+   users still say the password is saved (it is kept on this computer).
+
+To try a restore on a second computer: copy the zip there, restore it the same way. The clients and
+users appear, and each user says the password is not saved yet: type it again.
+
+In a terminal: `qm backup my-backup.zip`, and, with Quartermaster closed, `qm restore my-backup.zip`.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

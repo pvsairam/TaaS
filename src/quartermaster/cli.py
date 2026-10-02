@@ -514,6 +514,12 @@ def _serve(args: argparse.Namespace) -> int:
         if not args.no_browser:
             webbrowser.open(address)
         return 0
+    # a restore chosen on the Settings page waits for this start: nothing is open yet, so it can be applied
+    from quartermaster.service import backup
+
+    waiting = backup.apply_pending(backup.Folders(Path(args.tests), Path(args.evidence), Path(args.data)))
+    if waiting:
+        print(waiting)
     tests = _tests_folder(args.tests)
     if tests is None:
         return 2
@@ -545,6 +551,42 @@ def _serve(args: argparse.Namespace) -> int:
     finally:
         server.server_close()
         app.stop()
+    return 0
+
+
+def _backup(args: argparse.Namespace) -> int:
+    from quartermaster.service import backup
+
+    folders = backup.Folders(Path(args.tests), Path(args.evidence), Path(args.data))
+    out = Path(args.file)
+    try:
+        content = backup.create(folders, include_evidence=args.with_evidence)
+    except backup.BackupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(content)
+    print(f"Backup saved: {out} ({len(content) // 1024} KB). Test users' passwords are not in it.")
+    return 0
+
+
+def _restore(args: argparse.Namespace) -> int:
+    from quartermaster.service import backup
+
+    address = f"http://127.0.0.1:{args.port}"
+    if _answers(address):
+        print("error: Quartermaster is running. Close it first (or restore from the Settings page).", file=sys.stderr)
+        return 2
+    folders = backup.Folders(Path(args.tests), Path(args.evidence), Path(args.data))
+    try:
+        info = backup.restore(folders, Path(args.file).read_bytes())
+    except (OSError, backup.BackupError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(
+        f"Restored the backup made {info.get('created_at')}. "
+        f"The copy of what was here before is in {folders.data / backup.BACKUPS}."
+    )
     return 0
 
 
@@ -644,6 +686,21 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--no-browser", action="store_true", help="do not open the web browser")
     sv.set_defaults(func=_serve)
+
+    for name, func, text in (
+        ("backup", _backup, "save your tests, run history, clients and settings in one zip (no passwords)"),
+        ("restore", _restore, "put a backup zip back (Quartermaster must not be running)"),
+    ):
+        bp = sub.add_parser(name, help=text)
+        bp.add_argument("file", help="the backup zip" + (" to make" if name == "backup" else " to restore"))
+        bp.add_argument("--tests", default=DEFAULT_TESTS, help="your tests folder")
+        bp.add_argument("--evidence", default="evidence", help="the evidence folder")
+        bp.add_argument("--data", default=".qm", help="the data folder")
+        if name == "backup":
+            bp.add_argument("--with-evidence", action="store_true", help="also keep screenshots, videos and documents")
+        else:
+            bp.add_argument("--port", type=int, default=8765)
+        bp.set_defaults(func=func)
 
     args = parser.parse_args(argv)
     try:

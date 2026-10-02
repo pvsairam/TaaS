@@ -218,7 +218,7 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 | **Needs attention** | Test team | Failures grouped by kind (checks that did not match, items not found, screens that did not respond, sign-in problems, runs that could not start, unreadable files) with the failed step, expected and observed, the screenshot and the last release it passed on. Oracle screen changes are accepted with one click (the old file is kept). Each failure says its likely cause from the run history (the Oracle update, changed data, or the test itself); when it is the update, **Draft SR** writes an Oracle service request to copy into My Oracle Support. |
 | **Schedules** | Test leads | Tests that run by themselves on chosen days at a chosen time (for example every night at 02:00), while `qm serve` runs. Each shows when it runs next and links to its last run; **Run now** starts it at once. |
 | **Record a test** | Functional team | Name the test and start. A browser opens already signed in. While recording: a timer, the steps so far, Pause and Resume, Add check, Add note (what should happen at a step), Mask value, Undo and Finish. |
-| **Settings** | Everyone | **Clients and environments**: add each client and its pods (address, Oracle release, kind, sign-in), with test users and personas; passwords are typed here and saved encrypted (by Windows for your Windows user), never shown again. Production pods are refused. Switch the pod in use from the menu. Each client is kept apart: its own tests, manual scripts, evidence, runs, schedules, Needs attention and audit log (the first client keeps the default folders; others are in `clients/<name>-<code>/`), and every client's schedules run even when another is in use. Also: the AI assistant (any provider; the key is kept in memory or in an environment variable), evidence options, folders, theme and keyboard shortcuts. For pods behind single sign-on or MFA, **Sign in by hand** opens a browser to sign in once; runs then reuse that session (kept in memory only). |
+| **Settings** | Everyone | **Clients and environments**: add each client and its pods (address, Oracle release, kind, sign-in), with test users and personas; passwords are typed here and saved encrypted (by Windows for your Windows user), never shown again. Production pods are refused. Switch the pod in use from the menu. Each client is kept apart: its own tests, manual scripts, evidence, runs, schedules, Needs attention and audit log (the first client keeps the default folders; others are in `clients/<name>-<code>/`), and every client's schedules run even when another is in use. **Backup and restore** (General tab): download one zip with your tests, run history, clients and settings, and put it back later. Also: the AI assistant (any provider; the key is kept in memory or in an environment variable), evidence options, folders, theme and keyboard shortcuts. For pods behind single sign-on or MFA, **Sign in by hand** opens a browser to sign in once; runs then reuse that session (kept in memory only). |
 | **Audit log** | Test leads, auditors | Who changed what in Quartermaster and when: runs started, approvals, accepted screen changes, test data saved, imports, schedules, settings and sign-ins. Never passwords, keys or test data values. Search, and download as CSV. |
 
 Start a run from anywhere with **New run** (or press `N`). `Ctrl+K` searches and runs anything: pages, tests,
@@ -242,6 +242,23 @@ lists are kept in `.qm/releases`, and imported manual scripts in `.qm/manual` (t
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
+
+## Backup and restore
+
+Settings, General, **Backup and restore** (or `qm backup my-backup.zip` in a terminal) makes one zip with
+everything that cannot be made again: your tests (and every client's), run history, imported manual
+scripts and feature lists, schedules, the audit log, settings, and the clients and their pods.
+
+- **Never in the zip:** the test users' passwords, the key that protects them, the AI key and the
+  sign-ins done by hand. The zip is safe to keep in a shared folder. After a restore on another
+  computer, type the test users' passwords again; on the same computer they are kept.
+- **Evidence** (screenshots, videos, Word documents) is left out unless you tick *Also include
+  evidence*, because it can be large. A backup over 2 GB is refused: copy the `evidence` folder yourself.
+- **Restoring** replaces your tests, history, clients and settings with the backup. The Settings page
+  stores the zip and applies it the next time Quartermaster starts (its databases are open while it
+  runs). Before anything is replaced, the current state is saved in `.qm/backups/` (the last 5 are
+  kept), so a restore can be undone. In a terminal, with Quartermaster closed: `qm restore my-backup.zip`.
+- Evidence you already have is never deleted by a restore that does not contain evidence.
 
 ## Proof of testing: screenshots, video and the Word evidence document
 
