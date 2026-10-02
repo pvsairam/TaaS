@@ -168,9 +168,10 @@ export async function openScenario(id) {
       button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}),
       button("Approve", {kind: "primary", ic: "check", onClick: () => approveScenario(s.id)}),
     ] : [
-      h("span", {class: "meta grow"}, s.automated ? "Ready: Run plays it by itself." : aiReady() ? "Prepare: an AI does it and you review. Or do it by hand once." : "Do it by hand once; after that it plays by itself."),
-      s.automated && aiReady() ? button("Prepare again", {ic: "target", disabled: !state.status.ready,
-        title: "The AI does it again, for example when the saved steps are wrong or incomplete", onClick: () => {
+      h("span", {class: "meta grow"}, s.automated ? (aiReady() ? "Ready: Run plays it by itself." : "Run plays it by itself. To prepare it again, paste the AI key in Settings.") : aiReady() ? "Prepare: an AI does it and you review. Or do it by hand once." : "Do it by hand once; after that it plays by itself."),
+      s.automated ? button("Prepare again", {ic: "target", disabled: !state.status.ready || !aiReady(),
+        title: aiReady() ? "The AI does it again, for example when the saved steps are wrong or incomplete"
+          : `Set up the AI first: ${state.status.ai?.problem || "Settings, AI assistant"}`, onClick: () => {
           if (!confirm("The AI prepares this scenario again. If it finishes, the new version replaces the current one and waits in To review; Run is refused until you approve it. If it stops, the current version stays.")) return;
           runScenario(s.id, {prepare: true});
         }}) : null,
