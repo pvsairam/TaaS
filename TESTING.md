@@ -360,6 +360,9 @@ You should see: four steps, one per line, without the numbers.
 You should see: failed runs grouped by kind (for example "Item not found"), with the failed step,
 what was expected, what was found and a screenshot. If nothing failed it says all clear.
 
+To clear an item, click **Dismiss** on it, or **Dismiss all shown** at the top. A dismissed failure
+comes back only if the test fails again on a later run.
+
 Each failed test also says its **Likely cause**, worked out from its history: passed on an
 earlier release and fails on this one (probably the Oracle update), passed before on this same
 release (the data or the pod changed), or never passed (the test or its data). When the update is

@@ -383,6 +383,35 @@ def test_needs_attention_and_accepting_an_update(app: App) -> None:
         call(app, "POST", "/api/test/accept-update", {"file": "../x.yaml", "step_index": 0, "new": ["a", "b"]})
 
 
+def test_needs_attention_items_can_be_dismissed_until_they_fail_again(app: App) -> None:
+    add_suite_tests(app)
+    first = finished_suite_run(app)
+    todo = call(app, "GET", "/api/attention")
+    (failure,) = [i for i in todo["items"] if i["category"] == "assertion"]
+    assert call(app, "POST", "/api/attention/dismiss", {"keys": [failure["key"], "made-up"]}) == {"dismissed": 1}
+    after = call(app, "GET", "/api/attention")
+    assert "assertion" not in after["counts"] and after["count"] == 2 and after["dismissed"] == 1
+    entries = json.loads(app.handle("GET", "/api/audit", b"").body)["entries"]
+    assert entries[0]["action"] == "Dismissed from Needs attention"
+
+    # the same test failing on a later run shows up again
+    again = app.queue.store.create("hcm", {"screenshots": "every-step", "video": "off"})
+    app.queue.store.update(again["id"], status="failed", suite_dir=app.queue.store.get(first["id"])["suite_dir"])
+    back = call(app, "GET", "/api/attention")
+    assert back["counts"].get("assertion") == 1 and back["dismissed"] == 0
+    with pytest.raises(ApiError, match="choose what to dismiss"):
+        call(app, "POST", "/api/attention/dismiss", {"keys": []})
+
+
+def test_a_run_that_could_not_finish_says_why_in_plain_words() -> None:
+    from quartermaster.service.insights import plain_run_error
+
+    crashed = "Exception: BrowserContext.new_page: Connection closed while reading from the driver"
+    assert plain_run_error(crashed).startswith("The browser or Quartermaster stopped while the run was going.")
+    assert "Set QM_FUSION_URL" in plain_run_error("error: set QM_FUSION_URL to the non-prod pod URL")
+    assert plain_run_error("something new") == ""
+
+
 def test_test_detail_speaks_plainly(app: App) -> None:
     add_suite_tests(app)
     finished_suite_run(app)

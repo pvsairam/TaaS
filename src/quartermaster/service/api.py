@@ -6,6 +6,7 @@ computers and other web sites cannot start runs.
 
     GET  /api/status                 pod, credentials set or not, environment name and release, folders
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
+    POST /api/attention/dismiss      {"keys"} hide items of Needs attention (they come back if it fails again)
     GET  /api/audit, /api/audit.csv  the audit log: who changed what, when (newest first; the CSV oldest first)
     GET  /api/signin                 the sign-in done by hand (single sign-on, MFA): none, waiting, done, failed
     POST /api/signin                 open a browser on the pod for a person to sign in; the session is kept
@@ -60,6 +61,7 @@ computers and other web sites cannot start runs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -255,6 +257,8 @@ class App:
             return Reply(HTTPStatus.OK, body, "application/zip", name)
         if method == "GET" and route == ["attention"]:
             return _json(self.attention())
+        if method == "POST" and route == ["attention", "dismiss"]:
+            return _json(self.dismiss_attention(data))
         if method == "GET" and route == ["attention", "sr"]:
             return _json(self.sr_draft(str((query.get("run") or [""])[0]), str((query.get("test") or [""])[0])))
         if method == "GET" and route == ["test"]:
@@ -750,10 +754,49 @@ class App:
         result = insights.attention(
             self.tests(), self.queue.store.list(limit=500), self.tests_root, self.settings.get()["release"]
         )
+        dismissed = self._dismissed()
+        kept = []
         for item in result["items"]:
+            item["key"] = attention_key(item)
+            if item["key"] in dismissed:
+                continue
             item["picture_url"] = self._url_rel(item.pop("picture", None))
             item["document_url"] = self._url_rel(item.pop("document", None))
+            kept.append(item)
+        counts: dict[str, int] = {}
+        for item in kept:
+            counts[item["category"]] = counts.get(item["category"], 0) + 1
+        result.update(items=kept, count=len(kept), counts=counts, dismissed=len(result["items"]) - len(kept))
         return result
+
+    @property
+    def _dismissed_file(self) -> Path:
+        return self.backups.parent / "attention_dismissed.json"
+
+    def _dismissed(self) -> set[str]:
+        try:
+            data = json.loads(self._dismissed_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        return {str(k) for k in data} if isinstance(data, list) else set()
+
+    def dismiss_attention(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Hide items from Needs attention. A key names one failure of one run, so the same test
+        failing again on a later run shows up again."""
+        keys = data.get("keys")
+        if not isinstance(keys, list) or not keys:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "choose what to dismiss")
+        current = {
+            attention_key(i)
+            for i in insights.attention(
+                self.tests(), self.queue.store.list(limit=500), self.tests_root, self.settings.get()["release"]
+            )["items"]
+        }
+        wanted = {str(k) for k in keys} & current  # only what is listed now; old keys are dropped
+        kept = (self._dismissed() & current) | wanted
+        self._dismissed_file.parent.mkdir(parents=True, exist_ok=True)
+        self._dismissed_file.write_text(json.dumps(sorted(kept)), encoding="utf-8")
+        return {"dismissed": len(wanted)}
 
     def sr_draft(self, run_id: str, test_id: str) -> dict[str, str]:
         """A draft Oracle service request for a failed test that Needs attention lists."""
@@ -808,6 +851,8 @@ class App:
         view["release"] = str(suite.get("release") or run["options"].get("release") or "")
         view["executed_by"] = str(suite.get("executed_by") or run["options"].get("tester") or "")
         view["environment"] = urlsplit(str(suite.get("environment_url") or "")).hostname or None
+        if run.get("status") == "error":
+            view["error_plain"] = insights.plain_run_error(run.get("error"))
         if counts:
             view["counts"] = insights.run_counts(run)
         return view
@@ -952,6 +997,18 @@ def _tail(log: Path, n: int = 40) -> str:
 
 
 # ---------------------------------------------------------------------- HTTP
+
+
+def attention_key(item: dict[str, Any]) -> str:
+    """Names one item of Needs attention: one failure of one run, one screen change, one bad file."""
+    cat = str(item.get("category", ""))
+    if cat == "ui_change":
+        return f"ui:{item.get('test_id')}:{item.get('run_id')}:{item.get('step_index')}"
+    if cat == "unreadable":
+        return f"file:{item.get('file')}:{hashlib.sha1(str(item.get('error')).encode()).hexdigest()[:10]}"
+    if item.get("test_id"):
+        return f"fail:{item.get('test_id')}:{item.get('run_id')}"
+    return f"run:{item.get('run_id')}"
 
 
 def port_of(server: Any) -> int:

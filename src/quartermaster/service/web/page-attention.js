@@ -32,7 +32,12 @@ export async function attentionPage() {
     h("div", {class: "page-head"},
       h("div", {}, h("h1", {}, "Needs attention"),
         h("p", {class: "lead"}, "Failures to look into, Oracle screen changes to accept, and anything that stopped a run.")),
-      h("span", {class: "meta"}, `Last checked ${clock(a.checked_at)}`)),
+      h("div", {class: "row", style: "gap:8px"},
+        h("span", {class: "meta"}, `Last checked ${clock(a.checked_at)}${a.dismissed ? ` · ${a.dismissed} dismissed` : ""}`),
+        a.count ? button("Dismiss all shown", {size: "sm", ic: "x", onClick: () => {
+          const keys = a.items.filter((i) => current === "all" || i.category === current).map((i) => i.key);
+          if (confirm(`Dismiss ${keys.length === 1 ? "this item" : `these ${keys.length} items`}? Each comes back only if it fails again on a later run.`)) dismiss(keys, "Dismissed.");
+        }}) : null)),
     a.count ? [
       h("div", {class: "toolbar"}, chips([["all", "All", a.count],
         ...ORDER.filter((k) => a.counts[k]).map((k) => [k, a.categories[k], a.counts[k]])], current, (v) => { current = v; draw(); }, "Kind")),
@@ -94,6 +99,14 @@ function item(i) {
     h("div", {class: "card-body stack", style: "gap:12px"}, head, body, evidence, facts));
 }
 
+async function dismiss(keys, what) {
+  try {
+    await api("/api/attention/dismiss", {keys});
+    toast(`${what} If it fails again on a later run, it comes back.`);
+    attentionPage();
+  } catch (err) { toast(err.message); }
+}
+
 function actions(i) {
   const out = [];
   if (i.category === "ui_change") {
@@ -113,6 +126,8 @@ function actions(i) {
     out.push(button("Run again", {size: "sm", kind: i.category === "ui_change" ? "" : "primary", ic: "runs", disabled: !state.status.ready, onClick: () => openRunDrawer(i.file)}));
   }
   if (i.category === "unreadable") out.push(button("Open the test", {size: "sm", href: testLink(i.file)}));
+  out.push(button("Dismiss", {size: "sm", kind: "ghost", ic: "x", title: "Remove it from this list; it comes back only if it fails again on a later run",
+    onClick: () => dismiss([i.key], "Dismissed.")}));
   return out;
 }
 

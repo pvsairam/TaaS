@@ -1,6 +1,6 @@
 // Runs: every run, and one run's execution in detail.
 import {
-  STATUS, api, button, callout, card, chips, emptyState, h, icon, input, plural, statusBadge, statusNode, table,
+  STATUS, api, button, callout, card, chips, disclose, emptyState, h, icon, input, plural, statusBadge, statusNode, table,
   toast, took, when,
 } from "./ui.js";
 import {evidenceViewer, executionTimeline, openFolder, openRunDrawer, releaseBadge} from "./components.js";
@@ -113,6 +113,14 @@ export async function runPage(id) {
   if (location.hash !== runLink(id)) return; // left while loading
   const isActive = active(run);
   const live = progress(run.events);
+  // A run that ended part way (stopped, or could not finish) leaves its last test "running" and the
+  // rest "waiting" in the live progress: they did not run, so say so.
+  if (!isActive) {
+    for (const t of live) {
+      if (t.status === "running") t.status = run.status === "cancelled" ? "cancelled" : "error";
+      else if (t.status === "waiting") t.status = "skipped";
+    }
+  }
   const liveById = new Map(live.map((t) => [t.id, t]));
   const results = run.results;
   const totalSteps = live.reduce((a, t) => a + Math.max(t.total, t.steps.length), 0);
@@ -184,6 +192,7 @@ export async function runPage(id) {
     detail = card({title: t.title, sub: t.total ? `${t.steps.filter((x) => x && x.status !== "running").length} of ${plural(t.total, "step")}` : "",
       actions: statusBadge(t.status),
       body: t.status === "waiting" ? emptyState({ic: "clock", title: "Not started", text: "It runs after the tests before it."})
+        : t.status === "skipped" ? emptyState({ic: "minus", title: "Did not run", text: "The run ended before this test. Run it again to test it."})
         : executionTimeline(t.steps, {total: t.total})});
   }
 
@@ -198,7 +207,8 @@ export async function runPage(id) {
   const outputOpen = document.querySelector("details.run-output")?.open || false;
   show([{label: "Runs", href: "#/runs"}, {label: runName(run)}],
     head,
-    run.status === "error" ? h("div", {class: "section"}, callout("danger", "The run could not finish.", run.error || "")) : null,
+    run.status === "error" ? h("div", {class: "section"}, callout("danger", "The run could not finish.", run.error_plain || run.error || "",
+      run.error_plain && run.error ? disclose("Technical details", h("pre", {class: "block"}, run.error)) : null)) : null,
     h("div", {class: `section ${list ? "split" : ""}`}, list, detail),
     run.output ? h("div", {class: "card section"}, h("div", {class: "card-body"},
       h("details", {class: "disclose run-output", open: outputOpen}, h("summary", {}, icon("right"), "Messages from the run (for the test team)"),

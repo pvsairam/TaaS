@@ -260,6 +260,33 @@ def classify(error: str | None) -> str:
     return "failure"
 
 
+def plain_run_error(error: str | None) -> str:
+    """Why a whole run could not finish, in everyday words; "" when the message is not a known one."""
+    low = " ".join((error or "").split()).lower()
+    if any(
+        m in low
+        for m in (
+            "connection closed while reading from the driver",
+            "browser has been closed",
+            "target page, context or browser has been closed",
+            "the service stopped during this run",
+        )
+    ):
+        return (
+            "The browser or Quartermaster stopped while the run was going. This happens when qm serve is "
+            "stopped with Ctrl+C (it also stops the run it started), when the test browser window is closed, "
+            "or when the computer goes to sleep. Click Run again."
+        )
+    if "set qm_fusion_url" in low:
+        return (
+            "The pod address is not set in the window where qm serve was started. Set QM_FUSION_URL, "
+            "QM_FUSION_USER and QM_FUSION_PASSWORD there, then start qm serve again."
+        )
+    if "no credentials for persona" in low:
+        return "The sign-in for this test's user is not set on this computer (see Settings, Sign-in)."
+    return ""
+
+
 def expected_observed(error: str | None) -> dict[str, str] | None:
     m = re.search(r"expected text '(.*)', found '(.*)'$", " ".join((error or "").split()))
     return {"expected": m.group(1), "observed": m.group(2)} if m else None

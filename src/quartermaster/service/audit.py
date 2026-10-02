@@ -100,6 +100,8 @@ def describe(route: list[str], data: dict[str, Any], reply: Any) -> Described | 
         return "Changed settings", "Settings", {k: v for k, v in data.items() if isinstance(v, str | int | bool)}
     if key == "ai/key":
         return ("Entered the AI key" if str(data.get("key") or "").strip() else "Removed the AI key"), "AI", {}
+    if key == "attention/dismiss":
+        return "Dismissed from Needs attention", f"{reply.get('dismissed', 0)} item(s)", {}
     if key == "signin":
         return "Opened a browser to sign in by hand", "Sign-in", {}
     if key == "signin/forget":
