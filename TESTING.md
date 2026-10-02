@@ -357,7 +357,20 @@ running. Within a minute of that time a run labelled "Scheduled: Nightly check" 
 Note: schedules only start while `qm serve` is running. A time missed while it was stopped
 starts only if Quartermaster is back within the hour.
 
-### 6.11 Search and shortcuts
+### 6.11 Certification pack for a release
+
+Do this after some tests have run with the Oracle release set in Settings (6.1).
+
+1. Click **Overview**. In the release readiness card, click **Certification pack**.
+2. A zip downloads, named like `certification_26C.zip`. Unzip it.
+
+You should see: `Certification 26C.docx` and an `evidence` folder with one Word document per
+test (its latest run on that release). Open the certification document. It shows the result,
+counts by module, every test with its result and evidence file, what failed with a picture,
+tests not yet run on the release, and a sign-off table. In **Release comparison** (shown once
+tests ran on two releases), the download icon on each row gets the pack for that release.
+
+### 6.12 Search and shortcuts
 
 - Press **Ctrl+K**. Type `release impact`. Press Enter. It opens Release impact.
 - Press **N**. The New run panel opens. Press Esc to close it.

@@ -387,7 +387,7 @@ export function releaseReadiness(r, onSetRelease) {
   const pct = r.total ? Math.round((100 * r.validated) / r.total) : 0;
   return card({title: h("span", {}, h("span", {class: "release"}, r.release), " release readiness"),
     sub: `${r.validated} of ${plural(r.total, "test")} validated on ${r.release} (${pct}%)`,
-    actions: button("Run the rest", {size: "sm", ic: "runs", onClick: () => openRunDrawer(".")}),
+    actions: [certificationButton(r.release), button("Run the rest", {size: "sm", ic: "runs", onClick: () => openRunDrawer(".")})],
     body: h("div", {class: "stack", style: "gap:14px"},
       stackedBar(parts, parts.map((p) => `${p.label}: ${p.n}`).join(", ")),
       h("div", {class: "grid g-2", style: "gap:8px 16px"}, parts.map((p) => h("div", {class: "row", style: "flex-wrap:nowrap"},
@@ -407,7 +407,17 @@ export function releaseComparison(releases) {
       h("div", {class: "grow"}, stackedBar([{n: r.passed, cls: "fill-success", label: "Passed"}, {n: r.failed, cls: "fill-danger", label: "Failed"}],
         `${r.release}: ${r.passed} passed, ${r.failed} failed`)),
       h("span", {class: "num", style: "width:48px;text-align:right;font-weight:600"}, r.pass_rate === null ? "–" : `${r.pass_rate}%`),
-      h("span", {class: "meta num", style: "width:88px"}, `${r.passed} of ${plural(r.tested, "test")}`))))});
+      h("span", {class: "meta num", style: "width:88px"}, `${r.passed} of ${plural(r.tested, "test")}`),
+      button("", {size: "sm", kind: "ghost", ic: "download", title: `Certification pack for ${r.release}`,
+        href: certificationLink(r.release), attrs: {download: ""}}))))});
+}
+
+const certificationLink = (release) => `/api/certification?release=${encodeURIComponent(release)}`;
+
+// A zip: a Word summary of every test's result on the release, to sign, and each test's evidence document.
+function certificationButton(release) {
+  return button("Certification pack", {size: "sm", ic: "download", href: certificationLink(release),
+    title: `Download a Word summary of every test on ${release}, to sign, with each test's evidence document`, attrs: {download: ""}});
 }
 
 export function moduleCoverage(modules) {

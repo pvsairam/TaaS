@@ -10,6 +10,8 @@ computers and other web sites cannot start runs.
     POST /api/ai/check               does the AI chosen in Settings answer? (a one-word question)
     POST /api/ai/key                 {"key"} the AI key, kept in memory only until Quartermaster stops ("" forgets it)
     GET  /api/dashboard              pass rate, coverage, release readiness, activity
+    GET  /api/certification?release=26A  the release's certification pack (.zip): a Word summary to
+                                     sign and each test's latest evidence document on that release
     GET  /api/attention              what needs a person, by kind
     GET  /api/tests                  test files in the tests folder, with their last result
     GET  /api/test?file=<path>       one test: steps in plain words, data, history, the file
@@ -66,6 +68,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.ai import providers as ai_providers
+from quartermaster.evidence.certification import write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
@@ -191,6 +194,13 @@ class App:
         if method == "GET" and route == ["dashboard"]:
             release = self.settings.get()["release"]
             return _json(insights.dashboard(self.tests(), self.queue.store.list(limit=500), release))
+        if method == "GET" and route == ["certification"]:
+            release = str((query.get("release") or [""])[0]).strip() or self.settings.get()["release"]
+            if not release:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "set the Oracle release in Settings first")
+            results = insights.test_results(self.queue.store.list(limit=500))
+            name, body = write_certification_pack(self.tests(), results, release, self.evidence_root)
+            return Reply(HTTPStatus.OK, body, "application/zip", name)
         if method == "GET" and route == ["attention"]:
             return _json(self.attention())
         if method == "GET" and route == ["test"]:

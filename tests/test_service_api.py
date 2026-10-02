@@ -281,6 +281,31 @@ def test_release_readiness_counts_each_test_once(app: App) -> None:
         call(app, "POST", "/api/settings", {"password": "x"})
 
 
+def test_certification_pack_for_a_release(app: App) -> None:
+    import io
+    import re
+    import zipfile
+
+    add_suite_tests(app)
+    finished_suite_run(app)  # ran on 26D
+    reply = app.handle("GET", "/api/certification?release=26D", b"")
+    assert reply.content_type == "application/zip" and reply.download_name == "certification_26D.zip"
+    pack = zipfile.ZipFile(io.BytesIO(reply.body))
+    names = pack.namelist()
+    assert "Certification 26D.docx" in names
+    assert len([n for n in names if n.startswith("evidence/") and n.endswith(".docx")]) == 3
+    word = zipfile.ZipFile(io.BytesIO(pack.read("Certification 26D.docx"))).read("word/document.xml").decode()
+    text = " ".join(re.sub(r"<[^>]+>", " ", word).split())
+    assert "SOME TESTS FAILED" in text and "Oracle release 26D" in text
+    assert "Create a location" in text and "Redwood Shores" in text  # what failed, in plain words
+    assert "Not yet run on this release" in text and "A passing test" in text  # hcm/pass.yaml has no run
+
+    with pytest.raises(ApiError, match="set the Oracle release"):
+        app.handle("GET", "/api/certification", b"")
+    empty = zipfile.ZipFile(io.BytesIO(app.handle("GET", "/api/certification?release=27A", b"").body))
+    assert empty.namelist() == ["Certification 27A.docx"]
+
+
 def test_pod_check_reports_what_happened(app: App) -> None:
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
