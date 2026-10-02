@@ -389,7 +389,17 @@ class App:
             raise ValueError("a scenario or recording is in progress; finish it first")
         scenarios = self.manual.summary()["scenarios"]
         self._with_results(scenarios)
-        todo = [s for s in scenarios if not s["automated"] and not s["review"] and not s.get("blank_data")]
+        # Left out: what plays by itself or waits for review, and what the AI would stop at for
+        # certain (test data missing, values to type that the script does not give, no steps).
+        todo = [
+            s
+            for s in scenarios
+            if not s["automated"]
+            and not s["review"]
+            and not s.get("blank_data")
+            and not s.get("values_missing")
+            and s.get("step_count")
+        ]
         if isinstance(data.get("ids"), list):
             wanted = [str(i) for i in data["ids"]]
             todo = sorted((s for s in todo if s["id"] in wanted), key=lambda s: wanted.index(s["id"]))

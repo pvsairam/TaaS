@@ -84,7 +84,10 @@ class ManualScripts:
                     "warnings": data.get("warnings", []),
                 }
             )
-            scenarios.extend({k: v for k, v in s.items() if k not in ("cases", "fields")} for s in items)
+            scenarios.extend(
+                {**{k: v for k, v in s.items() if k not in ("cases", "fields")}, "values_missing": values_missing(s)}
+                for s in items
+            )
         return {"files": files, "scenarios": scenarios}
 
     @staticmethod
@@ -227,3 +230,15 @@ class ManualScripts:
             raise LookupError("that file is not imported")
         path.unlink()
         return {"removed": key}
+
+
+_TYPES = re.compile(r"\b(enter|type|fill(?:\s+in)?|input|provide|key\s+in)\b", re.I)
+_GIVES = re.compile(r"\d|\bas\s+\S|[:=]\s*\S|\be\.g\.", re.I)
+
+
+def values_missing(scenario: dict[str, Any]) -> int:
+    """How many steps say to type something without saying what ("Enter required data", "enter
+    the date"). A person fills those in; the AI never makes values up, so Prepare stops there.
+    Names in quotes are usually field names, not values, so they do not count as a value."""
+    steps = [st for c in scenario.get("cases") or [] for st in c.get("steps") or []]
+    return sum(1 for st in steps if _TYPES.search(st.get("action", "")) and not _GIVES.search(st.get("action", "")))

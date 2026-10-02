@@ -93,6 +93,9 @@ export async function manualPage() {
         // What someone typed in the workbook's Pass / Fail column is only a note: Quartermaster did not run it.
         {label: "Notes", render: (s) => h("div", {class: "row", style: "gap:4px"},
           s.blank_data ? badge("Test data missing", "warning") : null,
+          s.values_missing ? h("span", {title: "These steps say to type something without saying what, e.g. \"Enter required data\". The AI never makes values up, so Prepare stops there: do it by hand, or write the values in the workbook and import it again."},
+            badge(`Values not written: ${s.values_missing} ${s.values_missing === 1 ? "step" : "steps"}`, "warning")) : null,
+          !s.step_count ? badge("No steps", "neutral") : null,
           s.status ? h("span", {title: `Typed in the workbook${s.tester ? ` by ${s.tester}` : ""}. Not a Quartermaster run.`},
             badge(`Workbook: ${s.status === "passed" ? "Pass" : "Fail"}${s.releases?.length ? ` (${s.releases.join(", ")})` : ""}`, "neutral")) : null)},
         {srLabel: "Run", cls: "actions", render: (s) => h("div", {class: "row", style: "gap:6px;flex-wrap:nowrap;justify-content:flex-end"},
@@ -122,8 +125,10 @@ export async function manualPage() {
   const batch = data.prepare_all || {items: [], counts: {}};
   const batchRunning = batch.status === "running" || batch.status === "stopping";
   const batchDone = (batch.counts.prepared || 0) + (batch.counts.stopped || 0);
-  // what Prepare all would do: not playing by itself yet, not waiting for review, test data given
-  const toPrepare = all.filter((s) => !s.automated && !s.review && !s.blank_data);
+  // what Prepare all would do: not playing by itself yet, not waiting for review, and nothing the
+  // AI would stop at for certain (test data missing, values to type that are not written, no steps)
+  const toPrepare = all.filter((s) => !s.automated && !s.review && !s.blank_data && !s.values_missing && s.step_count);
+  const leftOut = all.filter((s) => !s.automated && !s.review && (s.blank_data || s.values_missing || !s.step_count)).length;
   const totals = {cases: all.reduce((a, s) => a + s.case_count, 0), steps: all.reduce((a, s) => a + s.step_count, 0)};
   show([{label: "Tests", href: "#/tests"}, {label: "Manual scenarios"}],
     h("div", {class: "page-head"},
@@ -134,7 +139,7 @@ export async function manualPage() {
       h("div", {class: "row"}, filesBtn,
         aiReady() && toPrepare.length && !batchRunning ? button(`Prepare all (${toPrepare.length})`, {ic: "target", disabled: !state.status.ready,
           title: "The AI prepares every scenario that does not play by itself yet, one after another; you review them after",
-          onClick: () => startPrepareAll(toPrepare.length)}) : null,
+          onClick: () => startPrepareAll(toPrepare.length, leftOut)}) : null,
         button("Import manual scripts", {kind: all.length ? "" : "primary", ic: "download", onClick: () => openManualImport()}))),
     h("div", {class: "toolbar"}, testsViewSwitch("manual", {automated: state.tests.length, manual: all.length,
       review: all.filter((s) => s.review === "needs_review").length})),

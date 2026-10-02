@@ -12,9 +12,10 @@ const OUTCOME = {
   stopped: ["Stopped", "danger"], not_started: ["Not started", "neutral"],
 };
 
-export async function startPrepareAll(count) {
+export async function startPrepareAll(count, leftOut = 0) {
   if (!state.status?.ready) { toast("Set up the pod and its sign-in in Settings first."); return; }
   if (!confirm(`The AI prepares ${plural(count, "scenario")}, one after another, in the browser that opens.\n\n` +
+    (leftOut ? `${plural(leftOut, "scenario")} ${leftOut === 1 ? "is" : "are"} left out: test data missing, values to type that the script does not give, or no steps. The AI would stop at those; do them by hand.\n\n` : "") +
     "You do not need to watch. Each one then waits in To review until you approve it. Start?")) return;
   try {
     await api("/api/manual/prepare-all", {});

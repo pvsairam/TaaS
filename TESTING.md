@@ -243,7 +243,11 @@ run's folder in `evidence\` as `ai-diary.txt`.
 **Prepare many at once (optional)**
 
 14. In **Manual scenarios**, click **Prepare all (N)**. N is the number of scenarios that do not
-    play by themselves yet, are not waiting for review, and have no missing test data. Click OK.
+    play by themselves yet, are not waiting for review, and that the AI can finish: scenarios
+    marked **Test data missing**, **Values not written** (a step says "Enter required data" or
+    "enter the date" without the value) or **No steps** are left out, because the AI never makes
+    values up and would stop there. Do those by hand, or write the values in the workbook and
+    import it again. Click OK.
 15. The **To review** page opens. It shows each scenario: waiting, preparing now, ready to review,
     or stopped (with the reason). You do not need to watch; **Watch the AI** shows the browser
     steps, and **Stop** stops after the scenario being prepared now. While it runs, Prepare and
