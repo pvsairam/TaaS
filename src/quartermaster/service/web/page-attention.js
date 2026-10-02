@@ -4,10 +4,11 @@ import {openRunDrawer, openViewer} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
 
-const ORDER = ["assertion", "missing_element", "timeout", "authentication", "failure", "could_not_run", "ui_change", "unreadable"];
+const ORDER = ["assertion", "missing_element", "service_call", "timeout", "authentication", "failure", "could_not_run", "ui_change", "unreadable"];
 const LOOK = {
   assertion: {ic: "x", tone: "danger", short: "Check did not match"},
   missing_element: {ic: "target", tone: "danger", short: "Item not found"},
+  service_call: {ic: "server", tone: "danger", short: "Service call failed"},
   timeout: {ic: "clock", tone: "danger", short: "Screen did not respond"},
   authentication: {ic: "lock", tone: "danger", short: "Sign-in problem"},
   failure: {ic: "x", tone: "danger", short: "Failed"},

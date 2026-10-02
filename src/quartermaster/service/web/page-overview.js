@@ -26,6 +26,7 @@ export async function overviewPage() {
   };
 
   const SHORT = {assertion: ["failed check", "failed checks"], missing_element: ["item not found", "items not found"],
+    service_call: ["service call failed", "service calls failed"],
     timeout: ["timeout", "timeouts"], authentication: ["sign-in problem", "sign-in problems"], failure: ["failure", "failures"],
     could_not_run: ["run that could not start", "runs that could not start"], ui_change: ["screen change", "screen changes"],
     unreadable: ["unreadable file", "unreadable files"]};

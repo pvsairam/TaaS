@@ -25,9 +25,14 @@ _NEVER = "never_passed"
 def likely_cause(item: dict[str, Any]) -> dict[str, Any] | None:
     """The likely cause of a failed test (an item of Needs attention), or None for other items."""
     kind = item.get("category")
-    if kind not in ("assertion", "missing_element", "timeout", "failure") or not item.get("test_id"):
+    if kind not in ("assertion", "missing_element", "service_call", "timeout", "failure") or not item.get("test_id"):
         return None
     good, now = item.get("last_good_release"), item.get("run_release")
+    suggested = (
+        "The suggested fix above is the most likely new name: use it first, then run the test again. "
+        if item.get("suggestion")
+        else ""
+    )
     if kind == "timeout":
         return _cause(
             "pod_slow",
@@ -36,13 +41,16 @@ def likely_cause(item: dict[str, Any]) -> dict[str, Any] | None:
             "open that screen on the pod by hand: if it is slow there too, tell the pod's administrator.",
         )
     if good and now and good != now:
-        what = "a value on the screen is different" if kind == "assertion" else "an item is no longer found"
+        what = {
+            "assertion": "a value on the screen is different",
+            "service_call": "the service answered differently",
+        }.get(kind, "an item is no longer found")
         return _cause(
             _RELEASE,
             f"Probably the {now} update",
-            f"It passed on {good} and fails on {now}: {what}. Look at the picture. If Oracle changed how the "
-            "screen works, raise a service request with Oracle (Draft SR). If only the screen layout moved, "
-            "record that step again.",
+            f"It passed on {good} and fails on {now}: {what}. {suggested}"
+            "Look at the picture. If Oracle changed how the screen works, raise a service request with Oracle "
+            "(Draft SR). If only the screen layout moved, record that step again.",
             sr=True,
         )
     if item.get("last_good_at"):
@@ -52,6 +60,21 @@ def likely_cause(item: dict[str, Any]) -> dict[str, Any] | None:
             "It passed before on this same release, so the update is not the cause. Check the test data on "
             "the pod (a refresh from production can change it) and that the test user still has the same "
             "roles, then run it again.",
+        )
+    if kind == "service_call":
+        return _cause(
+            _NEVER,
+            "The service address or its data needs fixing",
+            "It has never passed, so Oracle is not the cause. Check the service address in the test (a typo, or "
+            "a service this pod does not have) and the data it asks for, then run it again.",
+        )
+    if kind == "missing_element" and item.get("suggestion"):
+        return _cause(
+            _NEVER,
+            "Try the suggested fix first",
+            "It has never passed, and the item is not on the screen under the name the test knows. "
+            f"{suggested}If the suggestion is wrong, the screen differs from when it was recorded "
+            "(another user, another page or the item is not there): record the step again.",
         )
     if kind == "missing_element":
         return _cause(

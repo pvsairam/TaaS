@@ -287,6 +287,7 @@ CATEGORIES = {
     "missing_element": "Items not found on the screen",
     "timeout": "Screens that did not respond",
     "authentication": "Sign-in problems",
+    "service_call": "Service calls that failed",
     "failure": "Other failures",
     "could_not_run": "Runs that could not start",
     "ui_change": "Oracle screen changes",
@@ -300,6 +301,8 @@ def classify(error: str | None) -> str:
     low = text.lower()
     if "missingcredentials" in low or "sign in" in low or "sign-in" in low or "password" in low or "login" in low:
         return "authentication"
+    if "the api answered" in low or "the api reply" in low or "in the api reply" in low:
+        return "service_call"  # a REST step: the service said no, or its reply was not as expected
     if "expected text" in low or low.startswith("stepfailure") or "assert" in low:
         return "assertion"
     if re.search(r"matched \d+", low) or "resolutionerror" in low or "no suggestion matches" in low:
@@ -391,10 +394,10 @@ def attention(
                     "compare": expected_observed(raw),
                 }
             )
-            items[-1]["cause"] = likely_cause(items[-1])
             suggestion = _suggestion(r, f, spec)
             if suggestion:
                 items[-1]["suggestion"] = suggestion
+            items[-1]["cause"] = likely_cause(items[-1])  # after the suggestion: it changes the advice
         for h in r.get("healing") or []:
             if h.get("source", "fallback") != "fallback":
                 continue  # a suggestion for a failed step is shown on that failure (see _suggestion)

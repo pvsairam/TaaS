@@ -540,6 +540,9 @@ You should see: the test fails, and its step says **Tried 2 times**. In the Word
 has an **Attempts** line: "2 (every attempt failed)". Now choose **Stop at once** in Settings and run
 it again: the step says nothing about attempts (it was tried once).
 
+In **Needs attention** this failure is listed as **Service call failed** (a service address that does not
+exist, so the advice says to check the address), not as a check that did not match.
+
 A test that passes only on the retry cannot be forced on purpose. When it happens for real, the
 step says "Passed on attempt 2: the first try did not work (...)", the test shows **Flaky** after it
 happens twice in 10 runs, and the Overview has a **Stability** card with the share of runs that needed
