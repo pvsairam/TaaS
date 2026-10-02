@@ -6,6 +6,10 @@ computers and other web sites cannot start runs.
 
     GET  /api/status                 pod, credentials set or not, environment name and release, folders
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
+    GET  /api/signin                 the sign-in done by hand (single sign-on, MFA): none, waiting, done, failed
+    POST /api/signin                 open a browser on the pod for a person to sign in; the session is kept
+                                     in memory only, and the runs started from here use it
+    POST /api/signin/forget          forget that sign-in
     POST /api/check-pod              can this computer reach the pod now?
     POST /api/ai/check               does the AI chosen in Settings answer? (a one-word question)
     POST /api/ai/key                 {"key"} the AI key, kept in memory only until Quartermaster stops ("" forgets it)
@@ -61,6 +65,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
@@ -74,6 +79,7 @@ import yaml
 from quartermaster.ai import providers as ai_providers
 from quartermaster.evidence.certification import write_certification_pack
 from quartermaster.evidence.document import plain_error
+from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
@@ -83,6 +89,7 @@ from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Reco
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
 from quartermaster.service.schedules import Schedules
 from quartermaster.service.settings import Settings, check_pod
+from quartermaster.service.signin import SignIn, qm_signin_command
 from quartermaster.service.store import Store
 from quartermaster.service.triage import sr_draft
 
@@ -124,6 +131,7 @@ class App:
         record_command: RecordCommandBuilder = qm_record_command,
         cwd: Path | None = None,
         releases_root: Path | None = None,
+        signin_command: Callable[[], list[str]] = qm_signin_command,
     ):
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
@@ -149,6 +157,7 @@ class App:
         )
         self.recording.on_finished = self.prepare_all.finished
         self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
+        self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -157,6 +166,7 @@ class App:
 
     def stop(self) -> None:
         self.schedules.stop()
+        self.signin.stop()
         self.recording.shutdown()
         self.queue.stop()
 
@@ -193,6 +203,18 @@ class App:
             return _json(self.set_ai_key(str(data.get("key") or "")))
         if method == "POST" and route == ["ai", "check"]:
             return _json(ai_providers.check(ai_providers.config_from(self.settings.get())))
+        if route[:1] == ["signin"]:
+            if method == "GET" and route == ["signin"]:
+                return _json(self.signin.view())
+            if method == "POST" and route == ["signin"]:
+                if not os.environ.get("QM_FUSION_URL"):
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "set QM_FUSION_URL on this computer first")
+                try:
+                    return _json(self.signin.start())
+                except ValueError as e:
+                    raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
+            if method == "POST" and route == ["signin", "forget"]:
+                return _json(self.signin.forget())
         if method == "POST" and route == ["check-pod"]:
             self.pod_check = check_pod(os.environ.get("QM_FUSION_URL", ""))
             return _json(self.pod_check)
@@ -591,7 +613,14 @@ class App:
             "evidence_folder": str(self.evidence_root),
             "default_options": DEFAULT_OPTIONS,
             "ai": self._ai_view(settings),
-            "ready": bool(url and os.environ.get("QM_FUSION_USER") and os.environ.get("QM_FUSION_PASSWORD")),
+            "signed_in_by_hand": self.signin.view(),
+            "ready": bool(
+                url
+                and (
+                    (os.environ.get("QM_FUSION_USER") and os.environ.get("QM_FUSION_PASSWORD"))
+                    or os.environ.get(SESSION_ENV)
+                )
+            ),
         }
 
     def tests(self) -> list[dict[str, Any]]:

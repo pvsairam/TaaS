@@ -17,7 +17,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from quartermaster.domain.models import Environment, LocatorStrategy
-from quartermaster.runner.credentials import persona_credentials
+from quartermaster.runner.credentials import MissingCredentialsError, persona_credentials, persona_key
+from quartermaster.runner.session import ENV as SESSION_ENV
+from quartermaster.runner.session import decode_session, encode_session
 
 # The red box is a separate overlay on top of the page: an outline on the element itself is
 # often clipped by Redwood field wrappers. Tiny elements (e.g. hidden radio inputs) box their label.
@@ -87,25 +89,24 @@ class PlaywrightDriver:
         self.login_as(persona)
 
     def login_as(self, persona: str) -> None:
+        env = os.environ if self._environ is None else self._environ
+        key = persona_key(persona)
+        own = bool(key and env.get(f"QM_FUSION_USER_{key}") and env.get(f"QM_FUSION_PASSWORD_{key}"))
+        session = env.get(SESSION_ENV, "")
+        if session and not own:  # a sign-in done by hand (single sign-on, MFA) is used when there is one
+            self._new_page(decode_session(session))
+            if self._wait_signed_in(30):
+                self._settle()
+                return
+            if not (env.get("QM_FUSION_USER") and env.get("QM_FUSION_PASSWORD")):
+                raise MissingCredentialsError(
+                    "the sign-in done by hand has expired. In Settings, click Sign in by hand and sign in again."
+                )
         user, password = persona_credentials(persona, self._environ)
-        if self._context is not None:
-            self._context.close()
-        size = {"width": 1600, "height": 1000}
-        video: dict[str, Any] = {}
-        if self._record_video:
-            video = {"record_video_dir": str(self._evidence / "videos"), "record_video_size": size}
-        self._context = self._browser.new_context(viewport=size, **video)
-        if self._context_hook is not None:
-            self._context_hook(self._context)
-        self.page = self._context.new_page()
-        self.page.set_default_timeout(self._action_timeout_ms)
-        if self._record_video and self.page.video is not None:
-            # One video per sign-in; a persona switch starts a new one. Written when the context closes.
-            self.videos.append(str(self.page.video.path()))
-        self._track_requests(self.page)
+        self._new_page()
         self.page.goto(self._url, wait_until="domcontentloaded")
         # Two sign-in pages exist: the classic Fusion one ("User ID" / "Sign In") and the
-        # OCI IAM (IDCS) one ("Username" / "Next"). Federated SSO (Azure AD, Okta) will plug in here.
+        # OCI IAM (IDCS) one ("Username" / "Next"). Single sign-on with MFA: see sign_in_by_hand.
         p = self.page
         user_box = p.get_by_label("User ID", exact=True).or_(p.get_by_label("Username", exact=True))
         user_box.wait_for()
@@ -117,6 +118,67 @@ class PlaywrightDriver:
         pod_host = urlparse(self._url).hostname
         p.wait_for_url(lambda u: urlparse(u).hostname == pod_host, timeout=120_000)
         self._settle()
+
+    def _new_page(self, cookies: list[dict[str, Any]] | None = None) -> None:
+        """A fresh browser context (clean cookies, or the given ones) with one page."""
+        if self._context is not None:
+            self._context.close()
+        size = {"width": 1600, "height": 1000}
+        video: dict[str, Any] = {}
+        if self._record_video:
+            video = {"record_video_dir": str(self._evidence / "videos"), "record_video_size": size}
+        self._context = self._browser.new_context(viewport=size, **video)
+        if cookies:
+            self._context.add_cookies(cookies)
+        if self._context_hook is not None:
+            self._context_hook(self._context)
+        self.page = self._context.new_page()
+        self.page.set_default_timeout(self._action_timeout_ms)
+        if self._record_video and self.page.video is not None:
+            # One video per sign-in; a persona switch starts a new one. Written when the context closes.
+            self.videos.append(str(self.page.video.path()))
+        self._track_requests(self.page)
+        if cookies:
+            with suppress(Exception):  # a sign-on page that never finishes loading is checked below
+                self.page.goto(self._url, wait_until="domcontentloaded")
+
+    def _signed_in(self) -> bool:
+        """On the pod, past any sign-in page."""
+        with suppress(Exception):  # the page was navigating
+            url = str(self.page.url)
+            if urlparse(url).hostname != urlparse(self._url).hostname or re.search(r"sign-?in|login", url, re.I):
+                return False
+            return int(self.page.locator("input[type=password]").locator("visible=true").count()) == 0
+        return False
+
+    def _wait_signed_in(self, timeout_s: float, steady_s: float = 3) -> bool:
+        """Wait until the pod shows past its sign-in for `steady_s` in a row (single sign-on passes
+        through the pod several times on its way)."""
+        deadline = time.monotonic() + timeout_s
+        since: float | None = None
+        while time.monotonic() < deadline:
+            if self._signed_in():
+                since = since or time.monotonic()
+                if time.monotonic() - since >= steady_s:
+                    return True
+            else:
+                since = None
+            self.page.wait_for_timeout(500)
+        return False
+
+    def sign_in_by_hand(self, env: Environment, timeout_s: float = 600) -> str:
+        """Open a browser on the pod for a person to sign in (single sign-on, MFA), then return the
+        pod's session, packed into one line (see runner.session). Nothing is written to disk."""
+        from playwright.sync_api import sync_playwright  # optional dependency
+
+        self._url = env.url
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(headless=self._headless, executable_path=self._executable)
+        self._new_page()
+        self.page.goto(self._url, wait_until="domcontentloaded")
+        if not self._wait_signed_in(timeout_s):
+            raise TimeoutError(f"nobody finished signing in within {int(timeout_s / 60)} minutes")
+        return encode_session(self._context.cookies(), urlparse(self._url).hostname or "")
 
     def _track_requests(self, page: Any) -> None:
         self._inflight = set()

@@ -199,6 +199,28 @@ def _document(args: argparse.Namespace) -> int:
     return 0
 
 
+def _signin(args: argparse.Namespace) -> int:
+    """Sign in to the pod by hand (single sign-on, MFA) and print the session for `qm serve`."""
+    from quartermaster.runner.playwright_driver import PlaywrightDriver
+    from quartermaster.runner.session import PREFIX
+
+    url = os.environ.get("QM_FUSION_URL")
+    if not url:
+        print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
+        return 2
+    env = Environment(name="pod", url=url, kind=EnvironmentKind(args.kind))
+    assert_safe_target(env)
+    driver = PlaywrightDriver(headless=False)
+    print("Sign in to the pod in the browser that opened. It closes by itself when the pod's home page shows.")
+    try:
+        session = driver.sign_in_by_hand(env, timeout_s=args.timeout)
+    finally:
+        driver.close()
+    print(PREFIX + session, flush=True)
+    print("Signed in.")
+    return 0
+
+
 def _record(args: argparse.Namespace) -> int:
     from quartermaster.recorder.recorder import Recorder, events_to_test, to_yaml
     from quartermaster.runner.playwright_driver import PlaywrightDriver
@@ -535,6 +557,11 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--ai-workspace", default="", help="Anthropic only: workspace ID, for a key not tied to one")
     rc.set_defaults(func=_record)
 
+    si = sub.add_parser("signin", help="sign in to the pod by hand (single sign-on, MFA); used by qm serve")
+    si.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
+    si.add_argument("--timeout", type=float, default=600, help="seconds to wait for the sign-in")
+    si.set_defaults(func=_signin)
+
     sv = sub.add_parser("serve", help="start the web UI on this computer")
     sv.add_argument(
         "--tests", default=DEFAULT_TESTS, help=f"folder holding your tests ({DEFAULT_TESTS}, created on first start)"
@@ -549,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (SpecError, UnsafeEnvironmentError, MissingCredentialsError, ValueError) as e:
+    except (SpecError, UnsafeEnvironmentError, MissingCredentialsError, ValueError, TimeoutError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

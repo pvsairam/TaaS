@@ -1,7 +1,7 @@
 // Settings: environment, sign-in, storage, appearance and shortcuts. Passwords are never shown.
 import {api, button, card, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
 import {checkPod, openFolder} from "./components.js";
-import {connection, envName, loadCommon, state} from "./state.js";
+import {connection, envName, loadCommon, schedule, state} from "./state.js";
 import {setTheme, show} from "./app.js";
 
 export async function settingsPage() {
@@ -45,6 +45,7 @@ export async function settingsPage() {
     body: h("div", {},
       row("User name", st.user || "Not set. Set QM_FUSION_USER on this computer.", Boolean(st.user)),
       row("Password", st.password_set ? "Set (hidden)" : "Not set. Set QM_FUSION_PASSWORD on this computer.", st.password_set),
+      byHandRow(st),
       h("p", {class: "hint", style: "margin-top:12px"}, "The pod address, user and password come from environment variables on this computer. To change them, set the variables, stop Quartermaster with Ctrl+C and run ",
         h("code", {}, "qm serve"), " again. Use a test or development pod only, never production."))});
 
@@ -164,4 +165,33 @@ function aiCard(ai) {
           field("Key variable", keyEnv, "Instead of pasting the key, you can set this variable on the computer before starting qm serve; then it is remembered after a restart.", "ai-key"),
           h("div", {class: "wide"}, workspaceRow))),
       h("p", {class: "hint"}, "What is sent to the AI: the scenario's written steps and the names of the buttons, links and headings on the pod screen. E-mail addresses and long numbers are hidden first. Never typed values, never the pod password. Use a test pod."))});
+}
+
+// Single sign-on or MFA: the pod will not take a user name and password from a test, so a person
+// signs in once in a browser Quartermaster opens. The session stays in memory, never in a file.
+function byHandRow(st) {
+  const sh = st.signed_in_by_hand || {status: "none"};
+  const start = async (e) => {
+    e.currentTarget.disabled = true;
+    try { await api("/api/signin", {}); toast("A browser opened on the pod. Sign in there; it closes by itself."); settingsPage(); }
+    catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+  };
+  const text = {
+    none: "Not used. For a pod behind single sign-on or MFA, sign in by hand once; runs then use that sign-in.",
+    waiting: "Waiting for you to sign in, in the browser that opened…",
+    done: `Signed in by hand${sh.at ? ` ${when(sh.at).toLowerCase()}` : ""}. Runs use it until the pod ends the session or Quartermaster stops. It is kept in memory only.`,
+    failed: `Did not work: ${sh.error || "the browser closed"}.`,
+  }[sh.status] || "";
+  const actions = sh.status === "waiting" ? null : [
+    button(sh.status === "done" ? "Sign in again" : "Sign in by hand", {size: "sm", ic: "lock", disabled: !st.pod_url, onClick: start}),
+    sh.status === "done" ? button("Forget", {size: "sm", kind: "ghost", onClick: async () => {
+      try { await api("/api/signin/forget", {}); toast("Forgotten."); settingsPage(); } catch (err) { toast(err.message); }
+    }}) : null,
+  ];
+  if (sh.status === "waiting") schedule(settingsPage, 2000);
+  const tone = {done: ["success", "check"], failed: ["danger", "x"], waiting: ["info", "loader"]}[sh.status] || ["neutral", "lock"];
+  return h("div", {class: "list-item", style: "padding:12px 0"},
+    h("span", {class: `icon-tile tone-${tone[0]}`}, icon(tone[1])),
+    h("div", {class: "grow"}, h("div", {class: "t"}, "Single sign-on or MFA"), h("div", {class: "meta", style: "overflow-wrap:anywhere"}, text)),
+    actions ? h("div", {class: "row", style: "gap:6px"}, actions) : null);
 }

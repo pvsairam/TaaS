@@ -103,6 +103,20 @@ itself), and a message that the pod answered.
 4. In **Evidence** (right side), choose Screenshots and Video and whether to show the browser.
    Each change is saved at once. Every run you start afterwards uses them.
 
+#### Pods behind single sign-on or MFA (only if your pod needs it)
+
+If your pod sends you to your company's sign-on page (Microsoft, Okta) or asks for a code on your
+phone, a test cannot type the password itself. Sign in once by hand instead:
+
+1. In **Settings**, in the Sign-in card, click **Sign in by hand**.
+2. A browser opens on the pod. Sign in the way you always do, including the phone code.
+3. When the pod's home page shows, the browser closes by itself.
+
+You should see: "Signed in by hand" in the card. Runs, recordings and Prepare started from
+Quartermaster now use that sign-in. It is kept in memory only (never in a file) and ends when the
+pod ends the session or when you stop `qm serve`. A run after that says to sign in by hand again.
+A test that switches to another persona with its own user name and password still uses those.
+
 ### 6.2 Run one test
 
 1. Click **New run** (top right).
