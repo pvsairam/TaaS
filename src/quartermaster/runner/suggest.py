@@ -19,6 +19,7 @@ accepts or ignores it in Needs attention.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Callable
 from difflib import SequenceMatcher
 from typing import Any
@@ -40,39 +41,57 @@ Answer with JSON only: {"element": <number or null>, "confidence": <0 to 1>, "wh
 
 
 def make_healer(ask: Ask | None) -> Callable[[int, Step, Any], HealingProposal | None]:
-    """The function the engine calls for a step whose item was not found. `ask` is None without an AI."""
+    """The function the engine calls for a step whose item was not found. `ask` is None without an AI.
+    When nothing is suggested, one line says why: it is in the run's messages (for the test team)."""
 
     def healer(index: int, step: Step, driver: Any) -> HealingProposal | None:
-        return suggest(index, step, driver, ask)
+        proposal, reason = suggest_with_reason(index, step, driver, ask)
+        if proposal is None:
+            print(f"note: step {index + 1}: no suggested fix ({reason})", file=sys.stderr)
+        return proposal
 
     return healer
 
 
 def suggest(index: int, step: Step, driver: Any, ask: Ask | None) -> HealingProposal | None:
+    return suggest_with_reason(index, step, driver, ask)[0]
+
+
+def suggest_with_reason(index: int, step: Step, driver: Any, ask: Ask | None) -> tuple[HealingProposal | None, str]:
+    """The suggestion, or None and the reason in a few words."""
     page = getattr(driver, "page", None)
-    if step.target is None or page is None:
-        return None
+    if step.target is None:
+        return None, "the step has no item to look for"
+    if page is None:
+        return None, "no browser page to look at"
     from quartermaster.recorder.autopilot import SNAPSHOT_JS
 
     screen = page.evaluate(SNAPSHOT_JS)
     items = [it for it in (screen.get("items") if isinstance(screen, dict) else None) or [] if _usable(it)]
     if not items:
-        return None
+        return None, "no buttons, links or fields were found on the screen"
     old = step.target.ordered()[0]
     written = _names(step)
     pool = _compatible(step, items)
 
+    why = f"no name among the {len(pool)} on the screen looks like {' or '.join(repr(w) for w in written) or 'it'}"
     found = _similar(written, pool)
     if found is not None:
         item, score = found
         way = _unique_way(driver, item)
-        if way is not None and not _risky(item, step):
+        if way is None:
+            why = f'"{item["name"]}" looks like it but cannot be found exactly once on the page'
+        elif _risky(item, step):
+            why = f'"{item["name"]}" looks like it but changes data, so it is not suggested'
+        else:
+            shown = item.get("title") or item["name"]
             return _proposal(
-                index, step, old, way, round(score * 0.9, 2), "similar", f'"{item["name"]}" looks like the old name'
-            )
+                index, step, old, way, round(score * 0.9, 2), "similar", f'"{shown}" looks like the old name'
+            ), ""
     if ask is None:
-        return None
-    return _ask_ai(index, step, old, driver, pool, written, ask)
+        return None, why + "; no AI is set up to ask"
+    proposal = _ask_ai(index, step, old, driver, pool, written, ask)
+    return (proposal, "") if proposal is not None else (None, why + "; the AI chose none")
 
 
 # ------------------------------------------------------------------ the AI
@@ -163,7 +182,9 @@ def _similar(written: list[str], pool: list[dict[str, str]]) -> tuple[dict[str, 
     """The one name on the page that is clearly the most like what the step looked for."""
     scored: list[tuple[float, dict[str, str]]] = []
     for item in pool:
-        score = max((_like(w, item["name"]) for w in written), default=0.0)
+        # a Redwood card's link holds its title and a description: the title is what the step was written for
+        shown = [t for t in (item["name"], item.get("title")) if t]
+        score = max((_like(w, t) for w in written for t in shown), default=0.0)
         if score >= SIMILAR_MIN:
             scored.append((score, item))
     scored.sort(key=lambda x: x[0], reverse=True)

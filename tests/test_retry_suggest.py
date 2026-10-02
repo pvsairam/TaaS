@@ -199,6 +199,28 @@ def test_a_name_that_looks_like_the_old_one_is_suggested_without_any_ai() -> Non
     assert p.old == (LocatorStrategy.ROLE, "button:Search: Name")
 
 
+def test_a_redwood_card_is_matched_by_its_title_not_its_long_description() -> None:
+    long_name = "Locations Define the places where your workers are based, with their address and time zone"
+    card = {"role": "link", "name": long_name[:80], "full": long_name, "title": "Locations"}
+    pod = Pod({**SCREEN, "items": [card, {"role": "link", "name": "Positions"}]})
+    pod.known = {("role", f"link:{long_name}")}
+    p = suggest(1, looked_for("Location"), pod, None)
+    assert p is not None and p.source == "similar"
+    assert p.new == (LocatorStrategy.ROLE, f"link:{long_name}")  # found by the whole name, as the page names it
+    assert p.why == '"Locations" looks like the old name'
+
+
+def test_when_nothing_is_suggested_the_reason_is_said(capsys: Any) -> None:
+    from quartermaster.runner.suggest import suggest_with_reason
+
+    got, reason = suggest_with_reason(0, looked_for("Approve the thing"), Pod(), None)
+    assert got is None and "no name among the 3 on the screen looks like" in reason and "no AI" in reason
+    got, reason = suggest_with_reason(0, looked_for("Documents"), Pod(), ask_with({"element": None}))
+    assert got is None and reason.endswith("the AI chose none")
+    make_healer(None)(4, looked_for("Approve the thing"), Pod())
+    assert "step 5: no suggested fix (no name among" in capsys.readouterr().err
+
+
 def test_two_equally_like_names_are_not_a_safe_guess() -> None:
     screen = {
         **SCREEN,

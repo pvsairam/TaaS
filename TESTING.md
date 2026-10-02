@@ -552,7 +552,8 @@ a retry.
    link's longer full name, for example "Locations Define locations...": that is how the page names it.)
 
 5. Run the Suggestion demo. It fails at step 2 (about a minute, because the step is tried again first).
-6. Click **Needs attention**.
+6. Click **Needs attention**. (If a failed run shows no suggestion, open the run, scroll to the bottom and open
+   **Messages from the run**: a line "no suggested fix (...)" says why. Send me that line.)
 
 You should see: under the failure, a blue box **Suggested fix**: "A similar name on the screen suggests
 the step should find the link named "Locations" instead of the link named "Location"." The test file
