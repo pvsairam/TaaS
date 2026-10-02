@@ -114,6 +114,11 @@ def _run(args: argparse.Namespace) -> int:
             if s.status in (StepStatus.FAILED, StepStatus.HEALED):
                 print(f"        step {s.index + 1} [{s.status.value}] {s.intent}: {s.error or 'used fallback locator'}")
 
+        for c in result.cleanup:
+            if c.status is StepStatus.FAILED:
+                print(f"        cleanup {c.index + 1} [failed] {c.intent}: {c.error}")
+        if result.cleanup:
+            print(f"        cleanup: {result.cleanup_status}")
         videos: list[str] = list(getattr(driver, "videos", []))
         if args.video == "on-failure" and result.status is not StepStatus.FAILED:
             for v in videos:

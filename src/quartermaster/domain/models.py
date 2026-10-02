@@ -165,6 +165,9 @@ class TestCase(_Strict):
     estimated_minutes: float = Field(default=5.0, gt=0)
     data: dict[str, str] = Field(default_factory=dict)
     steps: list[Step] = Field(min_length=1)
+    # Steps that remove what the test made on the pod. They run after the steps above, whether those
+    # passed or failed. A cleanup that fails is reported but never changes the test's result.
+    cleanup: list[Step] = Field(default_factory=list)
     # For a test made from a manual scenario: its written steps ({"action", "expected"}), so the
     # evidence follows the script the tester knows rather than the recorded clicks.
     written_steps: list[dict[str, str]] = Field(default_factory=list)
@@ -204,6 +207,7 @@ class StepResult(_Strict):
     started_at: str | None = None  # ISO 8601 with time zone
     screenshot_note: str | None = None  # why a screenshot that was asked for is missing
     written_step: int | None = None  # see Step.written_step
+    note: str | None = None  # why a cleanup step was not done
 
 
 class ScreenshotMode(StrEnum):
@@ -217,6 +221,7 @@ class RunResult(_Strict):
     environment: str
     steps: list[StepResult]
     healing: list[HealingProposal] = Field(default_factory=list)
+    cleanup: list[StepResult] = Field(default_factory=list)  # kept apart from `steps`: never part of the result
     run_id: str = ""
     test_title: str = ""
     persona: str = ""
@@ -235,3 +240,11 @@ class RunResult(_Strict):
         if StepStatus.HEALED in statuses:
             return StepStatus.HEALED
         return StepStatus.PASSED
+
+    @property
+    def cleanup_status(self) -> str:
+        """One word: none (no cleanup in the test), done, partial (some steps failed) or failed."""
+        if not self.cleanup:
+            return "none"
+        done = [c for c in self.cleanup if c.status is not StepStatus.FAILED]
+        return "done" if len(done) == len(self.cleanup) else "partial" if done else "failed"

@@ -104,6 +104,36 @@ password is needed, and it only ever calls the pod itself.
 send under `options.body`; `${name}` placeholders work in it too. A REST step that changes data
 changes it on the pod, like a click on Save would.
 
+### Cleaning up after a test
+
+A test that creates something on the pod can remove it again at the end. Put the removal steps under
+`cleanup:`. They run after the steps, whether the steps passed or failed.
+
+```yaml
+steps:
+  - action: api_call
+    intent: Create the location
+    value: POST /hcmRestApi/resources/11.13.18.05/locationsV2
+    options:
+      body: {LocationName: "QM Test ${RUN_ID}"}
+      save: {location_id: LocationId}       # keep the id of what was made
+  # ...more steps that use it...
+cleanup:
+  - action: api_call
+    intent: Remove the location
+    value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/${location_id}
+```
+
+- A cleanup that fails is shown on the run and in the Word document ("Cleanup did not finish: records
+  from this test may still be on the pod"). It never changes the test's result, and the other cleanup
+  steps still run.
+- If the test failed before it made the record, `${location_id}` was never saved. The step is then
+  skipped ("Nothing to clean up") instead of calling an address with a blank in it.
+- A cleanup `DELETE` must use a saved value such as `${location_id}`. A fixed address is refused when
+  the test loads, so a cleanup can only remove what this run made.
+- Any step can be a cleanup step (a click, a navigation). Add `options: {needs: location_id}` to skip
+  a step when that saved value is missing.
+
 ## Run it on your own computer (fastest way to reach your pod)
 
 If your laptop can open the pod in a browser, it can run Quartermaster. You need Python 3.11+

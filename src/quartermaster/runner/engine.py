@@ -27,7 +27,7 @@ from quartermaster.domain.models import (
     StepStatus,
     TestCase,
 )
-from quartermaster.dsl.loader import display_value, render_value
+from quartermaster.dsl.loader import SECRET, display_value, render_text_names, render_value
 from quartermaster.locators.resolver import Resolution, ResolutionError, resolve
 from quartermaster.runner.rest import check_reply, parse_request, render_body
 from quartermaster.safety.guards import assert_safe_target, confirmed_hosts
@@ -169,6 +169,7 @@ def run_test(
                 )
             )
             emit("step_end", index=i, intent=step.intent, status=status.value, error=error, evidence=evidence)
+        cleanup = _run_cleanup(test, driver, runtime, screenshots, emit)
     finally:
         driver.close()
 
@@ -177,6 +178,7 @@ def run_test(
         environment=env.name,
         steps=results,
         healing=healing,
+        cleanup=cleanup,
         run_id=run_id,
         test_title=test.title,
         persona=test.persona,
@@ -189,6 +191,79 @@ def run_test(
     )
     emit("run_end", status=result.status.value)
     return result
+
+
+def _run_cleanup(
+    test: TestCase,
+    driver: Driver,
+    runtime: dict[str, str],
+    screenshots: ScreenshotMode,
+    emit: Callable[..., None],
+) -> list[StepResult]:
+    """Run the test's cleanup steps. Each one is tried on its own: a failure is recorded and the next
+    step still runs. A step that needs something the test never saved (because it failed before
+    making it) is skipped, so nothing is ever deleted by an address with a blank in it."""
+    out: list[StepResult] = []
+    if not test.cleanup:
+        return out
+    emit("cleanup_start", steps=len(test.cleanup))
+    for i, step in enumerate(test.cleanup):
+        base: dict[str, Any] = {
+            "index": i,
+            "intent": step.intent,
+            "action": step.action.value,
+            "value": display_value(step.value, test.data, runtime),
+            "expected": step.expected,
+        }
+        needs = step.options.get("needs")
+        missing = [str(n) for n in ([needs] if isinstance(needs, str) else needs or []) if str(n) not in runtime]
+        texts = [step.value or ""] + [v for _, v in (step.target.ordered() if step.target else [])]
+        blank = [n for t in texts for n in _unsaved(t, test.data, runtime)]
+        if missing or blank:
+            name = (missing or blank)[0]
+            note = f"'{name}' was never saved, so the test did not get as far as making it."
+            out.append(StepResult(**base, status=StepStatus.SKIPPED, note=note))
+            emit("cleanup_end", index=i, intent=step.intent, status="skipped", error=None)
+            continue
+        emit("cleanup_start_step", index=i, intent=step.intent)
+        start = time.perf_counter()
+        started = _now()
+        status, error = StepStatus.PASSED, None
+        evidence: list[str] = []
+        seen: dict[str, Resolution] = {}
+        try:
+            _execute(step, test.data, runtime, driver, seen)
+        except Exception as e:  # a failed cleanup is reported, never raised: the test's result stands
+            status, error = StepStatus.FAILED, str(e) if isinstance(e, ResolutionError) else f"{type(e).__name__}: {e}"
+        used = seen.get("res")
+        shot_note = None
+        if _wants_screenshot(screenshots, status):
+            try:
+                shot = driver.screenshot(f"cleanup-{i + 1:02d}", (used.strategy, used.value) if used else None)
+            except Exception:  # a busy page must not lose the cleanup's result
+                shot, shot_note = None, "The screen could not be captured."
+            if shot:
+                evidence.append(shot)
+        out.append(
+            StepResult(
+                **base,
+                status=status,
+                duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                error=error,
+                evidence=evidence,
+                locator=f"{used.strategy.value}={used.value}" if used else None,
+                started_at=started,
+                screenshot_note=shot_note,
+            )
+        )
+        emit("cleanup_end", index=i, intent=step.intent, status=status.value, error=error)
+    return out
+
+
+def _unsaved(text: str, data: dict[str, str], runtime: dict[str, str]) -> list[str]:
+    """Names in ${...} that are still unfilled after the test's data and what its steps saved."""
+    left = render_text_names(text, data, runtime)
+    return [n for n in left if not n.startswith(SECRET)]
 
 
 def _now() -> str:

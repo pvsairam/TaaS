@@ -238,6 +238,10 @@ class _Doc:
                     )
                     add(self._image(rel, n, "", caption=caption))
 
+        # --- cleanup of the data the test made (never part of the result above)
+        if run.get("cleanup"):
+            self._cleanup(run, add)
+
         # --- sign-off, then the technical appendix
         add(_page_break())
         add(_p([_r("Sign-off")], style="Heading1"))
@@ -249,6 +253,39 @@ class _Doc:
         add(_table(sign, sw, row_height=620))
 
         return document_xml(parts)
+
+    def _cleanup(self, run: dict[str, Any], add: Any) -> None:
+        """What was removed from the pod after the test, and what could not be."""
+        add(_p([_r("Cleanup of test data")], style="Heading1"))
+        status = run.get("cleanup_status", "")
+        said = {
+            "done": "Everything the test made was cleaned up.",
+            "partial": "Some cleanup steps failed: records made by this test may still be on the pod.",
+            "failed": "The cleanup failed: records made by this test may still be on the pod.",
+        }.get(status, "")
+        add(_p([_r(said + " This does not change the result of the test above.")], after=160))
+        widths = [700, 4380, 1800, 3200]
+        rows = [
+            [
+                _cell("Step", widths[0], header=True),
+                _cell("What was done", widths[1], header=True),
+                _cell("Result", widths[2], header=True),
+                _cell("Note", widths[3], header=True),
+            ]
+        ]
+        for c in run["cleanup"]:
+            st = c.get("status", "")
+            note = plain_error(c["error"]) if c.get("error") else c.get("note") or ""
+            label = "Nothing to clean" if st == "skipped" else _status_label(st)
+            rows.append(
+                [
+                    _cell(str(c.get("index", 0) + 1), widths[0]),
+                    _cell(c.get("intent", ""), widths[1]),
+                    _cell(label, widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True),
+                    _cell(note, widths[3]),
+                ]
+            )
+        add(_table(rows, widths))
 
     def _written_steps(self, written: list[dict[str, Any]], add: Any) -> None:
         """The steps of the written test script, each with what was done for it and its pictures."""

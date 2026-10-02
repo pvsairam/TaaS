@@ -101,6 +101,7 @@ function phase(run, events, live) {
     case "run_start": return `Signing in to Oracle Fusion${of}`;
     case "step_start": return `Executing step ${last.index + 1} of ${t?.total || "?"}: ${last.intent}${of}`;
     case "step_end": return `Step ${last.index + 1} of ${t?.total || "?"} ${last.status === "failed" ? "failed" : "done"}${of}`;
+    case "cleanup_start": case "cleanup_start_step": case "cleanup_end": return `Cleaning up the test data on the pod${of}`;
     case "run_end": return `Capturing evidence and writing the Word document${of}`;
     case "test_saved": return n < live.length ? "Starting the next test" : "Writing the run summary";
     default: return "Finishing";
@@ -185,6 +186,7 @@ export async function runPage(id) {
         testFile(r.test_id) ? button("Open test", {size: "sm", ic: "tests", href: testLink(testFile(r.test_id))}) : null)),
       h("div", {style: "padding:12px 24px 0", class: "stack"},
         r.failed_step ? callout("danger", `Step ${r.failed_step.number} failed: ${r.failed_step.intent}.`, r.failed_step.error) : null,
+        cleanupNote(r.cleanup),
         r.needs_update ? callout("warning", "Needs update.", ["Something on the screen was found in a different way than written. ", h("a", {href: "#/attention"}, "Review it in Needs attention"), "."]) : null),
       evidenceViewer(r, {run}));
   } else {
@@ -215,6 +217,20 @@ export async function runPage(id) {
         h("pre", {class: "block"}, run.output)))) : null);
 
   if (isActive) schedule(() => runPage(id), 1500);
+}
+
+// What the test's cleanup did. It never changes the test's result, but leftovers on the pod matter.
+function cleanupNote(c) {
+  if (!c) return null;
+  const bad = c.steps.filter((x) => x.status === "failed");
+  const none = c.steps.every((x) => x.status === "skipped");
+  if (bad.length) {
+    return callout("warning", "Cleanup did not finish: records from this test may still be on the pod.",
+      "The test's result is not affected.",
+      h("ul", {}, bad.map((x) => h("li", {}, `Cleanup step ${x.number} (${x.intent}): ${x.error}`))));
+  }
+  return callout("info", none ? "Nothing to clean up." : "Test data cleaned up.",
+    none ? c.steps[0]?.note || "" : `${plural(c.steps.filter((x) => x.status !== "skipped").length, "cleanup step")} done after the test.`);
 }
 
 function envLabel(host) {

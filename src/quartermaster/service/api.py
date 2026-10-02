@@ -991,6 +991,26 @@ class App:
             view["counts"] = insights.run_counts(run)
         return view
 
+    @staticmethod
+    def _cleanup_view(record: dict[str, Any]) -> dict[str, Any] | None:
+        """What the test's cleanup did, for the run page (None when the test has no cleanup)."""
+        if not record.get("cleanup"):
+            return None
+        return {
+            "status": record.get("cleanup_status", ""),
+            "steps": [
+                {
+                    "number": c.get("index", 0) + 1,
+                    "intent": c.get("intent", ""),
+                    "status": c.get("status", ""),
+                    "error": plain_error(c.get("error")),
+                    "detail": c.get("error"),
+                    "note": c.get("note"),
+                }
+                for c in record["cleanup"]
+            ],
+        }
+
     def _suite_results(self, run: dict[str, Any]) -> list[dict[str, Any]]:
         """Each test's result with links to its evidence, from the suite record once the run has ended."""
         if not run.get("suite_dir"):
@@ -1021,6 +1041,7 @@ class App:
                         "picture_url": self._url_rel(failed.get("screenshot")),
                     },
                     "needs_update": bool(entry.get("healing")),
+                    "cleanup": self._cleanup_view(record),
                     "started_at": record.get("started_at"),
                     "finished_at": record.get("finished_at"),
                     "record_url": self._url_rel(f"{entry['run_dir']}/run.json") if record else None,

@@ -463,6 +463,49 @@ a run by hand; scheduled runs show "Schedule".
 - Press **N**. The New run panel opens. Press Esc to close it.
 - Click the moon or sun icon at the top. The page switches between dark and light.
 
+### 6.14 Cleanup after a test
+
+This test only reads from the pod (GET), so it is safe. It shows that cleanup steps run, and that
+they are skipped when there is nothing to clean up. It needs a pod where Locations can be read by
+the REST service (the same one used by Create Location).
+
+1. Create the file `my_tests\cleanup_demo.yaml` with this text (keep the spaces):
+
+   ```yaml
+   id: demo.cleanup
+   title: Cleanup demo (reads only)
+   module: HCM
+   product: Global Human Resources
+   steps:
+     - action: api_call
+       intent: Find a location
+       value: GET /hcmRestApi/resources/11.13.18.05/locationsV2?limit=1
+       options:
+         save: {location_id: items[0].LocationId}
+   cleanup:
+     - action: api_call
+       intent: Look at the location again (stands in for a delete)
+       value: GET /hcmRestApi/resources/11.13.18.05/locationsV2/${location_id}
+   ```
+
+2. In **Tests**, click **Cleanup demo (reads only)**, then **Run this test**.
+
+You should see: the run passes. Under the test's name a blue box says **Test data cleaned up**
+("1 cleanup step done after the test"). Open the Word document: near the end there is a
+**Cleanup of test data** table with the step marked Passed.
+
+3. Open the file again and change `locationsV2?limit=1` to `locationsV9?limit=1`. Run it again.
+
+You should see: the run fails at step 1, and the blue box says **Nothing to clean up**: the test
+never saved a location, so the cleanup step was skipped instead of calling an address with a blank
+in it. The Word document shows the cleanup step as "Nothing to clean".
+
+4. Put `locationsV2` back. Now change the cleanup line to `value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/300`.
+
+You should see: the test is unreadable (see **Needs attention**, "Unreadable files") and says a cleanup
+DELETE must use a value the test saved, such as `${location_id}`. Put the line back as it was,
+or delete the demo file when you are done.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

@@ -189,6 +189,22 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
         for r in needs_update:
             add(_p([_r(r.get("test_title") or r["test_id"])], indent=360))
 
+    unclean = [r for r in runs if r.get("cleanup_status") in ("partial", "failed")]
+    if unclean:
+        add(_p([_r("Test data that may still be on the pod")], style="Heading1"))
+        add(
+            _p(
+                [
+                    _r(
+                        "The cleanup of these tests did not finish, so records they made may still be in Oracle "
+                        "Fusion. The test's evidence document says which cleanup step failed:"
+                    )
+                ]
+            )
+        )
+        for r in unclean:
+            add(_p([_r(r.get("test_title") or r["test_id"])], indent=360))
+
     # --- sign-off, where the evidence is, technical details
     add(_page_break())
     add(_p([_r("Sign-off")], style="Heading1"))
@@ -246,6 +262,8 @@ def _entry(record: dict[str, Any], run_dir: Path, doc: Path | None, evidence_roo
         "healing": record.get("healing", []),
         "mode": record.get("mode", "automatic"),  # "manual": done by hand by a tester
     }
+    if record.get("cleanup_status"):
+        entry["cleanup_status"] = record["cleanup_status"]
     if failed:
         shots = failed.get("evidence") or []
         entry["failed_step"] = {

@@ -58,7 +58,7 @@ def build_record(
 ) -> dict[str, Any]:
     raw = result.model_dump(mode="json")
     hashes: dict[str, str] = {}
-    for step in raw["steps"]:
+    for step in [*raw["steps"], *raw["cleanup"]]:
         rel_paths = []
         for p in step.get("evidence", []):
             rel = _relative(Path(p), run_dir)
@@ -90,6 +90,7 @@ def build_record(
         "healing": raw["healing"],
         "evidence_sha256": hashes,
         **({"written_steps": raw["written_steps"]} if raw.get("written_steps") else {}),
+        **({"cleanup": raw["cleanup"], "cleanup_status": result.cleanup_status} if raw["cleanup"] else {}),
     }
 
 

@@ -86,6 +86,23 @@ def _check_placeholders(test: TestCase, path: Path) -> None:
         saved = step.options.get("save") if step.action is Action.API_CALL else None
         if isinstance(saved, dict):
             known |= {str(k) for k in saved}  # a REST step keeps values from its reply for the steps after it
+    for i, step in enumerate(test.cleanup):
+        # Cleanup runs after the steps, so it may use what they saved. A name that was never saved is
+        # not an error here: the step is skipped at run time ("nothing was made, nothing to clean").
+        texts = [step.value or ""] + [v for _, v in (step.target.ordered() if step.target else [])]
+        for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):
+            if name not in known and not name.startswith(SECRET):
+                raise SpecError(f"{path}: cleanup step {i + 1} uses undefined data placeholder ${{{name}}}")
+        deletes = step.action is Action.API_CALL and (step.value or "").lstrip().upper().startswith("DELETE")
+        if deletes and not _PLACEHOLDER.search(step.value or ""):
+            raise SpecError(
+                f"{path}: cleanup step {i + 1} deletes a fixed address. A cleanup DELETE must use a value "
+                "this test saved (for example ${location_id}), so it can only remove what this run made"
+            )
+        needs = step.options.get("needs")
+        for name in [needs] if isinstance(needs, str) else needs or []:
+            if str(name) not in known:
+                raise SpecError(f"{path}: cleanup step {i + 1} needs '{name}', which no step saves")
 
 
 def render_value(value: str | None, data: dict[str, str], runtime: dict[str, str] | None = None) -> str | None:
@@ -93,6 +110,11 @@ def render_value(value: str | None, data: dict[str, str], runtime: dict[str, str
     if value is None:
         return None
     return _PLACEHOLDER.sub(_from_environment, _substitute(value, data, runtime))
+
+
+def render_text_names(value: str, data: dict[str, str], runtime: dict[str, str] | None = None) -> list[str]:
+    """The ${names} left in a text once test data and runtime values are filled in."""
+    return _PLACEHOLDER.findall(_substitute(value, data, runtime))
 
 
 def display_value(value: str | None, data: dict[str, str], runtime: dict[str, str] | None = None) -> str | None:
