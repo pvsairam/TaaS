@@ -278,6 +278,27 @@ def test_the_ai_does_each_step_and_adds_checks(tmp_path: Path) -> None:
     assert '[1] link "Me"' in ask.prompts[0] and "Step 1 of 4: Login" in ask.prompts[0]
 
 
+def test_done_is_not_taken_while_what_the_step_selects_was_not_clicked(tmp_path: Path) -> None:
+    screens = {
+        "home": screen("Me"),
+        "Me": screen("Personal Information"),
+        "Personal Information": screen("My Compensation"),
+        "My Compensation": screen("Me", texts=("Current Salary",)),
+    }
+    counts = {f"role:link:{n}": 1 for n in screens} | {"text:Current Salary": 1}
+    page = ScriptedPage(screens, "home", counts)
+    recorder = Recorder(test_id="t")
+    ask = scripted_ai(
+        [{"do": "done"}]
+        + [{"do": "click", "element": 1}, {"do": "done"}] * 2
+        + [{"do": "done", "why": "the card is shown"}, {"do": "click", "element": 1}, {"do": "done"}]
+        + [{"check": [1]}]
+    )
+    assert Autopilot(page, Guide(SCENARIO, tmp_path / "run"), recorder, ask).run() is True
+    assert page.done[-1] == ("click", "role:link:My Compensation")  # clicked after being told
+    assert 'step asks for "My Compensation"' in ask.prompts[6]
+
+
 def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: Path) -> None:
     screens = {
         "home": screen("Me"),
@@ -528,15 +549,16 @@ document.getElementById("login").addEventListener("submit", (e) => {
   $("pi").onclick = (ev) => {
     ev.preventDefault();
     $("panel").style.display = "none";
-    // like Redwood's Personal Info cards: a link holding a title and a long description, next to
-    // a box that reacts to a click without being a link
-    $("main").innerHTML = '<h1>Personal Information</h1><a href="#" id="comp"><div><span>My Compensation' +
-      '</span></div><div>View your compensation details, such as salary and personal contributions.</div></a>' +
+    // like Redwood's Personal Info cards: links holding a title and a long description, without ids,
+    // and (as on a real pod) the same card twice; next to a box that reacts to a click
+    const card = '<a href="#"><div><span>My Compensation</span></div>' +
+      '<div>View your compensation details, such as salary and personal contributions.</div></a>';
+    $("main").innerHTML = '<h1>Personal Information</h1><div class="cards">' + card + card + '</div>' +
       '<div style="cursor:pointer"><span>Contact Info</span></div>';
-    $("comp").onclick = (e2) => {
+    document.querySelectorAll(".cards a").forEach((a) => a.onclick = (e2) => {
       e2.preventDefault();
       $("main").innerHTML = '<h1>My Compensation</h1><h2>Current Salary</h2>';
-    };
+    });
   };
 });
 </script></body></html>"""

@@ -169,6 +169,11 @@ export async function openScenario(id) {
       button("Approve", {kind: "primary", ic: "check", onClick: () => approveScenario(s.id)}),
     ] : [
       h("span", {class: "meta grow"}, s.automated ? "Ready: Run plays it by itself." : aiReady() ? "Prepare: an AI does it and you review. Or do it by hand once." : "Do it by hand once; after that it plays by itself."),
+      s.automated && aiReady() ? button("Prepare again", {ic: "target", disabled: !state.status.ready,
+        title: "The AI does it again, for example when the saved steps are wrong or incomplete", onClick: () => {
+          if (!confirm("The AI prepares this scenario again. If it finishes, the new version replaces the current one and waits in To review; Run is refused until you approve it. If it stops, the current version stays.")) return;
+          runScenario(s.id, {prepare: true});
+        }}) : null,
       s.automated ? button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}) : null,
       ...actionButtons(s),
     ],

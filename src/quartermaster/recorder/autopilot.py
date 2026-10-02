@@ -22,6 +22,7 @@ from typing import Any
 from quartermaster.ai.providers import AIError, parse_json
 
 MAX_ACTIONS = 5  # per written step
+_ASKS_CLICK = re.compile(r"^(?:select|click(?: on)?|choose|open|tap|press)\s+(?:the\s+)?(.+)$", re.I)
 _RISKY = re.compile(
     r"\b(submit|save|delete|remove|approve|reject|withdraw|terminate|post|send|confirm|cancel|apply|sign out)\b", re.I
 )
@@ -68,6 +69,22 @@ CHECK_SYSTEM = """You help test Oracle Fusion Cloud. A test scenario has just be
 to two texts on the screen that prove the scenario reached the right page or result, for example a page \
 heading or a field label. Answer with one JSON object and nothing else: \
 {"check": [<numbers from the TEXTS list>], "why": "<a few words>"}. If nothing proves it, {"check": []}."""
+
+# Where an element is on the page, as a CSS selector that matches only it: from the nearest
+# ancestor with a stable id (one without long numbers, which pages generate anew), then by position.
+CSS_PATH_JS = r"""(el) => {
+  const parts = [];
+  for (let node = el; node && node.nodeType === 1 && node !== document.documentElement; node = node.parentElement) {
+    if (node.id && !/\d{3,}/.test(node.id) && document.querySelectorAll('#' + CSS.escape(node.id)).length === 1) {
+      parts.unshift('#' + CSS.escape(node.id));
+      break;
+    }
+    const same = [...(node.parentElement ? node.parentElement.children : [])].filter((c) => c.tagName === node.tagName);
+    parts.unshift(node.tagName.toLowerCase() + (same.length > 1 ? `:nth-of-type(${same.indexOf(node) + 1})` : ''));
+  }
+  const css = parts.join(' > ');
+  return css && document.querySelectorAll(css).length === 1 ? css : '';
+}"""
 
 # What the AI is shown of the page: never values typed in fields, only labels and visible names.
 SNAPSHOT_JS = r"""() => {
@@ -173,6 +190,7 @@ class Autopilot:
 
     def _do_step(self, number: int, step: dict[str, str], total: int) -> bool:
         done: list[str] = []
+        nudged = False
         for _ in range(MAX_ACTIONS):
             if self.should_stop():
                 return self._stuck(number, "stopped by the tester")
@@ -195,6 +213,16 @@ class Autopilot:
             why = " ".join(str(reply.get("why", "")).split())[:200]
             value = " ".join(str(reply.get("value") or "").split())
             if what == "done":
+                unclicked = self._still_to_do(step, screen) if not done else ""
+                if unclicked and not nudged:
+                    # "Select My Compensation" with nothing done yet, while it is on the screen
+                    nudged = True
+                    done.append(
+                        f'answered "done", but the step asks for "{unclicked}", which is on the screen'
+                        " and was NOT clicked yet; click it"
+                    )
+                    self._note(f"  Not done yet: {unclicked} is still to be clicked")
+                    continue
                 return True
             if what == "navigate" and self.navigate is not None and value:
                 self._open(number, value, why, done)
@@ -226,6 +254,19 @@ class Autopilot:
             self.settle()
             done.append(action)
         return self._stuck(number, f"not finished after {MAX_ACTIONS} actions")
+
+    @staticmethod
+    def _still_to_do(step: dict[str, str], screen: dict[str, Any]) -> str:
+        """The name in a step like "Select My Compensation" when that is still on the screen."""
+        m = _ASKS_CLICK.match(step["action"].strip())
+        if not m:
+            return ""
+        wanted = " ".join(m.group(1).split()).strip(" .'\"").lower()
+        for it in screen.get("items", []):
+            names = [str(it.get("title") or ""), str(it.get("name") or "")]
+            if wanted and any(n.lower() == wanted or n.lower().startswith(wanted + " ") for n in names if n):
+                return str(it.get("title") or it.get("name"))
+        return ""
 
     def _stuck(self, number: int, why: str) -> bool:
         self.reason = f"Step {number}: {why}"
@@ -395,7 +436,21 @@ class Autopilot:
         everywhere_one = [(s, v) for s, v, loc in ways if _count(loc) == 1]
         shown_one = [(s, v) for s, v, loc in shown if _count(loc) == 1]
         chosen = everywhere_one or shown_one or [(s, v) for s, v, _ in clickable]
-        return clickable[0][2].first, [{"strategy": s, "value": v} for s, v in chosen]
+        element = clickable[0][2].first
+        if not everywhere_one:
+            # The same name more than once on the page (e.g. two "My Compensation" cards): a replay
+            # needs a way that finds exactly one, so the place of this one on the page comes first.
+            css = self._css_path(element)
+            if css:
+                chosen = [("css", css), *chosen]
+        return element, [{"strategy": s, "value": v} for s, v in chosen]
+
+    def _css_path(self, element: Any) -> str:
+        try:
+            css = str(element.evaluate(CSS_PATH_JS) or "")
+            return css if css and _count(self.page.locator(css)) == 1 else ""
+        except Exception:  # a stand-in page, or the element is gone
+            return ""
 
     def _act(self, what: str, item: dict[str, str], value: str) -> None:
         element, candidates = self._locate(item)

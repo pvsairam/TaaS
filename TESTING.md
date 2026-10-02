@@ -223,6 +223,18 @@ by hand.
 chose and what did not work. Send it when you report a problem with Prepare. It is also kept in the
 run's folder in `evidence\` as `ai-diary.txt`.
 
+**Check what a scenario does, and prepare it again**
+
+- The written steps: in **Manual scenarios**, click the scenario's name. The panel lists each test
+  case with its steps and expected results.
+- What Run plays: open one of its runs and click **Open test**. It lists the saved actions, for
+  example "Open Me > Personal Information", "Click My Compensation" and "Check My Compensation is
+  shown". Login is not listed: Quartermaster signs in before every run. A step that only opens a
+  page, like "Me", becomes part of the Navigator action.
+- If the saved actions are wrong or incomplete, click the scenario's name, then **Prepare again**
+  (or **Do it by hand**). The new version waits in **To review** until you approve it; if the AI
+  stops, the current version stays.
+
 **Prepare many at once (optional)**
 
 14. In **Manual scenarios**, click **Prepare all (N)**. N is the number of scenarios that do not
