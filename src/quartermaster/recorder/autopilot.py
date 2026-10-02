@@ -92,9 +92,13 @@ EXPANDED_JS = r"""(text) => {
   const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
   const el = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6, span, div, a, button, [role=heading]')]
     .find((e) => !e.children.length && clean(e.innerText) === text);
+  // The nearest toggle that belongs to this heading only: once a container holds more than one
+  // toggle, it holds other sections too, and their state says nothing about this one.
   for (let n = el; n && n !== document.body; n = n.parentElement) {
-    const t = n.matches('[aria-expanded]') ? n : n.querySelector('[aria-expanded]');
-    if (t) return t.getAttribute('aria-expanded') === 'true';
+    if (n.matches('[aria-expanded]')) return n.getAttribute('aria-expanded') === 'true';
+    const inside = n.querySelectorAll('[aria-expanded]');
+    if (inside.length === 1) return inside[0].getAttribute('aria-expanded') === 'true';
+    if (inside.length > 1) return null;
   }
   return null;
 }"""
