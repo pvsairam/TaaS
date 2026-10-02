@@ -27,6 +27,7 @@ DEFAULT_OPTIONS: dict[str, Any] = {
     "release": "",
     "tester": "",
     "headed": False,
+    "highlight": True,  # red marks on what each step clicks or fills: live, in the video and in the screenshots
     "only": [],  # test ids: run just these from the folder (e.g. the tests a release puts at risk)
     "label": "",  # a name for the run, shown instead of the folder
 }
@@ -57,6 +58,8 @@ def qm_run_command(target: str, options: dict[str, Any], evidence_root: Path, ev
         cmd.append("--evidence-doc")
     if options["headed"]:
         cmd.append("--headed")
+    if not options.get("highlight", True):
+        cmd.append("--no-highlight")
     if options["release"]:
         cmd += ["--release", options["release"]]
     if options["tester"]:
@@ -74,7 +77,7 @@ def check_options(requested: dict[str, Any]) -> dict[str, Any]:
     for key, allowed in _CHOICES.items():
         if options[key] not in allowed:
             raise ValueError(f"{key} must be one of {', '.join(allowed)}")
-    for key in ("evidence_doc", "headed"):
+    for key in ("evidence_doc", "headed", "highlight"):
         options[key] = bool(options[key])
     for key in ("release", "tester"):
         options[key] = str(options[key]).strip()[:60]

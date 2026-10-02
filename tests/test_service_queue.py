@@ -147,3 +147,9 @@ def test_a_run_of_chosen_tests() -> None:
     for bad in ("hcm.view-worker", ["a b"], [1]):
         with pytest.raises(ValueError, match="list of test ids"):
             check_options({"only": bad})
+
+
+def test_highlighting_is_on_unless_turned_off() -> None:
+    on = qm_run_command("/tests", check_options({}), Path("/evidence"), Path("/events.jsonl"))
+    off = qm_run_command("/tests", check_options({"highlight": False}), Path("/evidence"), Path("/events.jsonl"))
+    assert "--no-highlight" not in on and "--no-highlight" in off

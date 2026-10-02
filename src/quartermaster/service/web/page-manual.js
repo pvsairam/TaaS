@@ -19,7 +19,8 @@ export async function runScenario(id, {byHand = false, prepare = false} = {}) {
   if (!state.status?.ready) { toast("Set up the pod and its sign-in in Settings first."); return; }
   try {
     const saved = remember("options") || {}; // what New run was last started with
-    const options = {screenshots: saved.screenshots || "every-step", video: saved.video || "off", headed: Boolean(saved.headed)};
+    const options = {screenshots: saved.screenshots || "every-step", video: saved.video || "off", headed: Boolean(saved.headed),
+      highlight: saved.highlight !== false};
     const r = await api("/api/manual/run", {id, by_hand: byHand, prepare, options});
     document.querySelector(".scrim")?.click(); // close the scenario panel, if open
     location.hash = r.mode === "automatic" ? runLink(r.run.id) : "#/manual-run";

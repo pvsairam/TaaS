@@ -40,6 +40,38 @@ _DRAW_HIGHLIGHT = """el => {
   document.body.appendChild(box);
 }"""
 _REMOVE_HIGHLIGHT = "() => document.getElementById('__qm_highlight')?.remove()"
+# Shown in the live browser (and so in the video) just before a click or a value is entered: a red
+# box round the item and, for a click, a red dot where it is clicked. It fades by itself and never
+# takes the click (pointer-events: none).
+_SHOW_ACTION = """(el, kind) => {
+  el.scrollIntoView({block: 'center', inline: 'nearest'});
+  let r = el.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) {
+    const host = el.closest('label, [role=radiogroup], [role=group]') || el.parentElement;
+    if (host) r = host.getBoundingClientRect();
+  }
+  document.getElementById('__qm_action')?.remove();
+  const layer = document.createElement('div');
+  layer.id = '__qm_action';
+  Object.assign(layer.style, {position: 'fixed', inset: '0', zIndex: '2147483647', pointerEvents: 'none',
+    transition: 'opacity 0.4s', opacity: '1'});
+  const box = document.createElement('div');
+  Object.assign(box.style, {position: 'fixed', left: (r.left - 5) + 'px', top: (r.top - 5) + 'px',
+    width: (r.width + 10) + 'px', height: (r.height + 10) + 'px', boxSizing: 'border-box',
+    border: '3px solid #d32f2f', borderRadius: '6px', background: 'rgba(211, 47, 47, 0.08)',
+    boxShadow: '0 0 0 4px rgba(211, 47, 47, 0.25)'});
+  layer.appendChild(box);
+  if (kind === 'click') {
+    const dot = document.createElement('div');
+    Object.assign(dot.style, {position: 'fixed', left: (r.left + r.width / 2 - 6) + 'px',
+      top: (r.top + r.height / 2 - 6) + 'px', width: '12px', height: '12px', borderRadius: '50%',
+      background: 'rgba(211, 47, 47, 0.5)', border: '2px solid rgba(211, 47, 47, 0.9)', boxSizing: 'border-box'});
+    layer.appendChild(dot);
+  }
+  document.body.appendChild(layer);
+  setTimeout(() => { layer.style.opacity = '0'; }, 1200);
+  setTimeout(() => layer.remove(), 1700);
+}"""
 
 
 class PlaywrightDriver:
@@ -55,8 +87,12 @@ class PlaywrightDriver:
         settle_ms: int = 15_000,
         record_video: bool = False,
         action_timeout_ms: int = 60_000,
+        highlight: bool = True,
     ):
         self._headless = headless
+        # Red marks on what each step uses: in the live browser before a click or an entry, and in the
+        # screenshots. Off: no marks at all.
+        self._highlight = highlight
         self._evidence = Path(evidence_dir)
         self._environ = environ
         self._context_hook = context_hook  # e.g. proxy/route setup, applied to every persona context
@@ -283,12 +319,23 @@ class PlaywrightDriver:
         p.get_by_role("link", name=parts[-1], exact=True).locator("visible=true").first.click(timeout=timeout_ms)
         self._settle()
 
+    def _show(self, loc: Any, kind: str) -> None:
+        """Mark the item a step is about to use, so whoever watches (or the video) sees it."""
+        if not self._highlight:
+            return
+        with suppress(Exception):  # never let the marker stop the step
+            loc.first.evaluate(_SHOW_ACTION, kind, timeout=2_000)
+            self.page.wait_for_timeout(400)  # long enough to see before the page changes
+
     def click(self, strategy: LocatorStrategy, value: str) -> None:
-        self._locator(strategy, value).click()
+        loc = self._locator(strategy, value)
+        self._show(loc, "click")
+        loc.click()
         self._settle()
 
     def fill(self, strategy: LocatorStrategy, value: str, text: str) -> None:
         loc = self._locator(strategy, value)
+        self._show(loc, "fill")
         if loc.get_attribute("role") == "group" and loc.get_by_role("spinbutton").count():
             self._fill_date(loc, text)
         else:
@@ -323,6 +370,7 @@ class PlaywrightDriver:
     def select(self, strategy: LocatorStrategy, value: str, option: str, pick: str | None = None) -> None:
         """Choose `option`; in type-ahead lists, type `option` and choose the suggestion `pick` (default: option)."""
         loc = self._locator(strategy, value)
+        self._show(loc, "fill")
         if loc.evaluate("el => el.tagName.toLowerCase()") == "select":
             loc.select_option(label=pick or option)
         else:
@@ -446,7 +494,9 @@ class PlaywrightDriver:
         folder = self._evidence / "screenshots"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{name}.png"
-        if highlight is not None:
+        with suppress(Exception):  # the live marker of the step (see _show) is not part of the picture
+            self.page.evaluate("() => document.getElementById('__qm_action')?.remove()")
+        if highlight is not None and self._highlight:
             with suppress(Exception):  # the element may be gone, e.g. after a click that navigated
                 self._locator(*highlight).first.evaluate(_DRAW_HIGHLIGHT, timeout=2_000)
         try:

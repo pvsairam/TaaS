@@ -99,6 +99,7 @@ export function openRunDrawer(preset) {
   const release = h("input", {class: "input", value: opt.release || st.release || "", placeholder: "e.g. 26C", "aria-describedby": "rel-hint"});
   const tester = h("input", {class: "input", value: opt.tester || "", placeholder: "Shown as Run by"});
   const headed = h("input", {type: "checkbox", checked: opt.headed});
+  const highlight = h("input", {type: "checkbox", checked: opt.highlight !== false});
 
   drawer({
     title: "New run",
@@ -119,11 +120,12 @@ export function openRunDrawer(preset) {
           h("div", {class: "hint", id: "rel-hint"}, st.release ? `This environment is on ${st.release}.` : "Set it once in Settings.")),
         h("div", {}, h("label", {class: "label", for: "nr-by"}, "Executed by"), Object.assign(tester, {id: "nr-by"}))),
       h("label", {class: "switch"}, headed, "Show the browser while it runs"),
+      h("label", {class: "switch"}, highlight, "Highlight clicks (red marks on what each step uses)"),
     ],
     foot: (close) => [count, h("span", {class: "grow"}), button("Cancel", {onClick: close}),
       button("Start run", {kind: "primary", ic: "play", disabled: !st.ready || !runnable.length, onClick: async (e) => {
         const target = scope === "all" ? "." : scope === "folder" ? folderSel.value : testSel.value;
-        const options = {screenshots: opt.screenshots, video: opt.video, headed: headed.checked,
+        const options = {screenshots: opt.screenshots, video: opt.video, headed: headed.checked, highlight: highlight.checked,
           release: release.value.trim(), tester: tester.value.trim(), evidence_doc: true};
         remember("options", {...options, release: ""});
         e.currentTarget.disabled = true;

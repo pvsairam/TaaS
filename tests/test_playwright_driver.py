@@ -197,3 +197,37 @@ def test_a_redwood_date_is_typed_box_by_box_and_read_back() -> None:
                 _date_driver(page).fill(LocatorStrategy.ROLE, "group:Effective Start Date", "01/01/1951")
         finally:
             browser.close()
+
+
+# ---------------------------------------------------------------------- highlighting what a step uses
+
+MARK_PAGE = """<!doctype html><button style="margin:80px"
+  onclick="window.seen = !!document.getElementById('__qm_action')">Save</button>"""
+
+
+def test_a_click_is_marked_in_red_unless_highlighting_is_off(tmp_path: Path) -> None:
+    pytest.importorskip("playwright")
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    from quartermaster.domain.models import LocatorStrategy
+
+    chromium = os.environ.get("QM_CHROMIUM_PATH") or (
+        "/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else None
+    )
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(executable_path=chromium)
+        try:
+            for on in (True, False):
+                page = browser.new_page()
+                page.set_content(MARK_PAGE)
+                d = PlaywrightDriver(settle_ms=200, highlight=on, evidence_dir=str(tmp_path / str(on)))
+                d.page = page
+                d.click(LocatorStrategy.ROLE, "button:Save")
+                assert page.evaluate("window.seen") is on  # the red mark was on screen when it was clicked
+                d.screenshot("after", highlight=(LocatorStrategy.ROLE, "button:Save"))
+                assert page.evaluate("!document.getElementById('__qm_action')")  # not left in the picture
+                page.close()
+        finally:
+            browser.close()

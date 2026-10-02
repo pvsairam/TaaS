@@ -76,7 +76,7 @@ function openSchedule(s) {
       h("div", {}, h("div", {class: "label"}, "Days"), dayBoxes),
       field("Time", time, "This computer's clock.", "sch-time"),
       h("label", {class: "switch"}, enabled, "On"),
-      h("p", {class: "hint", style: "margin:0"}, `Pictures and video follow Settings, Evidence (now: screenshots ${saved.screenshots || "every-step"}, video ${saved.video || "off"}). The browser is not shown.`),
+      h("p", {class: "hint", style: "margin:0"}, `Pictures and video follow Settings, Evidence (now: screenshots ${saved.screenshots || "every-step"}, video ${saved.video || "off"}, highlight clicks ${saved.highlight === false ? "off" : "on"}). The browser is not shown.`),
     ],
     foot: (close) => [
       s ? button("Delete", {kind: "ghost", onClick: async () => {
@@ -89,7 +89,8 @@ function openSchedule(s) {
         e.currentTarget.disabled = true;
         try {
           const saved2 = await api("/api/schedules", {id: s?.id, name: name.value.trim(), target: target.value, days: [...days].sort(),
-            time: time.value, enabled: enabled.checked, options: {screenshots: saved.screenshots || "every-step", video: saved.video || "off"}});
+            time: time.value, enabled: enabled.checked, options: {screenshots: saved.screenshots || "every-step", video: saved.video || "off",
+              highlight: saved.highlight !== false}});
           close();
           toast(saved2.enabled && saved2.next_run ? `Saved. Next run: ${when(saved2.next_run)}.` : "Saved.");
           schedulesPage();

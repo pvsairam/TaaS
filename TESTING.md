@@ -102,6 +102,10 @@ itself), and a message that the pod answered.
 
 4. In **Evidence** (right side), choose Screenshots and Video and whether to show the browser.
    Each change is saved at once. Every run you start afterwards uses them.
+5. **Highlight clicks** is on by default. Start a run with **Show the browser while it runs** on:
+   before each click a red box and a small red dot appear on the item for a moment (also in the
+   video), and the screenshots have a red box round the item each step used. Turn it off and run
+   again: no red marks anywhere.
 
 #### Pods behind single sign-on or MFA (only if your pod needs it)
 

@@ -64,7 +64,7 @@ class Schedules:
             raise ValueError("the time must be like 02:00 (24-hour clock)")
         given = data.get("options")
         options: dict[str, Any] = given if isinstance(given, dict) else {}
-        kept = {k: options[k] for k in ("screenshots", "video") if k in options}
+        kept = {k: options[k] for k in ("screenshots", "video", "highlight") if k in options}
         with self._lock:
             items = self._load()
             old = next((s for s in items if s.get("id") == data.get("id")), None)

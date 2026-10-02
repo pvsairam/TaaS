@@ -253,7 +253,7 @@ function problems(list) {
 async function runChosen(e, plan, chosen) {
   const saved = remember("options") || {};
   const options = {screenshots: saved.screenshots || state.status.default_options.screenshots, video: saved.video || "off",
-    headed: Boolean(saved.headed), tester: saved.tester || "", evidence_doc: true,
+    headed: Boolean(saved.headed), highlight: saved.highlight !== false, tester: saved.tester || "", evidence_doc: true,
     only: chosen.map((t) => t.id), label: `Release ${plan.release} impact · ${plural(chosen.length, "test")}`};
   e.currentTarget.disabled = true;
   try {

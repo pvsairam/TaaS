@@ -61,11 +61,13 @@ export async function settingsPage() {
   // including Run on a manual scenario and the runs started from Release impact.
   const opt = {...st.default_options, ...(remember("options") || {})};
   const keep = (key, value) => {
-    remember("options", {...(remember("options") || {}), screenshots: opt.screenshots, video: opt.video, headed: Boolean(opt.headed), [key]: value});
+    remember("options", {...(remember("options") || {}), screenshots: opt.screenshots, video: opt.video, headed: Boolean(opt.headed),
+      highlight: opt.highlight !== false, [key]: value});
     opt[key] = value;
     toast("Saved. Runs started from now on use it.");
   };
   const headed = h("input", {type: "checkbox", checked: Boolean(opt.headed), onchange: (e) => keep("headed", e.target.checked)});
+  const highlight = h("input", {type: "checkbox", checked: opt.highlight !== false, onchange: (e) => keep("highlight", e.target.checked)});
   const evidence = card({title: "Evidence", sub: "Screenshots, video and the browser, for every run you start",
     body: h("div", {class: "stack"},
       h("div", {}, h("div", {class: "label"}, "Screenshots"),
@@ -75,6 +77,8 @@ export async function settingsPage() {
         segmented([["off", "None"], ["on-failure", "Keep on failure"], ["always", "Always"]], opt.video, (v) => keep("video", v), "Video"),
         h("div", {class: "hint"}, "Videos are kept next to the document and shown in the run's Video tab.")),
       h("label", {class: "switch"}, headed, "Show the browser while it runs"),
+      h("div", {}, h("label", {class: "switch"}, highlight, "Highlight clicks"),
+        h("div", {class: "hint"}, "A red box (and a red dot for a click) shows what each step clicks or fills, in the browser and the video, and a red box marks it in the screenshots. Turn off for clean pictures.")),
       h("p", {class: "hint", style: "margin:0"}, "The same choices are in New run; changing them in either place changes both. Prepare and Run by hand always show the browser."))});
 
   const appearance = card({title: "Appearance",

@@ -27,7 +27,12 @@ from quartermaster.safety.guards import UnsafeEnvironmentError, assert_safe_targ
 def _playwright_driver(args: argparse.Namespace, run_dir: Path) -> Driver:
     from quartermaster.runner.playwright_driver import PlaywrightDriver
 
-    return PlaywrightDriver(headless=not args.headed, evidence_dir=str(run_dir), record_video=args.video != "off")
+    return PlaywrightDriver(
+        headless=not args.headed,
+        evidence_dir=str(run_dir),
+        record_video=args.video != "off",
+        highlight=not getattr(args, "no_highlight", False),
+    )
 
 
 # Replaced in tests with a fake; the real run drives a browser. Gets the run's evidence folder.
@@ -504,6 +509,9 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     rn.add_argument("--env-name", default="fusion")
     rn.add_argument("--headed", action="store_true", help="show the browser window")
+    rn.add_argument(
+        "--no-highlight", action="store_true", help="no red marks on what is clicked or filled (live or in screenshots)"
+    )
     rn.add_argument("--evidence", default="evidence", help="root folder for run evidence (one folder per run)")
     rn.add_argument(
         "--screenshots",
