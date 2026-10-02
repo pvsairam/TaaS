@@ -80,7 +80,7 @@ def secret_prefix(test_id: str) -> str:
     return "QM_" + re.sub(r"[^A-Z0-9]+", "_", test_id.upper()).strip("_")
 
 
-_ACTIONS = ("click", "fill", "select", "navigate", "assert_text", "assert_visible")
+_ACTIONS = ("click", "fill", "select", "navigate", "assert_text", "assert_visible", "wait_job")
 _LABELS = {
     "click": "click",
     "fill": "typed value",
@@ -89,6 +89,7 @@ _LABELS = {
     "assert_text": "check",
     "assert_visible": "check",
     "note": "note",
+    "wait_job": "wait for the process",
 }
 
 
@@ -184,6 +185,18 @@ class Recorder:
             else:
                 self.events.append({"kind": "note", "value": text})
                 self.message = "Note added to the last step."
+        elif word == "wait" and not self.paused:
+            if not any(e.get("kind") in _ACTIONS for e in self.events):
+                self.message = "Submit the process first, then add the wait."
+            else:
+                event: dict[str, Any] = {"kind": "wait_job", "value": "last"}
+                if self.guide is not None:
+                    event["guide_step"] = self.guide.current
+                self.events.append(event)
+                self.message = (
+                    "Added: wait for the scheduled process to finish. When the test plays, it reads the process "
+                    "number from the screen and waits until the process ends; it passes only if it succeeded."
+                )
         elif word == "result" and self.guide is not None:
             self.message = self.guide.mark(rest, self._page)
         elif word == "mask":

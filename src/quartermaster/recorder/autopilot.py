@@ -47,7 +47,7 @@ already done for this step (including actions that did not work), and what is on
 a numbered list of things that can be clicked or filled).
 
 Answer with one JSON object and nothing else:
-{"do": "click" | "fill" | "select" | "navigate" | "done" | "stuck", "element": <number from the list>, \
+{"do": "click" | "fill" | "select" | "navigate" | "wait" | "done" | "stuck", "element": <number from the list>, \
 "value": "<text to type, option to choose, or Navigator path>", "why": "<a few words>"}
 
 - "navigate": open a page from the Navigator menu by its path, for example {"do": "navigate", \
@@ -57,6 +57,8 @@ A group name alone, for example {"do": "navigate", "value": "Me"}, opens that gr
 use it when a step only names a group, then answer "done" for that step.
 - "click": a button, link, tab or tile from the list, by its number. Elements of kind "text" are cards or \
 tiles that open something when clicked (for example "Employment Info" on Personal Info).
+- "wait": the step says to wait for a scheduled process (ESS job) to finish, or to check that it \
+completed, after it was submitted. Quartermaster reads the process number from the screen and waits.
 - "done": the step is already complete on this screen (for example "Login" when signed in, or the page \
 the step asks for is open). A later step may already be done by an earlier navigate.
 - "stuck": the step needs a value the script does not give (blank, or written as <>), needs another \
@@ -244,9 +246,11 @@ class Autopilot:
         settle: Callable[[], None] = lambda: None,
         should_stop: Callable[[], bool] = lambda: False,
         navigate: Callable[[str], None] | None = None,
+        wait_process: Callable[[], str] | None = None,
     ):
         self.page, self.guide, self.recorder, self.ask = page, guide, recorder, ask
         self.settle, self.should_stop, self.navigate = settle, should_stop, navigate
+        self.wait_process = wait_process  # waits for the scheduled process just submitted; its final status
         self.reason = ""  # why it stopped early, for the tester
         # What the AI answered and what happened, step by step, kept with the run's evidence so a
         # person can see why it stopped. Only labels from the screen, never typed values or keys.
@@ -308,6 +312,20 @@ class Autopilot:
                     self._note(f"  Not done yet: {unclicked} is still to be clicked")
                     continue
                 return True
+            if what == "wait" and self.wait_process is not None:
+                self._say(f"Step {number}: waiting for the scheduled process to finish")
+                try:
+                    final = self.wait_process()
+                except Exception as e:  # no process number on the screen, or the status check refused
+                    done.append(f"wait for the process DID NOT WORK ({_first_line(e)})")
+                    self._note(f"  Wait for the process did not work: {_first_line(e)}")
+                    continue
+                self._note(f"  The scheduled process ended {final}")
+                if final != "SUCCEEDED":
+                    return self._stuck(number, f"the scheduled process ended {final}, not SUCCEEDED")
+                self._record({"kind": "wait_job", "value": "last"})
+                done.append("waited for the scheduled process: it SUCCEEDED")
+                continue
             if what == "navigate" and self.navigate is not None and value:
                 self._open(number, value, why, done)
                 continue

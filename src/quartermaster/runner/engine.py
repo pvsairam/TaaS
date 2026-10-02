@@ -221,7 +221,7 @@ def _execute(
         final = driver.wait_job(value, float(step.options.get("timeout_s", 900)))  # type: ignore[arg-type]
         expected = step.options.get("expect", "SUCCEEDED")
         if final != expected:
-            raise StepFailure(f"job {value!r} ended {final}, expected {expected}")
+            raise StepFailure(f"the scheduled process ended {final}, expected {expected}")
         return None
     if a is Action.API_CALL:
         code = driver.api_call(value, step.options)  # type: ignore[arg-type]

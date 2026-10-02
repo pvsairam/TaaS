@@ -65,6 +65,8 @@ class PlaywrightDriver:
         # opens a new page, which shows up as random click timeouts.
         self._action_timeout_ms = action_timeout_ms
         self.videos: list[str] = []
+        self.poll_s = 15.0  # how often a scheduled process's status is asked
+        self.last_process = ""  # the number of the last scheduled process waited for
         # Optional pinned browser binary (e.g. a preinstalled Chromium in CI containers).
         self._executable = (os.environ if environ is None else environ).get("QM_CHROMIUM_PATH")
         self._url = ""
@@ -272,7 +274,59 @@ class PlaywrightDriver:
         return str(loc.inner_text())
 
     def wait_job(self, job_name: str, timeout_s: float) -> str:
-        raise NotImplementedError("ESS job polling lands in Phase 1")
+        """Wait for a scheduled process (ESS job) to finish and return its final status, e.g.
+        SUCCEEDED, WARNING or ERROR.
+
+        `job_name` is the process number, or anything else (the process name, or "last") to use the
+        number Oracle shows when a process is submitted ("Process 1234567 was submitted"). The
+        status comes from Fusion's ERP integration service (ESSJobStatusRF), asked with the browser's
+        signed-in session, every `poll_s` seconds until the process ends or `timeout_s` passes.
+        """
+        number = job_name.strip() if job_name.strip().isdigit() else self.process_number_on_screen()
+        if not number:
+            raise ValueError(
+                "No process number is shown on the screen. Submit the process first: Oracle then shows "
+                "its number (for example 'Process 1234567 was submitted')."
+            )
+        self.last_process = number
+        deadline = time.monotonic() + timeout_s
+        status = ""
+        while True:
+            status = self._process_status(number)
+            if status in _PROCESS_DONE:
+                return status
+            if time.monotonic() >= deadline:
+                return f"NOT FINISHED (still {status or 'unknown'} after {int(timeout_s)} s, process {number})"
+            time.sleep(self.poll_s)
+
+    def process_number_on_screen(self) -> str:
+        """The number of the process just submitted, as Oracle shows it in its confirmation."""
+        try:
+            text = str(self.page.evaluate("() => document.body.innerText"))
+        except Exception:  # the page was navigating
+            return ""
+        for pattern in _PROCESS_NUMBER:
+            found = pattern.findall(text)
+            if found:
+                return str(found[-1])
+        return ""
+
+    def _process_status(self, number: str) -> str:
+        parts = urlparse(self._url)
+        url = (
+            f"{parts.scheme}://{parts.netloc}/fscmRestApi/resources/11.13.18.05/erpintegrations"
+            f"?finder=ESSJobStatusRF;requestId={number}&onlyData=true"
+        )
+        reply = self._context.request.get(url, headers={"Accept": "application/json"}, timeout=60_000)
+        if reply.status in (401, 403):
+            raise PermissionError(
+                f"The pod refused the status check of process {number} (HTTP {reply.status}). The test user "
+                "needs access to the ERP integration REST service (erpintegrations)."
+            )
+        if not reply.ok:
+            raise RuntimeError(f"The status check of process {number} failed (HTTP {reply.status}).")
+        items = (reply.json() or {}).get("items") or []
+        return str(items[0].get("RequestStatus") or "").upper() if items else ""
 
     def api_call(self, request: str, options: dict[str, Any]) -> int:
         raise NotImplementedError("REST steps land in Phase 1")
@@ -299,6 +353,17 @@ class PlaywrightDriver:
             with suppress(Exception):  # never leave the red box behind for the next screenshot
                 self.page.evaluate(_REMOVE_HIGHLIGHT)
         return str(path)
+
+
+# Final states of a scheduled process; anything else (WAIT, READY, RUNNING, BLOCKED...) is not done yet.
+_PROCESS_DONE = {"SUCCEEDED", "WARNING", "ERROR", "CANCELLED", "CANCELED", "EXPIRED", "ERROR_MANUAL_RECOVERY"}
+# How Oracle shows the number of a process just submitted: "Process 1234567 was submitted.",
+# "Your process 1234567 has been submitted", "Request ID: 1234567".
+_PROCESS_NUMBER = [
+    re.compile(r"\bprocess\s+(\d{3,})\s+(?:was|has been)\s+submitted", re.I),
+    re.compile(r"\brequest\s*id\s*[:#]?\s*(\d{3,})", re.I),
+    re.compile(r"\bprocess\s+id\s*[:#]?\s*(\d{3,})", re.I),
+]
 
 
 def _best_option(texts: list[str], wanted: str) -> int | None:

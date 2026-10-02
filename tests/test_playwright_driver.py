@@ -51,3 +51,84 @@ def test_a_screenshot_that_fails_twice_is_reported(tmp_path: Path) -> None:
         driver(tmp_path, page).screenshot("step-04")
     assert page.shots == 2
     assert any("__qm_highlight" in s for s in page.scripts)
+
+
+# ---------------------------------------------------------------------- scheduled processes (ESS)
+
+
+class Reply:
+    def __init__(self, status: int, body: Any = None) -> None:
+        self.status, self.ok, self._body = status, 200 <= status < 300, body
+
+    def json(self) -> Any:
+        return self._body
+
+
+class Requests:
+    """The browser context's request client: answers each status check with the next reply."""
+
+    def __init__(self, replies: list[Reply]) -> None:
+        self.replies, self.urls = replies, []
+
+    def get(self, url: str, headers: dict[str, str], timeout: int) -> Reply:
+        self.urls.append(url)
+        return self.replies.pop(0)
+
+
+class Context:
+    def __init__(self, replies: list[Reply]) -> None:
+        self.request = Requests(replies)
+
+
+class ScreenPage:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def evaluate(self, script: str) -> str:
+        return self.text
+
+
+def ess_driver(text: str, replies: list[Reply]) -> PlaywrightDriver:
+    d = PlaywrightDriver()
+    d.page, d._context, d._url, d.poll_s = (
+        ScreenPage(text),
+        Context(replies),
+        "https://abcd-dev2.fa.us6.oraclecloud.com/x",
+        0,
+    )
+    return d
+
+
+def status(s: str) -> Reply:
+    return Reply(200, {"items": [{"RequestStatus": s}]})
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Confirmation\nProcess 1234567 was submitted.\nOK",
+        "Your process 1234567 has been submitted",
+        "Request ID: 1234567",
+    ],
+)
+def test_the_number_of_a_process_just_submitted_is_read_from_the_screen(text: str) -> None:
+    assert ess_driver(text, []).process_number_on_screen() == "1234567"
+
+
+def test_waiting_for_a_process_until_it_ends() -> None:
+    d = ess_driver("Process 1234567 was submitted.", [status("WAIT"), status("RUNNING"), status("SUCCEEDED")])
+    assert d.wait_job("last", 60) == "SUCCEEDED" and d.last_process == "1234567"
+    url = d._context.request.urls[0]  # type: ignore[attr-defined]
+    assert url.startswith("https://abcd-dev2.fa.us6.oraclecloud.com/fscmRestApi/resources/")
+    assert "finder=ESSJobStatusRF;requestId=1234567" in url
+    # a number given in the test is used as it is; a failed process says so
+    assert ess_driver("", [status("ERROR")]).wait_job("7654321", 60) == "ERROR"
+
+
+def test_a_process_that_cannot_be_waited_for_says_why() -> None:
+    with pytest.raises(ValueError, match="No process number is shown on the screen"):
+        ess_driver("Welcome", []).wait_job("last", 60)
+    with pytest.raises(PermissionError, match="refused the status check of process 1234567 \\(HTTP 403\\)"):
+        ess_driver("Process 1234567 was submitted.", [Reply(403)]).wait_job("last", 60)
+    not_done = ess_driver("Process 1234567 was submitted.", [status("RUNNING")]).wait_job("last", 0)
+    assert not_done.startswith("NOT FINISHED (still RUNNING")

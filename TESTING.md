@@ -249,6 +249,17 @@ this change keep the old layout until you prepare them again or do them by hand 
   (or **Do it by hand**). The new version waits in **To review** until you approve it; if the AI
   stops, the current version stays.
 
+**Scenarios that submit a scheduled process**
+
+Many payroll and finance scripts submit a process (an ESS job) and then wait for it. While doing
+such a scenario by hand (or while recording a test), submit the process in the browser, then click
+**Wait for process**. When the test plays, Quartermaster reads the process number from Oracle's
+confirmation ("Process 1234567 was submitted"), asks the pod for its status every 15 seconds, and
+the step passes only when the process ends with **Succeeded** (it waits up to 30 minutes). When the
+AI prepares a scenario, it adds this step itself when a step says to wait for the process. The
+status comes from Oracle's ERP integration service, so the test user needs access to it; if not,
+the step says so.
+
 **Fill in test data the script does not give**
 
 When a scenario shows **Values not written** or **Test data missing**, click its name. Each step

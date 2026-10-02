@@ -664,8 +664,14 @@ def plain_error(error: str | None) -> str:
         return "The value to choose was not among the suggestions the screen offered."
     if "Timeout" in text:
         return "The screen did not respond in time."
+    ended = re.search(r"scheduled process ended (.+?), expected (\w+)", text)
+    if ended:
+        return f"The scheduled process ended with status {ended.group(1)}; it should have ended {ended.group(2)}."
     if "ended" in text and "job" in text:
         return "The scheduled process did not finish successfully."
+    for plain in ("No process number is shown", "The pod refused the status check", "The status check of process"):
+        if plain in text:
+            return text[text.index(plain) :]
     return "The step could not be completed. The test team has the full error message in the run record."
 
 
@@ -679,6 +685,7 @@ def _default_expected(step: dict[str, Any]) -> str:
         "assert_visible": "It is shown on the screen.",
         "assert_text": f'It shows "{value}".' if value else "It shows the expected text.",
         "login_as": f"Signed in as {value}." if value else "Signed in.",
+        "wait_job": "The scheduled process finishes successfully.",
     }.get(action, "The step completes.")
 
 

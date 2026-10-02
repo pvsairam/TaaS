@@ -289,6 +289,7 @@ def _prepare(args: argparse.Namespace, driver: Any, recorder: Any, env: Environm
         settle=getattr(driver, "_settle", lambda: None),
         should_stop=should_stop,
         navigate=(lambda path: driver.navigate(path, timeout_ms=10_000)) if hasattr(driver, "navigate") else None,
+        wait_process=(lambda: driver.wait_job("last", 1800)) if hasattr(driver, "wait_job") else None,
     )
     recorder.message = f"Preparing with {config.label}…"
     recorder.write_feed()

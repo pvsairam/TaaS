@@ -115,6 +115,8 @@ function workspace(rec) {
   const pauseBtn = button("Pause", {ic: "pause", onClick: () => send(feed?.paused ? "resume" : "pause")});
   const checkBtn = button("Add check", {ic: "target", pressed: false, title: "The next click in the browser records a check instead of an action",
     onClick: () => send("check")});
+  const waitBtn = button("Wait for process", {ic: "clock", title: "After submitting a scheduled process: the test waits until it finishes, and passes only if it succeeded",
+    onClick: () => send("wait")});
   const noteBtn = button("Add note", {ic: "note", title: "What should happen at the last step", attrs: {"aria-haspopup": "dialog"},
     onClick: (e) => popover(e.currentTarget, (close) => {
       const text = h("textarea", {class: "input", rows: "3", placeholder: "e.g. The worker's record opens on the Employment page", autofocus: true,
@@ -135,7 +137,7 @@ function workspace(rec) {
       h("section", {class: "card", "aria-label": "Recorder"},
         h("div", {class: "rec-bar", role: "toolbar", "aria-label": "Recorder controls"},
           h("span", {class: "rec-state"}, dot, stateLabel), timer, h("span", {class: "grow"}),
-          pauseBtn, checkBtn, noteBtn, maskBtn, undoBtn, finishBtn),
+          pauseBtn, checkBtn, waitBtn, noteBtn, maskBtn, undoBtn, finishBtn),
         h("div", {class: "card-body stack", style: "gap:12px"},
           h("div", {class: "row", style: "justify-content:space-between"}, h("h3", {}, "Recorded steps"), count),
           message, steps)),
@@ -159,7 +161,7 @@ function workspace(rec) {
     if (r.status === "saving") {
       stateLabel.textContent = "Saving";
       dot.classList.add("paused");
-      [pauseBtn, checkBtn, noteBtn, maskBtn, undoBtn, finishBtn].forEach((b) => { b.disabled = true; });
+      [pauseBtn, checkBtn, waitBtn, noteBtn, maskBtn, undoBtn, finishBtn].forEach((b) => { b.disabled = true; });
       message.textContent = "Saving the test and checking it can be read.";
       return;
     }
@@ -173,6 +175,7 @@ function workspace(rec) {
     maskBtn.disabled = !feed?.steps.some((st) => ["fill", "select"].includes(st.action) && st.value !== "••••••");
     undoBtn.disabled = !feed?.steps.length;
     noteBtn.disabled = !feed?.steps.length;
+    waitBtn.disabled = paused || !feed?.steps.length;
     message.textContent = !feed ? "Opening the browser and signing in to Oracle Fusion…" : feed.checking ? "Click the value to check in the browser window." : feed.message || "";
     count.textContent = feed ? plural(feed.steps.length, "step") : "";
     const sig = JSON.stringify(feed?.steps || []);

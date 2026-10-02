@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_KINDS = {"click", "fill", "select", "navigate", "assert_text", "assert_visible", "note"}
+_KINDS = {"click", "fill", "select", "navigate", "assert_text", "assert_visible", "note", "wait_job"}
 MASK = "••••••"
 _VALUED = {"fill", "select", "assert_text"}
 _STRATEGIES = {"label", "role", "test_id", "text", "css", "xpath"}
@@ -66,6 +66,20 @@ def events_to_steps(
             text = " ".join(str(ev.get("value") or "").split())
             if text and steps:
                 steps[-1]["expected"] = f"{steps[-1].get('expected', '')} {text}".strip()
+            continue
+        if kind == "wait_job":
+            # wait for the scheduled process just submitted (its number is read from the screen)
+            steps.append(
+                _written(
+                    {
+                        "action": "wait_job",
+                        "intent": "Wait for the scheduled process to finish",
+                        "value": str(ev.get("value") or "last"),
+                        "options": {"timeout_s": int(ev.get("timeout_s") or 1800)},
+                    },
+                    ev,
+                )
+            )
             continue
         if kind == "navigate":
             path = str(ev.get("value") or "").strip()

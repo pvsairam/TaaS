@@ -148,3 +148,29 @@ def test_a_test_from_a_manual_scenario_keeps_its_written_steps(tmp_path: Path) -
     out.write_text(to_yaml(test))
     again = load_test(out)
     assert [s.written_step for s in again.steps] == [3, 4] and again.written_steps == written
+
+
+def test_a_wait_for_a_scheduled_process_is_saved_as_a_step() -> None:
+    events = [
+        {"kind": "click", "intent": "Submit", "candidates": [{"strategy": "role", "value": "button:Submit"}]},
+        {"kind": "wait_job", "value": "last", "guide_step": 5},
+    ]
+    steps, _ = events_to_steps(events)
+    assert steps[1] == {
+        "action": "wait_job",
+        "intent": "Wait for the scheduled process to finish",
+        "value": "last",
+        "options": {"timeout_s": 1800},
+        "written_step": 5,
+    }
+
+
+def test_wait_for_process_is_added_after_an_action_while_recording() -> None:
+    from quartermaster.recorder.recorder import Recorder
+
+    rec = Recorder(test_id="t")
+    rec.command("wait")
+    assert rec.events == [] and "Submit the process first" in rec.message
+    rec.events.append({"kind": "click", "intent": "Submit", "candidates": [{"strategy": "text", "value": "Submit"}]})
+    rec.command("wait")
+    assert rec.events[-1] == {"kind": "wait_job", "value": "last"} and "waits until the process ends" in rec.message

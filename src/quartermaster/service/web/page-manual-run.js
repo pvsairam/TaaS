@@ -105,6 +105,8 @@ function workspace(rec) {
   const checkBtn = button("Add check", {ic: "target", title: "The next click in the browser checks a value instead of doing an action",
     onClick: () => send("check")});
   const stopBtn = button("Stop", {ic: "stop", title: "Stop the AI. Nothing is saved to run.", onClick: () => send("stop")});
+  const waitBtn = button("Wait for process", {ic: "clock", title: "After you submit a scheduled process: the saved test then waits until it finishes, and passes only if it succeeded",
+    onClick: () => send("wait")});
   const finishBtn = button("Finish", {kind: "primary", ic: "check", onClick: () => {
     const open = steps.filter((st) => !st.status).length;
     if (open && !confirm(`${open} step${open === 1 ? " is" : "s are"} not marked yet and will count as not checked, so the run will not pass. Finish anyway?`)) return;
@@ -115,7 +117,7 @@ function workspace(rec) {
     h("div", {class: "page-head"},
       h("div", {}, h("h1", {}, rec.title),
         h("p", {class: "lead"}, `${byAI ? "Prepared by AI · " : ""}${rec.ref} · ${rec.workbook}${rec.release ? ` · Release ${rec.release}` : ""}`)),
-      h("div", {class: "row"}, ...(byAI ? [stopBtn] : [checkBtn, finishBtn]))),
+      h("div", {class: "row"}, ...(byAI ? [stopBtn] : [checkBtn, waitBtn, finishBtn]))),
     byAI
       ? callout("info", "The AI is doing the steps in the browser window that opened. You can watch it.",
         "It reads each written step, chooses a button or link on the screen, and takes a picture when the step is done. It stops rather than guess, and never presses Save, Submit or Delete unless the step says so. You check its pictures at the end.")
@@ -155,7 +157,7 @@ function workspace(rec) {
   const update = (r) => {
     const feed = r.feed;
     if (r.status === "saving") {
-      [checkBtn, finishBtn, stopBtn].forEach((b) => { b.disabled = true; });
+      [checkBtn, waitBtn, finishBtn, stopBtn].forEach((b) => { b.disabled = true; });
       message.textContent = byAI ? "Saving what the AI did…" : "Saving the evidence and the steps you clicked…";
       return;
     }
@@ -163,6 +165,7 @@ function workspace(rec) {
     message.textContent = !feed ? "Opening the browser and signing in to Oracle Fusion…" : feed.checking ? "Click the value to check in the browser window." : feed.message || "";
     checkBtn.setAttribute("aria-pressed", String(Boolean(feed?.checking)));
     checkBtn.disabled = !feed;
+    waitBtn.disabled = !feed;
     finishBtn.disabled = !feed;
     const done = steps.filter((st) => st.status).length;
     progress.textContent = steps.length ? `${done} of ${steps.length} ${byAI ? "done" : "marked"}` : "";

@@ -19,7 +19,7 @@ from typing import Any
 from quartermaster.service.store import now
 
 RecordCommandBuilder = Callable[[Path, dict[str, str], Path, Path], list[str]]
-COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop", "result")
+COMMANDS = ("pause", "resume", "check", "undo", "note", "mask", "stop", "result", "wait")
 # Extra settings for doing a manual scenario by hand (see qm record --guide).
 GUIDE_FIELDS = (
     "guide",
