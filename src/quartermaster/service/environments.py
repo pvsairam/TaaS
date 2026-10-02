@@ -48,7 +48,11 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 # Added later: databases made before get the column when opened.
-_COLUMNS = {"environments": {"not_production": "INTEGER NOT NULL DEFAULT 0"}}
+_COLUMNS = {
+    "environments": {"not_production": "INTEGER NOT NULL DEFAULT 0"},
+    # where the client's tests, evidence and history are kept ("" = the default folders)
+    "clients": {"folder": "TEXT NOT NULL DEFAULT ''"},
+}
 
 
 def _now() -> str:
@@ -113,20 +117,66 @@ class Environments:
             ).fetchone()
         return dict(row) if row else None
 
+    def _state(self, key: str) -> str:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else ""
+
+    def _environment(self, env_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT e.*, c.name AS client FROM environments e JOIN clients c ON c.id = e.client_id WHERE e.id = ?",
+                (env_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def active_client_id(self) -> str:
+        """The client being worked on: the one of the environment in use, else the first client."""
+        env = self.active()
+        if env:
+            return str(env["client_id"])
+        clients = self.clients()
+        return str(clients[0]["id"]) if clients else ""
+
+    def clients(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(r) for r in self._db.execute("SELECT * FROM clients ORDER BY created_at")]
+
+    def home_client(self) -> str:
+        """The first client: it keeps the default folders (what was there before clients existed)."""
+        return self._state("home")
+
+    def client_folder(self, client_id: str) -> str:
+        with self._lock:
+            row = self._db.execute("SELECT folder FROM clients WHERE id = ?", (client_id,)).fetchone()
+        return str(row["folder"]) if row else ""
+
+    def client_environment(self, client_id: str) -> dict[str, Any] | None:
+        """The environment a client's runs use: the one last chosen for it, else its first one."""
+        env = self._environment(self._state(f"env:{client_id}"))
+        if env and env["client_id"] == client_id:
+            return env
+        with self._lock:
+            row = self._db.execute(
+                "SELECT id FROM environments WHERE client_id = ? ORDER BY created_at LIMIT 1", (client_id,)
+            ).fetchone()
+        return self._environment(str(row["id"])) if row else None
+
     def users(self, env_id: str) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(r) for r in self._db.execute("SELECT * FROM users WHERE environment_id = ?", (env_id,))]
 
-    def run_environ(self, base: Mapping[str, str]) -> dict[str, str]:
-        """The variables a run, recording or Prepare of the active environment gets: the pod, its kind
-        and its users with their passwords. Users set in the terminal for another pod are left out so
-        two clients never mix. With no environment set up, `base` is returned unchanged."""
-        env = self.active()
+    def run_environ(self, base: Mapping[str, str], client_id: str | None = None) -> dict[str, str]:
+        """The variables a run, recording or Prepare gets: the pod of the environment in use (of
+        `client_id` when given), its kind and its users with their passwords. Users and a sign-in set
+        in the terminal for another pod are left out so two clients never mix. With no environment
+        set up, `base` is returned unchanged."""
+        env = self.client_environment(client_id) if client_id else self.active()
         out = dict(base)
         if env is None:
             return out
         for key in list(out):
-            if key.startswith(("QM_FUSION_USER", "QM_FUSION_PASSWORD")):
+            if key.startswith(("QM_FUSION_USER", "QM_FUSION_PASSWORD", "QM_FUSION_SESSION")):
                 del out[key]
         out["QM_FUSION_URL"] = env["url"]
         out["QM_FUSION_KIND"] = env["kind"]
@@ -160,7 +210,14 @@ class Environments:
                 cid = str(data["id"])
             else:
                 cid = uuid.uuid4().hex[:10]
-                self._db.execute("INSERT INTO clients VALUES (?, ?, ?)", (cid, name, _now()))
+                home = self._db.execute("SELECT value FROM state WHERE key = 'home'").fetchone()
+                folder = "" if home is None else f"{_slug(name)}-{cid[:4]}"
+                self._db.execute(
+                    "INSERT INTO clients (id, name, created_at, folder) VALUES (?, ?, ?, ?)",
+                    (cid, name, _now(), folder),
+                )
+                if home is None:
+                    self._db.execute("INSERT INTO state VALUES ('home', ?)", (cid,))
         return {"id": cid, "name": name}
 
     def delete_client(self, client_id: str) -> None:
@@ -224,6 +281,9 @@ class Environments:
             has_active = self._db.execute("SELECT 1 FROM state WHERE key = 'active'").fetchone()
             if not has_active:  # the first environment is the one used
                 self._db.execute("INSERT INTO state VALUES ('active', ?)", (env_id,))
+            self._db.execute(  # a client's first environment is the one its runs use
+                "INSERT OR IGNORE INTO state VALUES (?, ?)", (f"env:{data['client_id']}", env_id)
+            )
         return {"id": env_id, "name": name, "url": url}
 
     def delete_environment(self, env_id: str) -> None:
@@ -232,6 +292,7 @@ class Environments:
                 raise LookupError("that environment is no longer there")
             self._db.execute("DELETE FROM users WHERE environment_id = ?", (env_id,))
             self._db.execute("DELETE FROM state WHERE key = 'active' AND value = ?", (env_id,))
+            self._db.execute("DELETE FROM state WHERE key LIKE 'env:%' AND value = ?", (env_id,))
 
     def set_release(self, env_id: str, release: str) -> None:
         release = _text(release, 20)
@@ -251,6 +312,9 @@ class Environments:
             if not self._db.execute("SELECT 1 FROM environments WHERE id = ?", (env_id,)).fetchone():
                 raise LookupError("that environment is no longer there")
             self._db.execute("INSERT OR REPLACE INTO state VALUES ('active', ?)", (env_id,))
+            self._db.execute(
+                "INSERT OR REPLACE INTO state SELECT 'env:' || client_id, id FROM environments WHERE id = ?", (env_id,)
+            )
         return self.active() or {}
 
     def save_user(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -326,6 +390,10 @@ class Environments:
                 }
             )
         return True
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "client"
 
 
 def _pod_url(url: str) -> str:

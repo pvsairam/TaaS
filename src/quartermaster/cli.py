@@ -459,15 +459,19 @@ def _tests_folder(name: str) -> Path | None:
 def _serve(args: argparse.Namespace) -> int:
     import webbrowser
 
-    from quartermaster.service.api import App, make_server, port_of
+    from quartermaster.service.api import make_server, port_of
+    from quartermaster.service.hub import Hub
 
     tests = _tests_folder(args.tests)
     if tests is None:
         return 2
-    app = App(
+    examples = Path("examples") / "tests"
+    # one workspace per client (Settings, Clients and environments); the first client keeps these folders
+    app = Hub(
         tests_root=tests,
         evidence_root=Path(args.evidence),
         data_dir=Path(args.data),
+        seed_tests=examples if examples.is_dir() else None,
         releases_root=Path(args.releases),
     )
     server = make_server(app, port=args.port)

@@ -25,20 +25,33 @@ def qm_signin_command() -> list[str]:
 
 
 class SignIn:
+    """One sign-in by hand at a time. Each session belongs to one pod (`key`, the environment id):
+    a run gets only the session of its own pod. The key "" is the pod set in the terminal, whose
+    session goes in this process's environment as before."""
+
     def __init__(self, command: Callable[[], list[str]] = qm_signin_command, cwd: Path | None = None):
         self._command = command
         self._cwd = cwd
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
-        self._state: dict[str, Any] = {"status": "done", "at": None} if os.environ.get(ENV) else {"status": "none"}
+        self._key = ""  # the pod the sign-in in progress is for
+        self._sessions: dict[str, str] = {}  # pod -> session, in memory only
+        self._states: dict[str, dict[str, Any]] = {}
         # The variables `qm signin` gets (the active environment's pod); None: this process's own.
         self.environ: Callable[[], dict[str, str]] | None = None
 
-    def view(self) -> dict[str, Any]:
+    def session(self, key: str = "") -> str:
         with self._lock:
-            return dict(self._state)
+            return os.environ.get(ENV, "") if not key else self._sessions.get(key, "")
 
-    def start(self) -> dict[str, Any]:
+    def view(self, key: str = "") -> dict[str, Any]:
+        with self._lock:
+            if key in self._states:
+                return dict(self._states[key])
+            has = os.environ.get(ENV) if not key else self._sessions.get(key)
+            return {"status": "done", "at": None} if has else {"status": "none"}
+
+    def start(self, key: str = "") -> dict[str, Any]:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise ValueError("a sign-in is already waiting in the browser that opened")
@@ -51,12 +64,13 @@ class SignIn:
                 cwd=self._cwd,
                 env=self.environ() if self.environ else None,
             )
-            self._state = {"status": "waiting", "at": _now()}
+            self._key = key
+            self._states[key] = {"status": "waiting", "at": _now()}
             proc = self._proc
-        threading.Thread(target=self._follow, args=(proc,), name="qm-signin", daemon=True).start()
-        return self.view()
+        threading.Thread(target=self._follow, args=(proc, key), name="qm-signin", daemon=True).start()
+        return self.view(key)
 
-    def _follow(self, proc: subprocess.Popen[str]) -> None:
+    def _follow(self, proc: subprocess.Popen[str], key: str) -> None:
         last = ""
         got = False
         assert proc.stdout is not None
@@ -69,7 +83,11 @@ class SignIn:
                 except SessionError as e:
                     last = str(e)
                     continue
-                os.environ[ENV] = text  # in memory only; the runs started from here inherit it
+                with self._lock:
+                    if key:
+                        self._sessions[key] = text  # in memory only
+                    else:
+                        os.environ[ENV] = text  # in memory only; the runs started from here inherit it
                 got = True
             elif line:
                 last = line
@@ -78,23 +96,28 @@ class SignIn:
             if self._proc is not proc:
                 return  # cancelled, or a newer sign-in
             if got:
-                self._state = {"status": "done", "at": _now()}
+                self._states[key] = {"status": "done", "at": _now()}
             else:
                 why = last[len("error: ") :] if last.startswith("error: ") else last
-                self._state = {"status": "failed", "at": _now(), "error": why or "the sign-in browser closed"}
+                self._states[key] = {"status": "failed", "at": _now(), "error": why or "the sign-in browser closed"}
 
-    def forget(self) -> dict[str, Any]:
-        self.stop()
-        os.environ.pop(ENV, None)
+    def forget(self, key: str = "") -> dict[str, Any]:
+        if self._key == key:
+            self.stop()
         with self._lock:
-            self._state = {"status": "none"}
-        return self.view()
+            if key:
+                self._sessions.pop(key, None)
+            else:
+                os.environ.pop(ENV, None)
+            self._states[key] = {"status": "none"}
+        return self.view(key)
 
     def stop(self) -> None:
         with self._lock:
             proc, self._proc = self._proc, None
-            if self._state.get("status") == "waiting":
-                self._state = {"status": "done", "at": None} if os.environ.get(ENV) else {"status": "none"}
+            state = self._states.get(self._key, {})
+            if state.get("status") == "waiting":
+                del self._states[self._key]
         if proc is not None and proc.poll() is None:
             proc.terminate()
 

@@ -78,7 +78,7 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import yaml
@@ -141,7 +141,16 @@ class App:
         cwd: Path | None = None,
         releases_root: Path | None = None,
         signin_command: Callable[[], list[str]] = qm_signin_command,
+        environments: Environments | None = None,
+        client_id: str = "",
+        shared_dir: Path | None = None,
+        keys_entered: set[str] | None = None,
     ):
+        """One workspace. Alone (tests, `qm serve` before clients) it sets up its own Environments.
+        Under a Hub, one App per client: `client_id` names the client, `environments` and the
+        settings, release lists and AI keys in `shared_dir` are shared by all clients."""
+        shared = shared_dir or data_dir
+        self.client_id = client_id
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
         self.queue = RunQueue(
@@ -154,17 +163,20 @@ class App:
         )
         self.recording = Recording(self.tests_root, self.evidence_root, data_dir / "recording", record_command)
         self.backups = data_dir / "backups"
-        self.settings = Settings(data_dir / "settings.json")
+        self.settings = Settings(shared / "settings.json")
         # Clients and their pods, set up in Settings; the active one is what runs use.
-        self.environments = Environments(data_dir / "environments.db")
-        old = self.settings.get()
-        self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
-        self.settings.environment = self.environments.active
-        self.settings.save_release = lambda r: self.environments.set_release(self.environments.active_id(), r)
-        self.settings.save_name = lambda n: self.environments.rename(self.environments.active_id(), n)
+        if environments is None:
+            environments = Environments(data_dir / "environments.db")
+            old = self.settings.get()
+            environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
+        self.environments = environments
+        self.settings.environment = self._env
+        self.settings.save_release = lambda r: self.environments.set_release(self._env_key(), r)
+        self.settings.save_name = lambda n: self.environments.rename(self._env_key(), n)
         self.pod_check: dict[str, Any] | None = None
-        self.keys_entered: set[str] = set()  # AI keys pasted in Settings: in memory only, never on disk
-        self.releases = Releases(releases_root, data_dir / "releases")
+        # AI keys pasted in Settings: in memory only, never on disk
+        self.keys_entered: set[str] = set() if keys_entered is None else keys_entered
+        self.releases = Releases(releases_root, shared / "releases")
         self.manual = ManualScripts(data_dir / "manual")
         self.recording.on_manual_done = self._manual_done
         self.prepare_all = PrepareAll(
@@ -175,8 +187,27 @@ class App:
         self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
         self.audit = AuditLog(data_dir / "audit.jsonl")
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
-        run_environ = lambda: self.environments.run_environ(os.environ)  # noqa: E731
-        self.queue.environ = self.recording.environ = self.signin.environ = run_environ
+        self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
+
+    def _env(self) -> dict[str, Any] | None:
+        """The environment this workspace's runs use (its client's, or the one in use), or None."""
+        if self.client_id:
+            return self.environments.client_environment(self.client_id)
+        return self.environments.active()
+
+    def _env_key(self) -> str:
+        env = self._env()
+        return str(env["id"]) if env else ""
+
+    def run_environ(self) -> dict[str, str]:
+        """What a run, recording or Prepare gets: the pod, its users and its sign-in by hand."""
+        out = self.environments.run_environ(os.environ, self.client_id or None)
+        key = self._env_key()
+        if key:
+            session = self.signin.session(key)
+            if session:
+                out[SESSION_ENV] = session
+        return out
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -245,16 +276,16 @@ class App:
             return _json(ai_providers.check(ai_providers.config_from(self.settings.get())))
         if route[:1] == ["signin"]:
             if method == "GET" and route == ["signin"]:
-                return _json(self.signin.view())
+                return _json(self.signin.view(self._env_key()))
             if method == "POST" and route == ["signin"]:
                 if not self.pod()["url"]:
                     raise ApiError(HTTPStatus.BAD_REQUEST, "add the pod in Settings, Clients and environments, first")
                 try:
-                    return _json(self.signin.start())
+                    return _json(self.signin.start(self._env_key()))
                 except ValueError as e:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
             if method == "POST" and route == ["signin", "forget"]:
-                return _json(self.signin.forget())
+                return _json(self.signin.forget(self._env_key()))
         if method == "POST" and route == ["check-pod"]:
             self.pod_check = check_pod(self.pod()["url"])
             return _json(self.pod_check)
@@ -396,8 +427,7 @@ class App:
 
     def _switched(self) -> None:
         """Another pod is in use: forget what belonged to the previous one."""
-        self.pod_check = None
-        self.signin.forget()  # a sign-in done by hand is for one pod only
+        self.pod_check = None  # a sign-in by hand stays with its pod (see SignIn)
 
     def _schedules(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
         try:
@@ -702,8 +732,8 @@ class App:
     # ------------------------------------------------------------------ views
 
     def pod(self) -> dict[str, Any]:
-        """The pod runs use and its default user: the active environment, else the terminal's variables."""
-        env = self.environments.active()
+        """The pod runs use and its default user: the environment in use, else the terminal's variables."""
+        env = self._env()
         if env:
             default = next((u for u in self.environments.users(env["id"]) if not u["persona"]), None)
             return {
@@ -711,6 +741,7 @@ class App:
                 "user": default["username"] if default else "",
                 "password_set": bool(default and default["secret"]),
                 "client": env["client"],
+                "client_id": env["client_id"],
                 "environment_id": env["id"],
                 "kind": env["kind"],
                 "sign_in": env["sign_in"],
@@ -722,6 +753,7 @@ class App:
             "user": os.environ.get("QM_FUSION_USER", ""),
             "password_set": bool(os.environ.get("QM_FUSION_PASSWORD")),
             "client": "",
+            "client_id": "",
             "environment_id": "",
             "kind": os.environ.get("QM_FUSION_KIND", "DEV").upper(),
             "sign_in": "password",
@@ -742,6 +774,7 @@ class App:
             "user": pod["user"],
             "password_set": pod["password_set"],
             "client": pod["client"],
+            "client_id": pod["client_id"],
             "environment_id": pod["environment_id"],
             "environment_kind": pod["kind"],
             "sign_in": pod["sign_in"],
@@ -751,8 +784,10 @@ class App:
             "evidence_folder": str(self.evidence_root),
             "default_options": DEFAULT_OPTIONS,
             "ai": self._ai_view(settings),
-            "signed_in_by_hand": self.signin.view(),
-            "ready": bool(url and ((pod["user"] and pod["password_set"]) or os.environ.get(SESSION_ENV))),
+            "signed_in_by_hand": self.signin.view(pod["environment_id"]),
+            "ready": bool(
+                url and ((pod["user"] and pod["password_set"]) or self.signin.session(pod["environment_id"]))
+            ),
         }
 
     def tests(self) -> list[dict[str, Any]]:
@@ -1114,7 +1149,11 @@ def port_of(server: Any) -> int:
     return int(server.server_address[1])
 
 
-def make_server(app: App, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+class Handles(Protocol):
+    def handle(self, method: str, raw_path: str, body: bytes) -> Reply: ...
+
+
+def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         server_version = "Quartermaster"
 

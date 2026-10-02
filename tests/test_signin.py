@@ -69,9 +69,13 @@ def test_a_pod_with_single_sign_on_is_ready_once_signed_in(monkeypatch: pytest.M
     status = app.handle("GET", "/api/status", b"")
     assert b'"ready": false' in status.body
     session = encode_session(COOKIES, POD)
-    monkeypatch.setenv(ENV, session)
+    pod = app._env_key()  # the pod set in the terminal became the first client's environment
+    monkeypatch.setenv(ENV, session)  # a session in the terminal is not taken for this pod
+    assert b'"ready": false' in app.handle("GET", "/api/status", b"").body
+    app.signin._sessions[pod] = session  # what Sign in by hand keeps, for this pod only
     body = app.handle("GET", "/api/status", b"").body
     assert b'"ready": true' in body and session.encode() not in body  # the page never sees the session
+    assert app.run_environ()[ENV] == session
 
 
 # ---------------------------------------------------------------- the browser side, with a stand-in browser

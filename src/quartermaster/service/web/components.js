@@ -28,7 +28,7 @@ export function environmentButton() {
     onclick: () => openEnvironment(btn)},
     h("span", {class: `dot ${c.dot}`}),
     h("span", {class: "env-text grow", style: "min-width:0"},
-      h("span", {class: "meta", style: "display:block"}, c.label),
+      h("span", {class: "meta ellipsis", style: "display:block"}, st?.client ? `${st.client} · ${c.label}` : c.label),
       h("span", {class: "env-name ellipsis", style: "display:block"}, envName(st) || "No pod set"),
       h("span", {class: "meta", style: "display:block"}, st?.release ? ["Release ", h("span", {class: "release"}, st.release)] : "Release not set")),
     h("span", {class: "env-text"}, icon("down")));

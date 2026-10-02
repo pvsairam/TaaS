@@ -106,6 +106,12 @@ your Windows user only.
 5. Add a second client the same way (**Add client** at the top of the card). To switch, click the
    environment box at the bottom-left of the menu and pick it under **Switch to**, or click
    **Use** next to it in Settings. Runs, recordings and Prepare then go to that pod.
+   Each client is kept apart: its own tests, manual scripts, evidence, runs, schedules, Needs
+   attention and audit log. Switch to the second client: **Tests** shows only its tests (a new
+   client starts with copies of the example tests), **Runs** shows none of the first client's
+   runs. Switch back: everything of the first client is still there. The first client keeps the
+   folders you had before (`my_tests`, `evidence`); every other client's files are in
+   `clients/<name>-<code>/`. Schedules of every client run even when another client is in use.
 6. Try adding a production pod (an address without dev, test, stage or uat, such as
    `https://acme.fa.us6.oraclecloud.com`): Quartermaster refuses it. If a real test pod has no such
    word in its address, tick **This is a test pod, not production** and save again.

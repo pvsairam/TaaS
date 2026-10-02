@@ -36,6 +36,7 @@ export async function environmentsCard(onChange) {
       h("h3", {class: "grow", style: "margin:0"}, client.name),
       button("Add environment", {size: "sm", ic: "plus", onClick: () => openEnvironment(client, null, changed)}),
       button("", {size: "sm", kind: "ghost", ic: "wrench", title: `Rename or delete ${client.name}`, onClick: () => openClient(client, changed)})),
+    h("div", {class: "meta"}, `Its own tests, evidence, runs and schedules, kept in ${client.folder ? `clients/${client.folder}` : "the default folders"}.`),
     client.environments.length ? client.environments.map((e) => envRow(client, e))
       : h("p", {class: "meta", style: "margin:8px 0 0"}, "No environment yet. Add the client's DEV or TEST pod."));
 
