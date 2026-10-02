@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from quartermaster.domain.models import Release, TestCase
+from quartermaster.domain.models import Action, Release, TestCase
 
 
 class SpecError(ValueError):
@@ -83,6 +83,9 @@ def _check_placeholders(test: TestCase, path: Path) -> None:
         for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):
             if name not in known and not name.startswith(SECRET):
                 raise SpecError(f"{path}: step {i} uses undefined data placeholder ${{{name}}}")
+        saved = step.options.get("save") if step.action is Action.API_CALL else None
+        if isinstance(saved, dict):
+            known |= {str(k) for k in saved}  # a REST step keeps values from its reply for the steps after it
 
 
 def render_value(value: str | None, data: dict[str, str], runtime: dict[str, str] | None = None) -> str | None:

@@ -328,8 +328,23 @@ class PlaywrightDriver:
         items = (reply.json() or {}).get("items") or []
         return str(items[0].get("RequestStatus") or "").upper() if items else ""
 
-    def api_call(self, request: str, options: dict[str, Any]) -> int:
-        raise NotImplementedError("REST steps land in Phase 1")
+    def api_call(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+        """Call a REST service of the pod with the browser's signed-in session: the HTTP status and
+        the JSON reply (None when the reply is not JSON)."""
+        pod = urlparse(self._url)
+        asked = urlparse(path)
+        if asked.netloc and asked.netloc != pod.netloc:
+            raise ValueError(f"a REST step may only call the pod ({pod.netloc}), not {asked.netloc}")
+        url = path if asked.netloc else f"{pod.scheme}://{pod.netloc}/{path.lstrip('/')}"
+        headers = {"Accept": "application/json"}
+        if body is not None:
+            headers["Content-Type"] = "application/vnd.oracle.adf.resourceitem+json"
+        reply = self._context.request.fetch(url, method=method, headers=headers, data=body, timeout=60_000)
+        try:
+            data = reply.json()
+        except Exception:  # an HTML error page, or an empty reply to a DELETE
+            data = None
+        return int(reply.status), data
 
     def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None:
         """Save what the user would see (the browser window) with the step's element boxed in red."""

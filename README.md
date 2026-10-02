@@ -73,6 +73,30 @@ and they submit real transactions, so they are kept out of the tests folder; see
 absence example shows an employee submitting a request and switching to the line manager (`login_as`)
 to approve it.
 
+### Steps that call a REST API
+
+A step can call a Fusion REST service, for example to check that a record made on the screen is
+really saved, or to find an id to open. It uses the browser's signed-in session, so no extra
+password is needed, and it only ever calls the pod itself.
+
+```yaml
+  - action: api_call
+    intent: The new location is saved
+    value: GET /hcmRestApi/resources/11.13.18.05/locationsV2?q=LocationName='${location_name}'
+    options:
+      expect_status: 200            # optional; any 2xx when left out
+      check:                        # optional; a path in the JSON reply and the value it must have
+        count: 1
+        items[0].ActiveStatus: A
+        items[0].LocationId: "*"    # "*" means it is there and not empty
+      save:                         # optional; later steps can use ${location_id}
+        location_id: items[0].LocationId
+```
+
+`value` is `METHOD /path` (GET, POST, PATCH, PUT or DELETE). For POST, PATCH and PUT put the JSON to
+send under `options.body`; `${name}` placeholders work in it too. A REST step that changes data
+changes it on the pod, like a click on Save would.
+
 ## Run it on your own computer (fastest way to reach your pod)
 
 If your laptop can open the pod in a browser, it can run Quartermaster. You need Python 3.11+

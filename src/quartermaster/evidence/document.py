@@ -669,6 +669,13 @@ def plain_error(error: str | None) -> str:
         return f"The scheduled process ended with status {ended.group(1)}; it should have ended {ended.group(2)}."
     if "ended" in text and "job" in text:
         return "The scheduled process did not finish successfully."
+    if "the API answered" in text or "in the API reply" in text or "the API reply has" in text:
+        said = text.split("StepFailure: ", 1)[-1]  # written in plain words by the REST step
+        return said[0].upper() + said[1:] + ("" if said.endswith(".") else ".")
+    for plain in ("a REST step may only call", "write the request as"):
+        if plain in text:
+            said = text[text.index(plain) :]
+            return said[0].upper() + said[1:]
     for plain in ("No process number is shown", "The pod refused the status check", "The status check of process"):
         if plain in text:
             return text[text.index(plain) :]
@@ -686,6 +693,7 @@ def _default_expected(step: dict[str, Any]) -> str:
         "assert_text": f'It shows "{value}".' if value else "It shows the expected text.",
         "login_as": f"Signed in as {value}." if value else "Signed in.",
         "wait_job": "The scheduled process finishes successfully.",
+        "api_call": "The service answers, and its reply has the expected values.",
     }.get(action, "The step completes.")
 
 

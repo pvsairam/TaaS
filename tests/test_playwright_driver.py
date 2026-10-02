@@ -74,6 +74,11 @@ class Requests:
         self.urls.append(url)
         return self.replies.pop(0)
 
+    def fetch(self, url: str, method: str, headers: dict[str, str], data: Any, timeout: int) -> Reply:
+        self.urls.append(url)
+        self.sent = (method, headers, data)
+        return self.replies.pop(0)
+
 
 class Context:
     def __init__(self, replies: list[Reply]) -> None:
@@ -132,3 +137,18 @@ def test_a_process_that_cannot_be_waited_for_says_why() -> None:
         ess_driver("Process 1234567 was submitted.", [Reply(403)]).wait_job("last", 60)
     not_done = ess_driver("Process 1234567 was submitted.", [status("RUNNING")]).wait_job("last", 0)
     assert not_done.startswith("NOT FINISHED (still RUNNING")
+
+
+# ---------------------------------------------------------------------- REST steps
+
+
+def test_a_rest_step_calls_the_pod_with_the_signed_in_session() -> None:
+    d = ess_driver("", [Reply(200, {"count": 1}), Reply(201, {"LocationId": 5})])
+    assert d.api_call("GET", "/hcmRestApi/resources/11.13.18.05/locationsV2") == (200, {"count": 1})
+    requests = d._context.request  # type: ignore[attr-defined]
+    assert requests.urls[0] == "https://abcd-dev2.fa.us6.oraclecloud.com/hcmRestApi/resources/11.13.18.05/locationsV2"
+    assert d.api_call("POST", "hcmRestApi/x", {"LocationName": "HQ"}) == (201, {"LocationId": 5})
+    method, headers, body = requests.sent
+    assert method == "POST" and body == {"LocationName": "HQ"} and "json" in headers["Content-Type"]
+    with pytest.raises(ValueError, match="may only call the pod"):
+        d.api_call("GET", "https://example.com/steal")

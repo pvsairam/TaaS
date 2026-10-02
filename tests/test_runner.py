@@ -193,7 +193,50 @@ def test_wait_job_checks_final_status(stage_env: Environment) -> None:
 def test_api_call_checks_status(stage_env: Environment) -> None:
     step = Step(action=Action.API_CALL, intent="get", value="GET /invoices", options={"expect_status": 201})
     result = run_test(_tc(step), stage_env, FakeDriver())
-    assert "API returned 200, expected 201" in (result.steps[0].error or "")
+    assert "the API answered HTTP 200, expected 201" in (result.steps[0].error or "")
+    d = FakeDriver()
+    d.api_status = 404
+    plain = Step(action=Action.API_CALL, intent="get", value="GET /invoices")
+    assert "the API answered HTTP 404" in (run_test(_tc(plain), stage_env, d).steps[0].error or "")
+
+
+def test_api_call_checks_the_reply_and_keeps_values_for_later_steps(stage_env: Environment) -> None:
+    look = Step(
+        action=Action.API_CALL,
+        intent="The location is in the REST API",
+        value="GET /hcmRestApi/resources/11.13.18.05/locationsV2?q=LocationName='${name}'",
+        options={
+            "check": {"count": 1, "items[0].ActiveStatus": "A", "items[0].LocationId": "*"},
+            "save": {"location_id": "items[0].LocationId"},
+        },
+    )
+    change = Step(
+        action=Action.API_CALL,
+        intent="Rename it",
+        value="PATCH /hcmRestApi/resources/11.13.18.05/locationsV2/${location_id}",
+        options={"body": {"LocationName": "${name} 2", "Active": True}},
+    )
+    fill = Step(
+        action=Action.FILL, intent="Search", value="${location_id}", target=Locator(strategies=[{"label": "Id"}])
+    )
+    d = FakeDriver({("label", "Id"): 1})
+    d.api_reply = {"count": 1, "items": [{"ActiveStatus": "A", "LocationId": 300100}]}
+    result = run_test(_tc(look, change, fill, data={"name": "HQ"}), stage_env, d)
+    assert [s.status for s in result.steps] == [StepStatus.PASSED] * 3
+    assert ("api_call", "GET", "/hcmRestApi/resources/11.13.18.05/locationsV2?q=LocationName='HQ'") in d.calls
+    assert (
+        "api_call",
+        "PATCH",
+        "/hcmRestApi/resources/11.13.18.05/locationsV2/300100",
+        {"LocationName": "HQ 2", "Active": True},
+    ) in d.calls
+    assert ("fill", "label", "Id", "300100") in d.calls
+
+    d.api_reply = {"count": 0, "items": []}
+    failed = run_test(_tc(look, data={"name": "HQ"}), stage_env, d).steps[0]
+    assert failed.status is StepStatus.FAILED
+    assert '"count" is "0" in the API reply, expected "1"' in (failed.error or "")
+    assert 'the API reply has no "items[0].ActiveStatus"' in (failed.error or "")
 
 
 def test_runner_refuses_prod_before_opening_browser() -> None:

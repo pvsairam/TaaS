@@ -29,6 +29,7 @@ from quartermaster.domain.models import (
 )
 from quartermaster.dsl.loader import display_value, render_value
 from quartermaster.locators.resolver import Resolution, ResolutionError, resolve
+from quartermaster.runner.rest import check_reply, parse_request, render_body
 from quartermaster.safety.guards import assert_safe_target
 
 
@@ -43,7 +44,7 @@ class Driver(Protocol):
     def select(self, strategy: LocatorStrategy, value: str, option: str, pick: str | None = None) -> None: ...
     def text_of(self, strategy: LocatorStrategy, value: str) -> str: ...
     def wait_job(self, job_name: str, timeout_s: float) -> str: ...
-    def api_call(self, request: str, options: dict[str, Any]) -> int: ...
+    def api_call(self, method: str, path: str, body: Any = None) -> tuple[int, Any]: ...
     def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None: ...
 
 
@@ -224,10 +225,16 @@ def _execute(
             raise StepFailure(f"the scheduled process ended {final}, expected {expected}")
         return None
     if a is Action.API_CALL:
-        code = driver.api_call(value, step.options)  # type: ignore[arg-type]
-        expected_code = int(step.options.get("expect_status", 200))
-        if code != expected_code:
-            raise StepFailure(f"API returned {code}, expected {expected_code}")
+
+        def fill_in(text: str) -> str:
+            return render_value(text, data, runtime) or ""
+
+        method, path = parse_request(value or "")
+        status, reply = driver.api_call(method, path, render_body(step.options.get("body"), fill_in))
+        wrong, kept = check_reply(status, reply, step.options, fill_in)
+        if wrong:
+            raise StepFailure("; ".join(wrong))
+        runtime.update(kept)  # ${name} in later steps
         return None
 
     assert step.target is not None  # guaranteed by Step validation

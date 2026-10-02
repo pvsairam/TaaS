@@ -27,6 +27,7 @@ class FakeDriver:
         self.calls: list[tuple[Any, ...]] = []
         self.job_status = "SUCCEEDED"
         self.api_status = 200
+        self.api_reply: Any = None
         self.opened = self.closed = False
 
     def open(self, env: Environment, persona: str) -> None:
@@ -61,9 +62,9 @@ class FakeDriver:
         self.calls.append(("wait_job", job_name))
         return self.job_status
 
-    def api_call(self, request: str, options: dict[str, Any]) -> int:
-        self.calls.append(("api_call", request))
-        return self.api_status
+    def api_call(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+        self.calls.append(("api_call", method, path) + ((body,) if body is not None else ()))
+        return self.api_status, self.api_reply
 
     def screenshot(self, name: str, highlight: tuple[LocatorStrategy, str] | None = None) -> str | None:
         self.highlights.append((name, highlight))
