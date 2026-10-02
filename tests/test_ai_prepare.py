@@ -385,6 +385,35 @@ def test_an_empty_section_is_left_open_for_the_picture_and_the_diary_says_why(tm
     assert "Section Additional Compensation: opened, but its fields are not in it" in diary
 
 
+def test_a_section_that_was_open_is_not_left_closed(tmp_path: Path) -> None:
+    empty = screen(texts=("Current Salary", "There's nothing here so far.", "Additional Compensation"))
+    pilot, page, recorder, guide = comp_run(tmp_path, empty)
+    # Current Salary's toggle does not say whether it is open; clicking it closes the section
+    page.toggles["Current Salary"] = {"expanded": None, "role": "button", "name": "Collapse"}
+    page.toggles.pop("Additional Compensation")
+    page.screens["closed"] = screen(texts=("Current Salary", "Additional Compensation"))
+    page.after['css:[data-qm-toggle="1"]'] = "closed"
+    page.after["css:reopen"] = "My Compensation"
+    clicks: list[str] = []
+    original = Locator.click
+
+    def click(self: Locator, timeout: float) -> None:
+        clicks.append(self.key)
+        if self.key == 'css:[data-qm-toggle="1"]' and len(clicks) > 1 and page.screen == "closed":
+            page.screen = "My Compensation"  # the second click opens it again
+            return
+        original(self, timeout)
+
+    Locator.click = click  # type: ignore[method-assign]
+    try:
+        assert pilot.run() is False
+    finally:
+        Locator.click = original  # type: ignore[method-assign]
+    assert page.screen == "My Compensation"  # opened again: the picture shows it as it was
+    diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
+    assert "Section Current Salary: it was open already" in diary
+
+
 def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: Path) -> None:
     screens = {
         "home": screen("Me"),

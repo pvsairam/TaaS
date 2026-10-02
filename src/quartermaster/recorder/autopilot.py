@@ -631,6 +631,13 @@ class Autopilot:
         now = self._expanded(toggle)
         opened = self._shown(wanted) or now == "true" or (now is None and self._amount_shown() > before)
         if not opened:
+            if now == "false" or self._amount_shown() < before:
+                # that click closed it (it was open): open it again, so the page stays as it was
+                with suppress(Exception):
+                    toggle.first.click(timeout=8000)
+                    self.settle()
+                self._note(f"  Section {section}: it was open already, and its fields are not in it")
+                return
             self._note(f"  Section {section}: clicking its toggle showed nothing new")
             self._note_section(section)
             return
