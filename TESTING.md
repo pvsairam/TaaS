@@ -469,24 +469,14 @@ This test only reads from the pod (GET), so it is safe. It shows that cleanup st
 they are skipped when there is nothing to clean up. It needs a pod where Locations can be read by
 the REST service (the same one used by Create Location).
 
-1. Create the file `my_tests\cleanup_demo.yaml` with this text (keep the spaces):
+1. Copy the demo files into your tests folder (they only read from the pod):
 
-   ```yaml
-   id: demo.cleanup
-   title: Cleanup demo (reads only)
-   module: HCM
-   product: Global Human Resources
-   steps:
-     - action: api_call
-       intent: Find a location
-       value: GET /hcmRestApi/resources/11.13.18.05/locationsV2?limit=1
-       options:
-         save: {location_id: items[0].LocationId}
-   cleanup:
-     - action: api_call
-       intent: Look at the location again (stands in for a delete)
-       value: GET /hcmRestApi/resources/11.13.18.05/locationsV2/${location_id}
+   ```powershell
+   Copy-Item examples\demos\*.yaml my_tests\
    ```
+
+   Open **Tests** (press F5 if it was already open). You should see three new tests whose names say
+   "demo": Cleanup demo, Retry demo and Suggestion demo.
 
 2. In **Tests**, click **Cleanup demo (reads only)**, then **Run this test**.
 
@@ -494,13 +484,13 @@ You should see: the run passes. Under the test's name a blue box says **Test dat
 ("1 cleanup step done after the test"). Open the Word document: near the end there is a
 **Cleanup of test data** table with the step marked Passed.
 
-3. Open the file again and change `locationsV2?limit=1` to `locationsV9?limit=1`. Run it again.
+3. Open `my_tests\cleanup_demo.yaml` and change `locationsV2?limit=1` to `locationsV9?limit=1`. Run it again.
 
 You should see: the run fails at step 1, and the blue box says **Nothing to clean up**: the test
 never saved a location, so the cleanup step was skipped instead of calling an address with a blank
 in it. The Word document shows the cleanup step as "Nothing to clean".
 
-4. Put `locationsV2` back. Now change the cleanup line to `value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/300`.
+4. Put `locationsV2?limit=1` back. Now change the cleanup line to `value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/300`.
 
 You should see: the test is unreadable (see **Needs attention**, "Unreadable files") and says a cleanup
 DELETE must use a value the test saved, such as `${location_id}`. Put the line back as it was,
@@ -543,20 +533,8 @@ In a terminal: `qm backup my-backup.zip`, and, with Quartermaster closed, `qm re
 **A. A step that fails is tried again**
 
 1. Click **Settings**, then **Evidence**. Under **If a step fails**, choose **Try once more**.
-2. Create `my_tests\retry_demo.yaml` (a test that always fails, and only reads):
-
-   ```yaml
-   id: demo.retry
-   title: Retry demo (always fails)
-   module: HCM
-   product: Global Human Resources
-   steps:
-     - action: api_call
-       intent: Read a service that does not exist
-       value: GET /hcmRestApi/resources/11.13.18.05/locationsV9?limit=1
-   ```
-
-3. Run it from **Tests**.
+2. Make sure the demo files are in `my_tests` (see 6.14, step 1).
+3. Run **Retry demo (always fails, reads only)** from **Tests**.
 
 You should see: the test fails, and its step says **Tried 2 times**. In the Word document the step
 has an **Attempts** line: "2 (every attempt failed)". Now choose **Stop at once** in Settings and run
@@ -569,29 +547,11 @@ a retry.
 
 **B. A suggested fix for a button that was renamed**
 
-4. Create `my_tests\suggest_demo.yaml` (it only opens a page and looks at it):
+4. The test **Suggestion demo (renamed link, reads only)** looks for a link called `Location`. The link on the
+   page is called "Locations", so it stands in for a name Oracle changed. (The suggestion may show the
+   link's longer full name, for example "Locations Define locations...": that is how the page names it.)
 
-   ```yaml
-   id: demo.suggest
-   title: Suggestion demo (reads only)
-   module: HCM
-   product: Global Human Resources
-   steps:
-     - action: navigate
-       intent: Open Workforce Structures
-       value: My Client Groups > Workforce Structures
-     - action: click
-       intent: Open Locations
-       target:
-         strategies:
-           - role: "link:Location"
-   ```
-
-   The link on the page is called "Locations", so "Location" stands in for a name Oracle changed. (The
-   suggestion may show the link's longer full name, for example "Locations Define locations...": that is
-   how the page names it.)
-
-5. Run it. It fails at step 2 (about a minute, because the step is tried again first).
+5. Run the Suggestion demo. It fails at step 2 (about a minute, because the step is tried again first).
 6. Click **Needs attention**.
 
 You should see: under the failure, a blue box **Suggested fix**: "A similar name on the screen suggests
@@ -609,7 +569,7 @@ You should see: the run passes. Open the file: `- role: "link:Locations"` is the
    That is correct: a wrong suggestion is worse than none. With **Suggest a fix when a step cannot find its
    item** off, the AI is never asked.
 
-Delete the two demo files when you are done.
+Delete the demo files from `my_tests` when you are done.
 
 ## Part 7. Stop
 

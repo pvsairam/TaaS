@@ -399,3 +399,23 @@ def test_the_stability_summary_gives_the_share_of_runs_that_needed_a_retry() -> 
     assert s["runs"] == 10 and s["retried"] == 2 and s["rate"] == 20.0
     assert s["flaky_count"] == 1 and s["flaky_tests"][0]["title"] == "A test"
     assert insights.stability_summary([], tests)["rate"] is None
+
+
+# ------------------------------------------------------------------ the demo tests in examples/demos
+
+
+def test_the_demo_tests_are_valid_and_only_read() -> None:
+    from conftest import EXAMPLES
+
+    from quartermaster.dsl.loader import load_tests
+
+    tests = {t.id: t for t in load_tests(EXAMPLES / "demos")}
+    assert set(tests) == {"demo.retry", "demo.suggest", "demo.cleanup"}
+    for t in tests.values():
+        for step in [*t.steps, *t.cleanup]:
+            # nothing here may change data on the pod: no REST call but GET, and no Save, Submit or Delete
+            if step.action is Action.API_CALL:
+                assert (step.value or "").startswith("GET ")
+            assert step.action in (Action.API_CALL, Action.NAVIGATE, Action.CLICK)
+    assert tests["demo.cleanup"].cleanup and tests["demo.retry"].steps[0].action is Action.API_CALL
+    assert tests["demo.suggest"].steps[1].target is not None
