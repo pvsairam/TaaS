@@ -31,6 +31,8 @@ class SignIn:
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
         self._state: dict[str, Any] = {"status": "done", "at": None} if os.environ.get(ENV) else {"status": "none"}
+        # The variables `qm signin` gets (the active environment's pod); None: this process's own.
+        self.environ: Callable[[], dict[str, str]] | None = None
 
     def view(self) -> dict[str, Any]:
         with self._lock:
@@ -47,6 +49,7 @@ class SignIn:
                 stdin=subprocess.DEVNULL,
                 text=True,
                 cwd=self._cwd,
+                env=self.environ() if self.environ else None,
             )
             self._state = {"status": "waiting", "at": _now()}
             proc = self._proc

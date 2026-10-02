@@ -57,7 +57,9 @@ export function envName(status) {
 // Connection state as the service last saw it; "Not checked" until a check has run.
 export function connection(status) {
   if (!status || !status.pod_url) return {tone: "bad", label: "Not set up", dot: "bad"};
-  if (!status.user || !status.password_set) return {tone: "bad", label: "Sign-in not set", dot: "bad"};
+  if (status.sign_in === "sso") {
+    if (status.signed_in_by_hand?.status !== "done") return {tone: "bad", label: "Sign in by hand", dot: "bad"};
+  } else if (!status.user || !status.password_set) return {tone: "bad", label: "Sign-in not set", dot: "bad"};
   const c = status.pod_check;
   if (!c) return {tone: "unknown", label: "Not checked yet", dot: "unknown"};
   return c.ok ? {tone: "ok", label: "Connected", dot: "ok"} : {tone: "bad", label: "Unreachable", dot: "bad"};

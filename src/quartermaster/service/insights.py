@@ -278,12 +278,12 @@ def plain_run_error(error: str | None) -> str:
             "or when the computer goes to sleep. Click Run again."
         )
     if "set qm_fusion_url" in low:
-        return (
-            "The pod address is not set in the window where qm serve was started. Set QM_FUSION_URL, "
-            "QM_FUSION_USER and QM_FUSION_PASSWORD there, then start qm serve again."
-        )
+        return "No pod is set up. Add the client and its environment in Settings, Clients and environments."
     if "no credentials for persona" in low:
-        return "The sign-in for this test's user is not set on this computer (see Settings, Sign-in)."
+        return (
+            "The user or password for this test is not saved. In Settings, Clients and environments, edit the "
+            "environment and add the user (a persona if the test switches user)."
+        )
     return ""
 
 

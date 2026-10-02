@@ -21,7 +21,7 @@ from quartermaster.evidence.suite import build_suite_record, suite_folder, write
 from quartermaster.impact.analyzer import analyze, plan
 from quartermaster.runner.credentials import MissingCredentialsError
 from quartermaster.runner.engine import Driver, run_test
-from quartermaster.safety.guards import UnsafeEnvironmentError, assert_safe_target
+from quartermaster.safety.guards import UnsafeEnvironmentError, assert_safe_target, confirmed_hosts
 
 
 def _playwright_driver(args: argparse.Namespace, run_dir: Path) -> Driver:
@@ -214,7 +214,7 @@ def _signin(args: argparse.Namespace) -> int:
         print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
         return 2
     env = Environment(name="pod", url=url, kind=EnvironmentKind(args.kind))
-    assert_safe_target(env)
+    assert_safe_target(env, confirmed_hosts())
     driver = PlaywrightDriver(headless=False)
     print("Sign in to the pod in the browser that opened. It closes by itself when the pod's home page shows.")
     try:
@@ -235,7 +235,7 @@ def _record(args: argparse.Namespace) -> int:
         print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
         return 2
     env = Environment(name=args.env_name, url=url, kind=EnvironmentKind(args.kind))
-    assert_safe_target(env)
+    assert_safe_target(env, confirmed_hosts())
 
     driver = PlaywrightDriver(headless=False, evidence_dir=args.evidence)
     recorder = Recorder(feed=Path(args.events) if args.events else None, test_id=args.id)

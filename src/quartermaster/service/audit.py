@@ -100,6 +100,28 @@ def describe(route: list[str], data: dict[str, Any], reply: Any) -> Described | 
         return "Changed settings", "Settings", {k: v for k, v in data.items() if isinstance(v, str | int | bool)}
     if key == "ai/key":
         return ("Entered the AI key" if str(data.get("key") or "").strip() else "Removed the AI key"), "AI", {}
+    if key == "environments/client":
+        return ("Changed a client" if data.get("id") else "Added a client"), str(reply.get("name") or ""), {}
+    if key == "environments/client/delete":
+        return "Deleted a client", str(data.get("id") or ""), {}
+    if key == "environments/environment":
+        return (
+            ("Changed an environment" if data.get("id") else "Added an environment"),
+            str(reply.get("name") or ""),
+            {"pod": reply.get("url"), "kind": data.get("kind"), "release": data.get("release")},
+        )
+    if key == "environments/environment/delete":
+        return "Deleted an environment", str(data.get("id") or ""), {}
+    if key == "environments/user":  # never the password: only whether a new one was typed
+        return (
+            "Saved a test user",
+            str(reply.get("username") or ""),
+            {"persona": reply.get("persona") or "default", "new password": "yes" if data.get("password") else "no"},
+        )
+    if key == "environments/user/delete":
+        return "Removed a test user", str(data.get("persona") or "default"), {}
+    if key == "environments/activate":
+        return "Switched environment", f"{reply.get('client', '')} · {reply.get('name', '')}", {}
     if key == "attention/dismiss":
         return "Dismissed from Needs attention", f"{reply.get('dismissed', 0)} item(s)", {}
     if key == "signin":

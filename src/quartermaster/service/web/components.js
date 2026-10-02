@@ -46,18 +46,34 @@ function openEnvironment(anchor) {
       b.disabled = true;
       try { await checkPod(); close(); openEnvironment(anchor); } catch (err) { toast(err.message); b.disabled = false; }
     }});
+    // The other environments, to switch to without leaving the page.
+    const others = h("div", {class: "stack", style: "gap:2px"});
+    api("/api/environments").then((data) => {
+      const choices = data.clients.flatMap((c) => c.environments.filter((e) => !e.active).map((e) => ({...e, client: c.name})));
+      if (!choices.length) return;
+      others.append(h("div", {class: "caption", style: "padding:8px 0 4px"}, "SWITCH TO"),
+        ...choices.map((e) => h("button", {type: "button", class: "btn ghost sm", style: "justify-content:flex-start;width:100%", onclick: async () => {
+          try {
+            await api("/api/environments/activate", {id: e.id});
+            close();
+            toast(`Now using ${e.client} · ${e.name}.`);
+            location.reload();
+          } catch (err) { toast(err.message); }
+        }}, icon("server"), h("span", {class: "ellipsis"}, `${e.client} · ${e.name}`), h("span", {class: "meta"}, ` ${e.kind}`))));
+    }).catch(() => {});
     return [
       h("div", {class: "pop-body"},
         h("div", {class: "row"}, h("span", {class: "icon-tile tone-primary"}, icon("server")),
-          h("div", {class: "grow"}, h("h3", {}, envName(st) || "No pod set"), h("div", {class: "meta"}, "Oracle Fusion environment"))),
+          h("div", {class: "grow"}, h("h3", {}, envName(st) || "No pod set"), h("div", {class: "meta"}, st.client || "Oracle Fusion environment"))),
         h("dl", {class: "kv"},
-          h("dt", {}, "Pod"), h("dd", {}, st.pod_url || "Not set (QM_FUSION_URL)"),
+          h("dt", {}, "Pod"), h("dd", {}, st.pod_url || "Not set up yet"),
           h("dt", {}, "Release"), h("dd", {}, st.release ? h("span", {class: "release"}, st.release) : "Not set"),
           h("dt", {}, "Signs in as"), h("dd", {}, st.user || "Not set"),
           h("dt", {}, "Connection"), status,
-          h("dt", {}, "Last check"), checked)),
+          h("dt", {}, "Last check"), checked),
+        others),
       h("div", {class: "pop-foot"}, check, h("span", {class: "grow"}),
-        button("Change environment", {size: "sm", href: "#/settings", attrs: {onclick: close}})),
+        button("Manage environments", {size: "sm", href: "#/settings", attrs: {onclick: close}})),
     ];
   });
 }

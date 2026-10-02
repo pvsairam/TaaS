@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,22 @@ class Settings:
     def __init__(self, path: Path):
         self.path = path
         self._lock = threading.Lock()
+        # The environment set up in Settings, when there is one: its name and release win over the
+        # ones saved here, and a changed release is saved on it (see environments.py).
+        self.environment: Callable[[], dict[str, str] | None] | None = None
+        self.save_release: Callable[[str], None] | None = None
+        self.save_name: Callable[[str], None] | None = None
 
     def get(self) -> dict[str, str]:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             raw = {}
-        return {k: str(raw.get(k) or "") for k in FIELDS}
+        out = {k: str(raw.get(k) or "") for k in FIELDS}
+        env = self.environment() if self.environment else None
+        if env:
+            out.update(environment_name=env["name"], release=env["release"])
+        return out
 
     def update(self, changes: dict[str, Any]) -> dict[str, str]:
         unknown = set(changes) - set(FIELDS)
@@ -52,6 +62,13 @@ class Settings:
         clean.update(check_settings({k: v for k, v in changes.items() if k in _AI}))
         if not _RELEASE.match(clean.get("release", "")):
             raise ValueError("the release may use letters, digits, spaces, dots and dashes, e.g. 26C")
+        env = self.environment() if self.environment else None
+        if env and "release" in clean and self.save_release:
+            self.save_release(clean.pop("release"))  # the release belongs to the environment
+        if env and "environment_name" in clean:
+            name = clean.pop("environment_name")
+            if name and self.save_name:
+                self.save_name(name)  # renames the environment in use
         with self._lock:
             current = {**self.get(), **clean}
             self.path.parent.mkdir(parents=True, exist_ok=True)

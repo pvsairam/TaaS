@@ -46,14 +46,10 @@ You should see: no red error lines. The last command downloads a browser and can
    git pull
    ```
 
-3. Tell Quartermaster where the pod is and how to sign in. These last only for this terminal
-   window. Do not put them in any file.
-
-   ```powershell
-   $env:QM_FUSION_URL="https://<your pod>.fa.us6.oraclecloud.com"
-   $env:QM_FUSION_USER="<user name>"
-   $env:QM_FUSION_PASSWORD="<password>"
-   ```
+3. Nothing else is needed: the pod and its users are set up in the web app (Part 6.1). If you
+   used the terminal variables before (QM_FUSION_URL, QM_FUSION_USER, QM_FUSION_PASSWORD), the
+   first start of `qm serve` copies that pod into the app as "My first client", so you can stop
+   setting them. The command line test in Part 5 still needs them.
 
 ## Part 4. Automatic checks (no pod needed)
 
@@ -91,35 +87,34 @@ checks in Part 4 would fail. Keep this terminal open while you test. Press Ctrl+
 The left side has the menu: Overview, Runs, Tests, Release impact, Needs attention,
 Record a test, Settings.
 
-### 6.1 Settings
+### 6.1 Settings: clients and environments
 
-1. Click **Settings**.
-2. Type a name for the environment (for example `DEV2`) and the Oracle release (for example `26C`). Click **Save**.
-3. Click **Check now**.
+1. Click **Settings**. On the left, **In use now** shows the pod runs use, and
+   **Clients and environments** lists your clients and their pods.
+2. If it is empty, click **Add a client**, type the client's name (for example `Acme Corp`) and
+   click **Save**. The New environment panel opens by itself.
+3. Fill in: Name (`DEV2`), Oracle release (`26C`), Pod address (copy it from the browser when the
+   pod's sign-in page is open), Kind (Development, Test or Stage / UAT), Sign-in (User name and
+   password). Under **Test users**, type the default user and its password. If a test switches
+   user (for example a Line Manager approves), click **Add persona** and fill in that user too.
+4. Click **Test connection**, then **Save**.
 
-You should see: the pod address, your user name, the password shown as set (never the password
-itself), and a message that the pod answered.
+You should see: the environment in the list with "In use", and "Signs in as <user>". The password
+is never shown again; the field says "Saved. Type to change". It is saved encrypted by Windows for
+your Windows user only.
 
-4. In **Evidence** (right side), choose Screenshots and Video and whether to show the browser.
+5. Add a second client the same way (**Add client** at the top of the card). To switch, click the
+   environment box at the bottom-left of the menu and pick it under **Switch to**, or click
+   **Use** next to it in Settings. Runs, recordings and Prepare then go to that pod.
+6. Try adding a production pod (an address without dev, test, stage or uat, such as
+   `https://acme.fa.us6.oraclecloud.com`): Quartermaster refuses it. If a real test pod has no such
+   word in its address, tick **This is a test pod, not production** and save again.
+7. In **Evidence** (right side), choose Screenshots and Video and whether to show the browser.
    Each change is saved at once. Every run you start afterwards uses them.
-5. **Highlight clicks** is on by default. Start a run with **Show the browser while it runs** on:
+8. **Highlight clicks** is on by default. Start a run with **Show the browser while it runs** on:
    before each click a red box and a small red dot appear on the item for a moment (also in the
    video), and the screenshots have a red box round the item each step used. Turn it off and run
    again: no red marks anywhere.
-
-#### Pods behind single sign-on or MFA (only if your pod needs it)
-
-If your pod sends you to your company's sign-on page (Microsoft, Okta) or asks for a code on your
-phone, a test cannot type the password itself. Sign in once by hand instead:
-
-1. In **Settings**, in the Sign-in card, click **Sign in by hand**.
-2. A browser opens on the pod. Sign in the way you always do, including the phone code.
-3. When the pod's home page shows, the browser closes by itself.
-
-You should see: "Signed in by hand" in the card. Runs, recordings and Prepare started from
-Quartermaster now use that sign-in. It is kept in memory only (never in a file) and ends when the
-pod ends the session or when you stop `qm serve`. A run after that says to sign in by hand again.
-A test that switches to another persona with its own user name and password still uses those.
 
 ### 6.2 Run one test
 

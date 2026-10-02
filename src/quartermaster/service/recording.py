@@ -85,6 +85,13 @@ class Recording:
         # Called with the final state whenever a session has ended (saved or not), e.g. to start the
         # next scenario of Prepare all.
         self.on_finished: Callable[[dict[str, Any]], None] | None = None
+        # The variables the recording gets (the active environment's pod and users); None: this process's own.
+        self.environ: Callable[[], dict[str, str]] | None = None
+
+    def busy(self) -> bool:
+        """A recording, a run by hand or a Prepare is going now."""
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         out, fields = check_request(request, self.tests_root)
@@ -146,6 +153,7 @@ class Recording:
                     stdin=subprocess.PIPE,  # kept open: a closed input would count as pressing Enter
                     stdout=f,
                     stderr=subprocess.STDOUT,
+                    env=self.environ() if self.environ else None,
                 )
             self._proc = proc
             self._state = {

@@ -408,7 +408,7 @@ def test_a_run_that_could_not_finish_says_why_in_plain_words() -> None:
 
     crashed = "Exception: BrowserContext.new_page: Connection closed while reading from the driver"
     assert plain_run_error(crashed).startswith("The browser or Quartermaster stopped while the run was going.")
-    assert "Set QM_FUSION_URL" in plain_run_error("error: set QM_FUSION_URL to the non-prod pod URL")
+    assert "No pod is set up" in plain_run_error("error: set QM_FUSION_URL to the non-prod pod URL")
     assert plain_run_error("something new") == ""
 
 

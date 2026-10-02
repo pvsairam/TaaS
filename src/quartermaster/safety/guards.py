@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+from collections.abc import Mapping
 from urllib.parse import urlparse
 
 from quartermaster.domain.models import Environment, EnvironmentKind
@@ -15,6 +17,14 @@ class UnsafeEnvironmentError(RuntimeError):
 # Oracle non-prod pods conventionally carry one of these markers in the hostname
 # (e.g. "abcd-test.fa.us2.oraclecloud.com", "abcd-dev1.fa...").
 _NONPROD_HOST = re.compile(r"-(dev|test|stage|stg|uat|sit|qa)\d*\.", re.IGNORECASE)
+
+
+def confirmed_hosts(environ: Mapping[str, str] | None = None) -> set[str] | None:
+    """Pod hosts a person confirmed in Settings are test pods although their name has no dev/test
+    marker (QM_FUSION_ALLOWED_HOSTS, set by qm serve for the environment in use), or None."""
+    raw = (os.environ if environ is None else environ).get("QM_FUSION_ALLOWED_HOSTS", "")
+    hosts = {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return hosts or None
 
 
 def assert_safe_target(env: Environment, allowed_hosts: set[str] | None = None) -> None:

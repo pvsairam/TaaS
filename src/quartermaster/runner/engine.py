@@ -30,7 +30,7 @@ from quartermaster.domain.models import (
 from quartermaster.dsl.loader import display_value, render_value
 from quartermaster.locators.resolver import Resolution, ResolutionError, resolve
 from quartermaster.runner.rest import check_reply, parse_request, render_body
-from quartermaster.safety.guards import assert_safe_target
+from quartermaster.safety.guards import assert_safe_target, confirmed_hosts
 
 
 class Driver(Protocol):
@@ -69,7 +69,7 @@ def run_test(
 ) -> RunResult:
     """Run one test. `on_event`, if given, hears about progress as it happens (for live views):
     run_start, step_start, step_end and run_end, each a small JSON-ready dict."""
-    assert_safe_target(env, allowed_hosts)
+    assert_safe_target(env, allowed_hosts if allowed_hosts is not None else confirmed_hosts())
     run_id = run_id or uuid.uuid4().hex[:8].upper()
 
     def emit(kind: str, **fields: Any) -> None:

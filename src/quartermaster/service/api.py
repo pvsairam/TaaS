@@ -8,6 +8,9 @@ computers and other web sites cannot start runs.
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
     POST /api/attention/dismiss      {"keys"} hide items of Needs attention (they come back if it fails again)
     GET  /api/audit, /api/audit.csv  the audit log: who changed what, when (newest first; the CSV oldest first)
+    GET  /api/environments           clients and their pods (never passwords), and which one runs use
+    POST /api/environments/client, /client/delete, /environment, /environment/delete, /user, /user/delete,
+         /activate, /check           set them up on the page; passwords are saved encrypted (vault.py)
     GET  /api/signin                 the sign-in done by hand (single sign-on, MFA): none, waiting, done, failed
     POST /api/signin                 open a browser on the pod for a person to sign in; the session is kept
                                      in memory only, and the runs started from here use it
@@ -86,6 +89,7 @@ from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
 from quartermaster.service.audit import AuditLog, describe
+from quartermaster.service.environments import Environments
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
 from quartermaster.service.manual import ManualScripts, needs_data
@@ -151,6 +155,13 @@ class App:
         self.recording = Recording(self.tests_root, self.evidence_root, data_dir / "recording", record_command)
         self.backups = data_dir / "backups"
         self.settings = Settings(data_dir / "settings.json")
+        # Clients and their pods, set up in Settings; the active one is what runs use.
+        self.environments = Environments(data_dir / "environments.db")
+        old = self.settings.get()
+        self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
+        self.settings.environment = self.environments.active
+        self.settings.save_release = lambda r: self.environments.set_release(self.environments.active_id(), r)
+        self.settings.save_name = lambda n: self.environments.rename(self.environments.active_id(), n)
         self.pod_check: dict[str, Any] | None = None
         self.keys_entered: set[str] = set()  # AI keys pasted in Settings: in memory only, never on disk
         self.releases = Releases(releases_root, data_dir / "releases")
@@ -164,6 +175,8 @@ class App:
         self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
         self.audit = AuditLog(data_dir / "audit.jsonl")
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
+        run_environ = lambda: self.environments.run_environ(os.environ)  # noqa: E731
+        self.queue.environ = self.recording.environ = self.signin.environ = run_environ
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
@@ -234,8 +247,8 @@ class App:
             if method == "GET" and route == ["signin"]:
                 return _json(self.signin.view())
             if method == "POST" and route == ["signin"]:
-                if not os.environ.get("QM_FUSION_URL"):
-                    raise ApiError(HTTPStatus.BAD_REQUEST, "set QM_FUSION_URL on this computer first")
+                if not self.pod()["url"]:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "add the pod in Settings, Clients and environments, first")
                 try:
                     return _json(self.signin.start())
                 except ValueError as e:
@@ -243,7 +256,7 @@ class App:
             if method == "POST" and route == ["signin", "forget"]:
                 return _json(self.signin.forget())
         if method == "POST" and route == ["check-pod"]:
-            self.pod_check = check_pod(os.environ.get("QM_FUSION_URL", ""))
+            self.pod_check = check_pod(self.pod()["url"])
             return _json(self.pod_check)
         if method == "GET" and route == ["dashboard"]:
             release = self.settings.get()["release"]
@@ -301,6 +314,8 @@ class App:
                     return _json(self.recording.send(route[1], str(data.get("text") or "")))
                 except ValueError as e:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
+        if route[:1] == ["environments"]:
+            return self._environments(method, route[1:], data)
         if route[:1] == ["releases"]:
             return self._releases(method, route[1:], query, data)
         if route[:1] == ["schedules"]:
@@ -328,6 +343,61 @@ class App:
         except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _environments(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        envs = self.environments
+        try:
+            if method == "GET" and not route:
+                return _json(envs.listing())
+            if method != "POST":
+                raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+            key = "/".join(route)
+            if key == "client":
+                return _json(envs.save_client(data), HTTPStatus.CREATED)
+            if key == "client/delete":
+                envs.delete_client(str(data.get("id") or ""))
+                return _json({"deleted": data.get("id")})
+            if key == "environment":
+                before = envs.active_id()
+                saved = envs.save_environment(data)
+                if envs.active_id() != before or saved["id"] == before:
+                    self._switched()
+                return _json(saved, HTTPStatus.CREATED)
+            if key == "environment/delete":
+                envs.delete_environment(str(data.get("id") or ""))
+                self._switched()
+                return _json({"deleted": data.get("id")})
+            if key == "user":
+                return _json(envs.save_user(data), HTTPStatus.CREATED)
+            if key == "user/delete":
+                envs.delete_user(str(data.get("environment_id") or ""), str(data.get("persona") or ""))
+                return _json({"deleted": data.get("persona")})
+            if key == "activate":
+                if self.queue.busy() or self.recording.busy():
+                    raise ApiError(HTTPStatus.CONFLICT, "wait until the run or recording in progress has finished")
+                active = envs.activate(str(data.get("id") or ""))
+                self._switched()
+                return _json({"active": active.get("id"), "name": active.get("name"), "client": active.get("client")})
+            if key == "check":
+                env = next(
+                    (e for c in envs.listing()["clients"] for e in c["environments"] if e["id"] == data.get("id")), None
+                )
+                if env is None:
+                    raise LookupError("that environment is no longer there")
+                result = check_pod(env["url"])
+                if env["active"]:
+                    self.pod_check = result
+                return _json(result)
+        except LookupError as e:
+            raise ApiError(HTTPStatus.NOT_FOUND, str(e).strip("'\"")) from e
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _switched(self) -> None:
+        """Another pod is in use: forget what belonged to the previous one."""
+        self.pod_check = None
+        self.signin.forget()  # a sign-in done by hand is for one pod only
 
     def _schedules(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
         try:
@@ -631,8 +701,36 @@ class App:
 
     # ------------------------------------------------------------------ views
 
-    def status(self) -> dict[str, Any]:
+    def pod(self) -> dict[str, Any]:
+        """The pod runs use and its default user: the active environment, else the terminal's variables."""
+        env = self.environments.active()
+        if env:
+            default = next((u for u in self.environments.users(env["id"]) if not u["persona"]), None)
+            return {
+                "url": env["url"],
+                "user": default["username"] if default else "",
+                "password_set": bool(default and default["secret"]),
+                "client": env["client"],
+                "environment_id": env["id"],
+                "kind": env["kind"],
+                "sign_in": env["sign_in"],
+                "set_up_in": "settings",
+            }
         url = os.environ.get("QM_FUSION_URL", "")
+        return {
+            "url": url,
+            "user": os.environ.get("QM_FUSION_USER", ""),
+            "password_set": bool(os.environ.get("QM_FUSION_PASSWORD")),
+            "client": "",
+            "environment_id": "",
+            "kind": os.environ.get("QM_FUSION_KIND", "DEV").upper(),
+            "sign_in": "password",
+            "set_up_in": "terminal" if url else "",
+        }
+
+    def status(self) -> dict[str, Any]:
+        pod = self.pod()
+        url = pod["url"]
         settings = self.settings.get()
         runs = self.queue.store.list(limit=1)
         return {
@@ -641,21 +739,20 @@ class App:
             "pod_host": urlsplit(url).hostname or "",
             "pod_check": self.pod_check,
             "last_run": self._run_view(runs[0]) if runs else None,
-            "user": os.environ.get("QM_FUSION_USER", ""),
-            "password_set": bool(os.environ.get("QM_FUSION_PASSWORD")),
+            "user": pod["user"],
+            "password_set": pod["password_set"],
+            "client": pod["client"],
+            "environment_id": pod["environment_id"],
+            "environment_kind": pod["kind"],
+            "sign_in": pod["sign_in"],
+            "set_up_in": pod["set_up_in"],
             "tests_folder": str(self.tests_root),
             "releases_folder": str(self.releases.folder or ""),
             "evidence_folder": str(self.evidence_root),
             "default_options": DEFAULT_OPTIONS,
             "ai": self._ai_view(settings),
             "signed_in_by_hand": self.signin.view(),
-            "ready": bool(
-                url
-                and (
-                    (os.environ.get("QM_FUSION_USER") and os.environ.get("QM_FUSION_PASSWORD"))
-                    or os.environ.get(SESSION_ENV)
-                )
-            ),
+            "ready": bool(url and ((pod["user"] and pod["password_set"]) or os.environ.get(SESSION_ENV))),
         }
 
     def tests(self) -> list[dict[str, Any]]:

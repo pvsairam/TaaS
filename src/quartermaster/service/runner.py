@@ -103,6 +103,8 @@ class RunQueue:
         cwd: Path | None = None,
     ):
         self.store = store
+        # The variables each run gets (the active environment's pod and users); None: this process's own.
+        self.environ: Callable[[], dict[str, str]] | None = None
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
         self.work_dir = work_dir
@@ -162,6 +164,11 @@ class RunQueue:
         self._thread = threading.Thread(target=self._loop, name="qm-run-queue", daemon=True)
         self._thread.start()
 
+    def busy(self) -> bool:
+        """A run is going now."""
+        with self._lock:
+            return self._proc is not None
+
     def stop(self, timeout: float = 5.0) -> None:
         self._stop.set()
         self._wake.set()
@@ -192,7 +199,8 @@ class RunQueue:
             return
         try:
             with log.open("wb") as out:
-                proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=self.cwd)
+                env = self.environ() if self.environ else None
+                proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, cwd=self.cwd, env=env)
                 with self._lock:
                     self._proc, self._current = proc, run["id"]
                 code = proc.wait()
