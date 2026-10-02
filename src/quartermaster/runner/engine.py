@@ -63,12 +63,18 @@ def run_test(
     *,
     allowed_hosts: set[str] | None = None,
     healer: Healer | None = None,
+    retries: int = 0,
+    retry_wait_s: float = 2.0,
     run_id: str | None = None,
     screenshots: ScreenshotMode = ScreenshotMode.ON_FAILURE,
     on_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> RunResult:
     """Run one test. `on_event`, if given, hears about progress as it happens (for live views):
-    run_start, step_start, step_end and run_end, each a small JSON-ready dict."""
+    run_start, step_start, step_retry, step_end and run_end, each a small JSON-ready dict.
+
+    `retries`: how many more times a step that failed is tried (a slow page is not a changed page),
+    after `retry_wait_s` seconds each time (`qm run` uses 1). A step may set its own with `options: {retries: N}`.
+    Only steps that are safe to repeat are retried (see `_may_retry`)."""
     assert_safe_target(env, allowed_hosts if allowed_hosts is not None else confirmed_hosts())
     run_id = run_id or uuid.uuid4().hex[:8].upper()
 
@@ -116,28 +122,49 @@ def run_test(
                     evidence.append(shot)
 
             wants_before = step.action is Action.CLICK and screenshots is ScreenshotMode.EVERY_STEP
-            try:
-                res = _execute(step, test.data, runtime, driver, seen, before_click if wants_before else None)
-                if res is not None and res.healed:
-                    status = StepStatus.HEALED
-                    healing.append(
-                        HealingProposal(
-                            step_index=i,
-                            intent=step.intent,
-                            # Template values (not rendered data), so the patch applies to the spec.
-                            old=step.target.ordered()[0],  # type: ignore[union-attr]
-                            new=step.target.ordered()[res.index],  # type: ignore[union-attr]
-                            confidence=res.confidence,
+            tries = 1 + _retries_for(step, retries)
+            attempt = 0
+            first_error: str | None = None
+            not_found: ResolutionError | None = None
+            while True:
+                attempt += 1
+                status, error, not_found = StepStatus.PASSED, None, None
+                evidence.clear()
+                seen.clear()
+                try:
+                    res = _execute(step, test.data, runtime, driver, seen, before_click if wants_before else None)
+                    if res is not None and res.healed:
+                        status = StepStatus.HEALED
+                        healing.append(
+                            HealingProposal(
+                                step_index=i,
+                                intent=step.intent,
+                                # Template values (not rendered data), so the patch applies to the spec.
+                                old=step.target.ordered()[0],  # type: ignore[union-attr]
+                                new=step.target.ordered()[res.index],  # type: ignore[union-attr]
+                                confidence=res.confidence,
+                            )
                         )
-                    )
-            except ResolutionError as e:
-                status, error = StepStatus.FAILED, str(e)
-                if healer is not None:
+                except ResolutionError as e:
+                    status, error, not_found = StepStatus.FAILED, str(e), e
+                except Exception as e:  # driver errors, assertion failures, timeouts
+                    status, error = StepStatus.FAILED, f"{type(e).__name__}: {e}"
+                if status is not StepStatus.FAILED or attempt >= tries or not _may_retry(step, not_found is not None):
+                    break
+                first_error = first_error or error
+                emit("step_retry", index=i, intent=step.intent, attempt=attempt + 1, of=tries, error=error)
+                time.sleep(retry_wait_s)
+            if not_found is not None and healer is not None:
+                try:  # a suggestion is a bonus: whatever goes wrong in it must not end the run
                     proposal = healer(i, step, driver)
-                    if proposal is not None:
-                        healing.append(proposal)
-            except Exception as e:  # driver errors, assertion failures, timeouts
-                status, error = StepStatus.FAILED, f"{type(e).__name__}: {e}"
+                except Exception as e:
+                    print(
+                        f"warning: step {i + 1}: no suggestion ({type(e).__name__}: {e})".splitlines()[0],
+                        file=sys.stderr,
+                    )
+                    proposal = None
+                if proposal is not None:
+                    healing.append(proposal)
 
             used = seen.get("res")
             if status is StepStatus.FAILED:
@@ -166,6 +193,8 @@ def run_test(
                     locator=f"{used.strategy.value}={used.value}" if used else None,
                     started_at=step_started,
                     screenshot_note=screenshot_note,
+                    attempts=attempt,
+                    first_error=first_error if status is not StepStatus.FAILED else None,
                 )
             )
             emit("step_end", index=i, intent=step.intent, status=status.value, error=error, evidence=evidence)
@@ -191,6 +220,27 @@ def run_test(
     )
     emit("run_end", status=result.status.value)
     return result
+
+
+def _retries_for(step: Step, default: int) -> int:
+    """How many more times this step may be tried: its own setting, else the run's (0 to 3)."""
+    own = step.options.get("retries")
+    wanted = own if isinstance(own, int) and not isinstance(own, bool) else default
+    return max(0, min(int(wanted), 3))
+
+
+def _may_retry(step: Step, not_found: bool) -> bool:
+    """Whether trying a failed step again is safe. A click is only repeated when its item was not found
+    (so it was never clicked: a second Save could save twice); a REST call only when it reads (GET);
+    waiting for a scheduled process already waits as long as it should."""
+    if step.action is Action.CLICK:
+        return not_found
+    if step.action is Action.WAIT_JOB:
+        return False
+    if step.action is Action.API_CALL:
+        first = (step.value or "").split(maxsplit=1)[:1]
+        return not first or first[0].upper() == "GET" or first[0].startswith(("/", "http"))
+    return True
 
 
 def _run_cleanup(

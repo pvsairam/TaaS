@@ -158,7 +158,7 @@ class App:
             tests_root=self.tests_root,
             evidence_root=self.evidence_root,
             work_dir=data_dir / "runs",
-            command=run_command,
+            command=self._with_ai(run_command),
             cwd=cwd,
         )
         self.recording = Recording(self.tests_root, self.evidence_root, data_dir / "recording", record_command)
@@ -188,6 +188,31 @@ class App:
         self.audit = AuditLog(data_dir / "audit.jsonl")
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
         self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
+        self.queue.defaults = lambda: {"retries": self._retries()}
+
+    def _retries(self) -> int:
+        """How many times a failed step is tried again (Settings, Evidence); 1 until chosen."""
+        value = self.settings.get().get("retries") or "1"
+        return int(value) if value in ("0", "1", "2", "3") else 1
+
+    def _with_ai(self, build: CommandBuilder) -> CommandBuilder:
+        """The command of a run, plus the AI chosen in Settings so it can suggest what a missing item became.
+        Only the standard command gets it (the AI key is in the environment of the run, never in the command)."""
+        if build is not qm_run_command:
+            return build
+
+        def command(target: str, options: dict[str, Any], evidence_root: Path, events: Path) -> list[str]:
+            cmd = build(target, options, evidence_root, events)
+            settings = self.settings.get()
+            config = ai_providers.config_from(settings)
+            if settings.get("ai_suggest") != "off" and config.provider and config.problem() is None:
+                cmd += ["--ai-suggest", "--ai-provider", config.provider, "--ai-model", config.model]
+                cmd += ["--ai-base-url", config.base_url, "--ai-key-env", config.key_env]
+                if config.workspace:
+                    cmd += ["--ai-workspace", config.workspace]
+            return cmd
+
+        return command
 
     def _env(self) -> dict[str, Any] | None:
         """The environment this workspace's runs use (its client's, or the one in use), or None."""
@@ -547,6 +572,7 @@ class App:
             "key_env": config.key_env,
             "workspace": config.workspace,
             "key_set": bool(config.key()),
+            "suggest": settings.get("ai_suggest") != "off",
             "label": config.label if config.provider else "",
             "problem": config.problem() if config.provider else "No AI provider is chosen.",
             "presets": [
@@ -782,7 +808,7 @@ class App:
             "tests_folder": str(self.tests_root),
             "releases_folder": str(self.releases.folder or ""),
             "evidence_folder": str(self.evidence_root),
-            "default_options": DEFAULT_OPTIONS,
+            "default_options": {**DEFAULT_OPTIONS, "retries": self._retries()},
             "ai": self._ai_view(settings),
             "signed_in_by_hand": self.signin.view(pod["environment_id"]),
             "ready": bool(
@@ -797,7 +823,9 @@ class App:
             last.setdefault(run["target"], run)
         latest: dict[str, dict[str, Any]] = {}  # each test's own latest result, whatever run it was part of
         validated: dict[str, str] = {}  # the release each test last passed on
-        for r in insights.test_results(runs):
+        results = insights.test_results(runs)
+        stable = insights.stability(results)
+        for r in results:
             latest.setdefault(
                 r["test_id"],
                 {
@@ -840,6 +868,7 @@ class App:
             previous = last.get(rel)
             item["last_run"] = self._run_view(previous) if previous else None
             item["last_result"] = latest.get(item.get("id", ""))
+            item["stability"] = stable.get(item.get("id", ""))
             item["release_validated"] = validated.get(item.get("id", ""))
             out.append(item)
         return out
@@ -954,7 +983,11 @@ class App:
         path = self._test_file(str(data.get("file") or ""))
         try:
             backup = accept_update(
-                path, int(data.get("step_index", -1)), [str(x) for x in data.get("new") or []], self.backups
+                path,
+                int(data.get("step_index", -1)),
+                [str(x) for x in data.get("new") or []],
+                self.backups,
+                add=bool(data.get("add")),
             )
         except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
@@ -1040,7 +1073,8 @@ class App:
                         "detail": failed.get("error"),
                         "picture_url": self._url_rel(failed.get("screenshot")),
                     },
-                    "needs_update": bool(entry.get("healing")),
+                    "needs_update": any(h.get("source", "fallback") == "fallback" for h in entry.get("healing") or []),
+                    "flaky": bool(entry.get("flaky")),
                     "cleanup": self._cleanup_view(record),
                     "started_at": record.get("started_at"),
                     "finished_at": record.get("finished_at"),
@@ -1058,6 +1092,8 @@ class App:
                             "detail": st.get("error"),
                             "compare": insights.expected_observed(st.get("error")),
                             "locator": st.get("locator"),
+                            "attempts": st.get("attempts", 1),
+                            "first_error": plain_error(st.get("first_error")),
                             "started_at": st.get("started_at"),
                             "seconds": round((st.get("duration_ms") or 0) / 1000, 1),
                             "screenshot_note": st.get("screenshot_note"),

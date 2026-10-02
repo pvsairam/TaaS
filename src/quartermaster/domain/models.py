@@ -189,7 +189,10 @@ class HealingProposal(_Strict):
     old: tuple[LocatorStrategy, str]
     new: tuple[LocatorStrategy, str]
     confidence: float = Field(ge=0, le=1)
-    source: str = "fallback"  # "fallback" | "ai"
+    # "fallback": a later way saved in the test found it. "similar": a name on the page that looks
+    # like the old one. "ai": the AI chose it. The last two are only suggestions for a failed step.
+    source: str = "fallback"
+    why: str = ""  # in words, for a suggestion
 
 
 class StepResult(_Strict):
@@ -208,6 +211,8 @@ class StepResult(_Strict):
     screenshot_note: str | None = None  # why a screenshot that was asked for is missing
     written_step: int | None = None  # see Step.written_step
     note: str | None = None  # why a cleanup step was not done
+    attempts: int = 1  # more than 1: the step failed and was tried again
+    first_error: str | None = None  # why the first attempt failed, when a later one passed
 
 
 class ScreenshotMode(StrEnum):
@@ -240,6 +245,11 @@ class RunResult(_Strict):
         if StepStatus.HEALED in statuses:
             return StepStatus.HEALED
         return StepStatus.PASSED
+
+    @property
+    def flaky(self) -> bool:
+        """The test passed, but a step needed another attempt: it may fail for no real reason."""
+        return any(s.attempts > 1 and s.status in (StepStatus.PASSED, StepStatus.HEALED) for s in self.steps)
 
     @property
     def cleanup_status(self) -> str:

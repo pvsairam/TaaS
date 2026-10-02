@@ -68,6 +68,54 @@ def test_results(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+STABILITY_RUNS = 10  # a test's last runs looked at
+FLAKY_AFTER = 2  # a test is flaky when this many of them needed a step tried again to pass
+
+
+def stability(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per test: how many of its last runs only passed because a step was tried again (newest runs first
+    in `results`). A test that needed it twice or more in its last 10 runs is called flaky."""
+    seen: dict[str, list[dict[str, Any]]] = {}
+    for r in results:
+        rows = seen.setdefault(r["test_id"], [])
+        if len(rows) < STABILITY_RUNS:
+            rows.append(r)
+    out: dict[str, dict[str, Any]] = {}
+    for test_id, rows in seen.items():
+        retried = sum(1 for r in rows if r.get("flaky"))
+        out[test_id] = {"runs": len(rows), "flaky_runs": retried, "flaky": retried >= FLAKY_AFTER}
+    return out
+
+
+def stability_summary(results: list[dict[str, Any]], tests: list[dict[str, Any]], days: int = 30) -> dict[str, Any]:
+    """The share of test runs in the last days that needed a retry to pass, and the flaky tests."""
+    since = datetime.now().astimezone() - timedelta(days=days)
+    recent = [r for r in results if _when(r["at"]) >= since]
+    retried = sum(1 for r in recent if r.get("flaky"))
+    titles = {t["id"]: t for t in tests if t.get("id")}
+    flaky = sorted(
+        (
+            {
+                "test_id": tid,
+                "title": titles[tid].get("title") or tid,
+                "file": titles[tid].get("file"),
+                **s,
+            }
+            for tid, s in stability(results).items()
+            if s["flaky"] and tid in titles
+        ),
+        key=lambda x: (-x["flaky_runs"], x["title"]),
+    )
+    return {
+        "days": days,
+        "runs": len(recent),
+        "retried": retried,
+        "rate": round(100 * retried / len(recent), 1) if recent else None,
+        "flaky_tests": flaky[:10],
+        "flaky_count": len(flaky),
+    }
+
+
 def run_counts(run: dict[str, Any]) -> dict[str, int] | None:
     """How many tests of a finished run passed and failed."""
     suite = suite_of(run)
@@ -141,6 +189,7 @@ def dashboard(tests: list[dict[str, Any]], runs: list[dict[str, Any]], release: 
         "last_run": _last_run(runs),
         "readiness": readiness(usable, results, release),
         "releases": release_comparison(usable, results),
+        "stability": stability_summary(results, usable),
     }
 
 
@@ -326,6 +375,7 @@ def attention(
             "document": r.get("document"),
             "folder": r.get("run_dir"),
         }
+        spec = _load_spec(tests_root / test["file"])
         if r["status"] == "failed":
             f = r.get("failed_step") or {}
             raw = f.get("error")
@@ -342,8 +392,12 @@ def attention(
                 }
             )
             items[-1]["cause"] = likely_cause(items[-1])
-        spec = _load_spec(tests_root / test["file"])
+            suggestion = _suggestion(r, f, spec)
+            if suggestion:
+                items[-1]["suggestion"] = suggestion
         for h in r.get("healing") or []:
+            if h.get("source", "fallback") != "fallback":
+                continue  # a suggestion for a failed step is shown on that failure (see _suggestion)
             strategies = _strategies(spec, h.get("step_index", -1))
             new = [str(x) for x in h.get("new") or []]
             if len(new) != 2 or not strategies or strategies[0] == {new[0]: new[1]}:
@@ -403,6 +457,34 @@ def attention(
         "categories": CATEGORIES,
         "checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     }
+
+
+def _suggestion(result: dict[str, Any], failed: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+    """What a failed step's item may have become, if the run found out (see runner.suggest) and the test
+    does not already try it first."""
+    number = failed.get("number")
+    if not isinstance(number, int):
+        return None
+    index = number - 1
+    for h in result.get("healing") or []:
+        if h.get("source") not in ("similar", "ai") or h.get("step_index") != index:
+            continue
+        new = [str(x) for x in h.get("new") or []]
+        old = [str(x) for x in h.get("old") or []]
+        strategies = _strategies(spec, index)
+        if len(new) != 2 or not strategies or strategies[0] == {new[0]: new[1]}:
+            continue
+        return {
+            "step_index": index,
+            "source": h["source"],
+            "confidence": h.get("confidence"),
+            "why": h.get("why") or "",
+            "old": old,
+            "new": new,
+            "old_text": describe(old),
+            "new_text": describe(new),
+        }
+    return None
 
 
 def describe(strategy: list[str]) -> str:

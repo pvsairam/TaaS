@@ -27,6 +27,7 @@ DEFAULT_OPTIONS: dict[str, Any] = {
     "release": "",
     "tester": "",
     "headed": False,
+    "retries": 1,  # when a step fails, try it again this many times (0 to 3; only steps that are safe to repeat)
     "highlight": True,  # red marks on what each step clicks or fills: live, in the video and in the screenshots
     "only": [],  # test ids: run just these from the folder (e.g. the tests a release puts at risk)
     "label": "",  # a name for the run, shown instead of the folder
@@ -60,6 +61,7 @@ def qm_run_command(target: str, options: dict[str, Any], evidence_root: Path, ev
         cmd.append("--headed")
     if not options.get("highlight", True):
         cmd.append("--no-highlight")
+    cmd += ["--retries", str(options.get("retries", 1))]
     if options["release"]:
         cmd += ["--release", options["release"]]
     if options["tester"]:
@@ -77,6 +79,9 @@ def check_options(requested: dict[str, Any]) -> dict[str, Any]:
     for key, allowed in _CHOICES.items():
         if options[key] not in allowed:
             raise ValueError(f"{key} must be one of {', '.join(allowed)}")
+    retries = options["retries"]
+    if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 3:
+        raise ValueError("retries must be a whole number from 0 to 3")
     for key in ("evidence_doc", "headed", "highlight"):
         options[key] = bool(options[key])
     for key in ("release", "tester"):
@@ -105,6 +110,8 @@ class RunQueue:
         self.store = store
         # The variables each run gets (the active environment's pod and users); None: this process's own.
         self.environ: Callable[[], dict[str, str]] | None = None
+        # Run options chosen in Settings, used when a request does not give its own (e.g. retries).
+        self.defaults: Callable[[], dict[str, Any]] | None = None
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
         self.work_dir = work_dir
@@ -123,7 +130,8 @@ class RunQueue:
     def submit(self, target: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """Queue a run of one test file or a folder of tests inside the tests folder."""
         self._inside_tests(target)
-        run = self.store.create(target, check_options(options or {}))
+        wanted = {**(self.defaults() if self.defaults else {}), **(options or {})}
+        run = self.store.create(target, check_options(wanted))
         self._wake.set()
         return run
 

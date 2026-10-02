@@ -88,6 +88,7 @@ def build_record(
         "quartermaster_version": __version__,
         "steps": raw["steps"],
         "healing": raw["healing"],
+        "flaky": result.flaky,  # passed, but only after a step was tried again
         "evidence_sha256": hashes,
         **({"written_steps": raw["written_steps"]} if raw.get("written_steps") else {}),
         **({"cleanup": raw["cleanup"], "cleanup_status": result.cleanup_status} if raw["cleanup"] else {}),

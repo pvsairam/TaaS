@@ -101,6 +101,7 @@ function phase(run, events, live) {
     case "run_start": return `Signing in to Oracle Fusion${of}`;
     case "step_start": return `Executing step ${last.index + 1} of ${t?.total || "?"}: ${last.intent}${of}`;
     case "step_end": return `Step ${last.index + 1} of ${t?.total || "?"} ${last.status === "failed" ? "failed" : "done"}${of}`;
+    case "step_retry": return `Step ${last.index + 1} did not work: trying again (attempt ${last.attempt} of ${last.of})${of}`;
     case "cleanup_start": case "cleanup_start_step": case "cleanup_end": return `Cleaning up the test data on the pod${of}`;
     case "run_end": return `Capturing evidence and writing the Word document${of}`;
     case "test_saved": return n < live.length ? "Starting the next test" : "Writing the run summary";
@@ -186,6 +187,8 @@ export async function runPage(id) {
         testFile(r.test_id) ? button("Open test", {size: "sm", ic: "tests", href: testLink(testFile(r.test_id))}) : null)),
       h("div", {style: "padding:12px 24px 0", class: "stack"},
         r.failed_step ? callout("danger", `Step ${r.failed_step.number} failed: ${r.failed_step.intent}.`, r.failed_step.error) : null,
+        r.flaky ? callout("warning", "Passed, but only after a step was tried again.",
+          "A test like this may fail for no real reason (a slow page, for example). Open the steps to see which one.") : null,
         cleanupNote(r.cleanup),
         r.needs_update ? callout("warning", "Needs update.", ["Something on the screen was found in a different way than written. ", h("a", {href: "#/attention"}, "Review it in Needs attention"), "."]) : null),
       evidenceViewer(r, {run}));

@@ -8,6 +8,7 @@ must read back exactly as before except for the new order. Otherwise nothing is 
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from datetime import datetime
@@ -58,12 +59,53 @@ def promote_strategy(text: str, step_index: int, strategy: str, value: str) -> s
     return new_text
 
 
-def accept_update(test_file: Path, step_index: int, new: list[str], backups: Path) -> Path:
-    """Apply the update to the test file, keeping a copy of the old one. Returns the backup."""
+def add_strategy(text: str, step_index: int, strategy: str, value: str) -> str:
+    """The same YAML text with {strategy: value} added at the top of that step's strategies, the old ways
+    kept below it (so a screen that still has them keeps passing). Used for a suggestion."""
+    spec = yaml.safe_load(text)
+    steps = spec.get("steps") if isinstance(spec, dict) else None
+    if not isinstance(steps, list) or not 0 <= step_index < len(steps):
+        raise ValueError(f"the test has no step {step_index + 1}")
+    wanted = {strategy: value}
+    strategies = ((steps[step_index] or {}).get("target") or {}).get("strategies") or []
+    if not strategies:
+        raise ValueError(f"step {step_index + 1} has no locators to add to")
+    if wanted in strategies:
+        return promote_strategy(text, step_index, strategy, value)
+
+    lines = text.splitlines(keepends=True)
+    start, end = _step_block(lines, step_index)
+    head = next((i for i in range(start, end) if lines[i].strip().startswith("strategies:")), None)
+    items = _list_items(lines, head + 1, end) if head is not None else []
+    if not items:
+        raise ValueError("the step's locators are not written in the usual way; please edit the file by hand")
+    first = items[0]
+    dash = next((_ITEM.match(ln) for ln in lines[first[0] : first[1]] if _ITEM.match(ln)), None)
+    if dash is None:
+        raise ValueError("the step's locators are not written in the usual way; please edit the file by hand")
+    # a double-quoted JSON string is also a valid YAML string
+    new_line = f"{dash.group(1)}- {strategy}: {json.dumps(value, ensure_ascii=False)}\n"
+    new_text = "".join(lines[: first[0]] + [new_line] + lines[first[0] :])
+
+    expected = dict(spec)
+    expected_steps = list(steps)
+    step = dict(expected_steps[step_index])
+    step["target"] = {**step["target"], "strategies": [wanted, *strategies]}
+    expected_steps[step_index] = step
+    expected["steps"] = expected_steps
+    if yaml.safe_load(new_text) != expected:
+        raise ValueError("could not update the file safely; please edit it by hand")
+    return new_text
+
+
+def accept_update(test_file: Path, step_index: int, new: list[str], backups: Path, *, add: bool = False) -> Path:
+    """Apply the update to the test file, keeping a copy of the old one. Returns the backup. With `add`,
+    the new way is one the test did not know yet (a suggestion): it is added, not just moved up."""
     if len(new) != 2:
         raise ValueError("the update must name a locator strategy and its value")
     text = test_file.read_text(encoding="utf-8")
-    updated = promote_strategy(text, step_index, new[0], new[1])
+    change = add_strategy if add else promote_strategy
+    updated = change(text, step_index, new[0], new[1])
     backups.mkdir(parents=True, exist_ok=True)
     backup = backups / f"{test_file.stem}.{datetime.now().strftime('%Y%m%d-%H%M%S')}{test_file.suffix}"
     shutil.copy2(test_file, backup)

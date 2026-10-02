@@ -173,7 +173,7 @@ def write_suite_document(suite: dict[str, Any], evidence_root: Path, out: Path) 
                 )
             )
 
-    needs_update = [r for r in runs if r.get("healing")]
+    needs_update = [r for r in runs if any(h.get("source", "fallback") == "fallback" for h in r.get("healing") or [])]
     if needs_update:
         add(_p([_r("Tests that need an update")], style="Heading1"))
         add(
@@ -264,6 +264,8 @@ def _entry(record: dict[str, Any], run_dir: Path, doc: Path | None, evidence_roo
     }
     if record.get("cleanup_status"):
         entry["cleanup_status"] = record["cleanup_status"]
+    if record.get("flaky"):
+        entry["flaky"] = True
     if failed:
         shots = failed.get("evidence") or []
         entry["failed_step"] = {

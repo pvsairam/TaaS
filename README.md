@@ -104,6 +104,29 @@ password is needed, and it only ever calls the pod itself.
 send under `options.body`; `${name}` placeholders work in it too. A REST step that changes data
 changes it on the pod, like a click on Save would.
 
+### When a step fails: retries, flaky tests and suggested fixes
+
+- **Retries.** A slow page is not a changed page, so a step that fails is tried again after a short wait
+  before the test fails (Settings, Evidence, **If a step fails**: stop at once, once more, or twice more;
+  `qm run --retries 0-3`). Only steps that are safe to repeat are tried again: a click only when its
+  item was not found (so it was never clicked: a second Save could save twice), a REST call only when it
+  reads (GET), and never waiting for a scheduled process. A step can set its own with
+  `options: {retries: 0}`. The run, the Word document and the run record say which step needed more than
+  one attempt and why the first failed.
+- **Flaky tests.** A test that passes only after a retry is marked **Flaky** in Tests once it has
+  happened in 2 of its last 10 runs, and Overview shows **Stability**: the share of test runs in the last
+  30 days that needed a retry (the aim is under 2%).
+- **Suggested fixes.** When a step fails because its button, link or field is not on the screen any more,
+  Quartermaster looks at the page while it is still open. First for a name that looks very like the old
+  one ("Search by Name" for "Search: Name"), with no AI. Then, if an AI is set up (Settings, AI assistant,
+  and the box *Suggest a fix when a step cannot find its item* is on), it shows the AI the step and the
+  names on the screen (personal details hidden first) and the AI may pick one. A suggestion is checked
+  (it must be found exactly once on the page, and a Save or Delete button is never suggested unless the
+  step is about it) and is **only a suggestion**: the step still fails and nothing in the test changes.
+  It appears on the failure in **Needs attention**; **Use the suggestion** adds it as the first way to
+  find the item and keeps the old ways below it (a copy of the old file is kept). Run the test again to
+  check it.
+
 ### Cleaning up after a test
 
 A test that creates something on the pod can remove it again at the end. Put the removal steps under

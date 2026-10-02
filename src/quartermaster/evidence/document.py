@@ -225,6 +225,9 @@ class _Doc:
                 rows_kv.append(
                     ("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, ""))
                 )
+                tries = int(s.get("attempts") or 1)
+                if tries > 1:
+                    rows_kv.append(("Attempts", _attempts_text(tries, st, s.get("first_error"))))
                 if st != "skipped":
                     rows_kv.append(("Time", _clock(s.get("started_at"))))
                 if s.get("screenshot_note") and not [r for r in shots if not _is_before(r)]:
@@ -340,6 +343,14 @@ class _Doc:
             failed = next((a for a in w["actions"] if a.get("status") == "failed"), None)
             if failed is not None:
                 rows_kv.append(("What happened", plain_error(failed.get("error")) or _ACTUAL["failed"]))
+            retried = next((a for a in w["actions"] if int(a.get("attempts") or 1) > 1), None)
+            if retried is not None:
+                rows_kv.append(
+                    (
+                        "Attempts",
+                        _attempts_text(int(retried["attempts"]), retried.get("status", ""), retried.get("first_error")),
+                    )
+                )
             add(_kv_table(rows_kv, status_row=("Result", st)))
             for a in w["actions"]:
                 for rel in a.get("evidence", []):
@@ -645,6 +656,14 @@ def _duration(start: str | None, end: str | None) -> str:
     if h:
         return f"{h} h {m} min"
     return f"{m} min {s} s" if m else f"{s} s"
+
+
+def _attempts_text(tries: int, status: str, first_error: str | None) -> str:
+    """A step that was tried more than once: said in the evidence, because a pass on a retry is not a clean pass."""
+    if status in ("passed", "healed"):
+        said = f"{tries} (passed on attempt {tries})"
+        return said + (f". The first attempt failed: {plain_error(first_error)}" if first_error else "")
+    return f"{tries} (every attempt failed)"
 
 
 def _status_label(status: str) -> str:

@@ -538,6 +538,79 @@ users appear, and each user says the password is not saved yet: type it again.
 
 In a terminal: `qm backup my-backup.zip`, and, with Quartermaster closed, `qm restore my-backup.zip`.
 
+### 6.16 Retries, flaky tests and suggested fixes
+
+**A. A step that fails is tried again**
+
+1. Click **Settings**, then **Evidence**. Under **If a step fails**, choose **Try once more**.
+2. Create `my_tests\retry_demo.yaml` (a test that always fails, and only reads):
+
+   ```yaml
+   id: demo.retry
+   title: Retry demo (always fails)
+   module: HCM
+   product: Global Human Resources
+   steps:
+     - action: api_call
+       intent: Read a service that does not exist
+       value: GET /hcmRestApi/resources/11.13.18.05/locationsV9?limit=1
+   ```
+
+3. Run it from **Tests**.
+
+You should see: the test fails, and its step says **Tried 2 times**. In the Word document the step
+has an **Attempts** line: "2 (every attempt failed)". Now choose **Stop at once** in Settings and run
+it again: the step says nothing about attempts (it was tried once).
+
+A test that passes only on the retry cannot be forced on purpose. When it happens for real, the
+step says "Passed on attempt 2: the first try did not work (...)", the test shows **Flaky** after it
+happens twice in 10 runs, and the Overview has a **Stability** card with the share of runs that needed
+a retry.
+
+**B. A suggested fix for a button that was renamed**
+
+4. Create `my_tests\suggest_demo.yaml` (it only opens a page and looks at it):
+
+   ```yaml
+   id: demo.suggest
+   title: Suggestion demo (reads only)
+   module: HCM
+   product: Global Human Resources
+   steps:
+     - action: navigate
+       intent: Open Workforce Structures
+       value: My Client Groups > Workforce Structures
+     - action: click
+       intent: Open Locations
+       target:
+         strategies:
+           - role: "link:Location"
+   ```
+
+   The link on the page is called "Locations", so "Location" stands in for a name Oracle changed. (The
+   suggestion may show the link's longer full name, for example "Locations Define locations...": that is
+   how the page names it.)
+
+5. Run it. It fails at step 2 (about a minute, because the step is tried again first).
+6. Click **Needs attention**.
+
+You should see: under the failure, a blue box **Suggested fix**: "A similar name on the screen suggests
+the step should find the link named "Locations" instead of the link named "Location"." The test file
+is not changed yet.
+
+7. Click **Use the suggestion**, then run the test again.
+
+You should see: the run passes. Open the file: `- role: "link:Locations"` is the first way, and the old
+`link:Location` is still there below it. A copy of the old file is in `.qm\backups`.
+
+8. Only if an AI is set up (Settings, AI assistant): change the file to look for
+   `link:Document Stuff` (a name nothing on the page looks like). Run it. If the AI recognises the
+   screen it may suggest a link; if it is not sure it says nothing, and the failure has no suggestion.
+   That is correct: a wrong suggestion is worse than none. With **Suggest a fix when a step cannot find its
+   item** off, the AI is never asked.
+
+Delete the two demo files when you are done.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

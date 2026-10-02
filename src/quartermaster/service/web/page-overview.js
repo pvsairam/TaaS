@@ -64,6 +64,17 @@ export async function overviewPage() {
       h("dt", {}, "Signs in as"), h("dd", {}, st.user || "Not set"),
       h("dt", {}, "Last execution"), h("dd", {}, last ? h("a", {href: runLink(last.id), class: "row", style: "gap:6px"}, statusBadge(last.status), when(last.at)) : "None yet"))});
 
+  const stable = dash.stability || {};
+  const stabilityCard = !stable.runs ? null : card({title: "Stability", sub: `Test runs in the last ${stable.days} days`,
+    body: h("div", {class: "stack", style: "gap:10px"},
+      h("div", {class: "row", style: "gap:10px;align-items:baseline"},
+        h("span", {style: "font-size:28px;font-weight:600"}, `${stable.rate}%`),
+        h("span", {class: "meta"}, `${stable.retried} of ${plural(stable.runs, "test run")} only passed after a step was tried again. Aim for under 2%.`)),
+      stable.flaky_tests.length ? h("div", {}, h("div", {class: "label"}, `Flaky tests (${stable.flaky_count})`),
+        h("ul", {style: "margin:4px 0 0;padding-left:18px"}, stable.flaky_tests.map((t) => h("li", {},
+          t.file ? h("a", {href: `#/tests/${encodeURIComponent(t.file)}`}, t.title) : t.title,
+          h("span", {class: "meta"}, ` · needed a retry in ${t.flaky_runs} of its last ${t.runs} runs`))))) : h("div", {class: "meta"}, "No flaky tests.")) });
+
   const firstRun = !runs.length ? callout("info", "Get started.", [
     st.ready ? "The pod is set up. " : h("span", {}, "First finish the pod's sign-in (", h("a", {href: "#/settings"}, "Settings"), "). "),
     state.tests.length ? `${plural(state.tests.length, "test")} ready: ` : "Record your first test, ",
@@ -83,6 +94,7 @@ export async function overviewPage() {
     metrics,
     h("div", {class: "grid g-main section"}, releaseReadiness(dash.readiness, setRelease), envCard),
     releaseComparison(dash.releases) ? h("div", {class: "section"}, releaseComparison(dash.releases)) : null,
+    stabilityCard ? h("div", {class: "section"}, stabilityCard) : null,
     h("div", {class: "grid g-main section"}, recentActivity(dash.activity), moduleCoverage(dash.modules)));
 
   if (runs.some(active)) schedule(overviewPage, 4000);

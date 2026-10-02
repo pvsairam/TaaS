@@ -95,6 +95,7 @@ def _run(args: argparse.Namespace) -> int:
     emit = _event_writer(args.events)
     emit({"type": "suite_start", "at": suite_started, "tests": [t.id for t in tests]})
 
+    healer = _suggester(args)
     results: list[RunResult] = []
     suite_runs: list[tuple[dict[str, Any], Path, Path | None]] = []
     for t, spec_file in zip(tests, files, strict=True):
@@ -103,7 +104,14 @@ def _run(args: argparse.Namespace) -> int:
         driver = driver_factory(args, run_dir)
         try:
             result = run_test(
-                t, env, driver, run_id=run_id, screenshots=ScreenshotMode(args.screenshots), on_event=emit
+                t,
+                env,
+                driver,
+                run_id=run_id,
+                screenshots=ScreenshotMode(args.screenshots),
+                on_event=emit,
+                healer=healer,
+                retries=args.retries,
             )
         except (UnsafeEnvironmentError, MissingCredentialsError) as e:
             print(f"error: {e}", file=sys.stderr)
@@ -282,6 +290,22 @@ def _record(args: argparse.Namespace) -> int:
     if secrets:
         print("Masked values were not saved. Before running it, set: " + ", ".join(secrets))
     return 0
+
+
+def _suggester(args: argparse.Namespace) -> Any:
+    """What suggests a fix for a step whose item is not found: names that look like the old one, and the
+    AI chosen in Settings when `--ai-suggest` is given and the AI is ready."""
+    from quartermaster.ai.providers import AIConfig, chat
+    from quartermaster.runner.suggest import make_healer
+
+    ask = None
+    if args.ai_suggest and args.ai_provider:
+        config = AIConfig(
+            args.ai_provider, args.ai_model, args.ai_base_url.rstrip("/"), args.ai_key_env, args.ai_workspace
+        )
+        if config.problem() is None:
+            ask = lambda system, prompt: chat(config, system, prompt, max_tokens=300, timeout=30)  # noqa: E731
+    return make_healer(ask)
 
 
 def _prepare(args: argparse.Namespace, driver: Any, recorder: Any, env: Environment, run_id: str) -> int:
@@ -638,6 +662,23 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--report", help="write JSON results for all runs to this file")
     rn.add_argument("--only", help="comma-separated test ids: run just these from the folder")
     rn.add_argument("--events", help="append progress events to this file as JSON lines (used by the web service)")
+    rn.add_argument(
+        "--retries",
+        type=int,
+        default=1,
+        choices=[0, 1, 2, 3],
+        help="when a step fails, try it again this many times (safe steps only) before giving up",
+    )
+    rn.add_argument(
+        "--ai-suggest",
+        action="store_true",
+        help="when a step cannot find its item, let the AI (see --ai-provider) suggest what it became",
+    )
+    rn.add_argument("--ai-provider", default="", help="AI provider id, used by --ai-suggest")
+    rn.add_argument("--ai-model", default="")
+    rn.add_argument("--ai-base-url", default="")
+    rn.add_argument("--ai-key-env", default="", help="NAME of the environment variable with the AI key")
+    rn.add_argument("--ai-workspace", default="", help="Anthropic only: workspace ID, for a key not tied to one")
     rn.set_defaults(func=_run)
 
     dc = sub.add_parser("document", help="rebuild a Word document from a saved run or suite folder")

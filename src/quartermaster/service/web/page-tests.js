@@ -60,7 +60,10 @@ export async function testsPage() {
           t.problem ? h("div", {class: "sub", style: "color:var(--danger)"}, t.problem) : null]},
         {label: "Module", render: (t) => [h("div", {}, t.module || "–"), t.product ? h("div", {class: "sub"}, t.product) : null]},
         {label: "Steps", cls: "num", render: (t) => t.steps ?? "–"},
-        {label: "Last result", render: (t) => statusBadge(lastStatus(t))},
+        {label: "Last result", render: (t) => t.stability?.flaky
+          ? h("span", {class: "row", style: "gap:6px"}, statusBadge(lastStatus(t)),
+            h("span", {class: "tag", title: `Needed a retry to pass in ${t.stability.flaky_runs} of its last ${t.stability.runs} runs`}, "Flaky"))
+          : statusBadge(lastStatus(t))},
         ...extra.map(([k, label, render]) => ({label, render, cls: ["last_run", "updated", "duration"].includes(k) ? "nowrap" : null})),
         {srLabel: "Run", cls: "actions", render: (t) => button("Run", {size: "sm", ic: "runs", disabled: !state.status.ready || Boolean(t.problem),
           title: `Run ${t.title || t.file}`, onClick: () => openRunDrawer(t.file)})},

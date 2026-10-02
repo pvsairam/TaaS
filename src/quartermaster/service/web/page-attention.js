@@ -75,6 +75,11 @@ function item(i) {
       i.compare ? h("div", {class: "compare"},
         h("div", {}, h("span", {class: "caption"}, "Expected"), i.compare.expected || "(empty)"),
         h("div", {}, h("span", {class: "caption"}, "Observed"), i.compare.observed || "(empty)")) : null,
+      i.suggestion ? callout("info", "Suggested fix.",
+        h("span", {}, `${i.suggestion.source === "ai" ? "The AI thinks" : "A similar name on the screen suggests"} the step should find `,
+          h("strong", {}, i.suggestion.new_text), ` instead of ${i.suggestion.old_text}.`,
+          i.suggestion.why ? ` ${i.suggestion.why}${/[.!?]$/.test(i.suggestion.why) ? "" : "."}` : "",
+          " It is only a suggestion: the test is unchanged until you accept it, and the old ways stay as a fallback. Run the test again afterwards to check it.")) : null,
       i.cause ? callout(i.cause.sr ? "warning" : "info", `Likely cause: ${i.cause.title}.`, i.cause.advice) : null,
       i.detail && i.detail !== i.error ? disclose("Technical details", h("pre", {class: "block"}, i.detail)) : null);
   } else {
@@ -115,6 +120,16 @@ function actions(i) {
       try {
         await api("/api/test/accept-update", {file: i.file, step_index: i.step_index, new: i.new});
         toast("Test updated. A copy of the old file was kept.");
+        attentionPage();
+      } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+    }}));
+  }
+  if (i.suggestion) {
+    out.push(button("Use the suggestion", {kind: "primary", size: "sm", ic: "check", onClick: async (e) => {
+      e.currentTarget.disabled = true;
+      try {
+        await api("/api/test/accept-update", {file: i.file, step_index: i.suggestion.step_index, new: i.suggestion.new, add: true});
+        toast("Test updated. A copy of the old file was kept. Run the test again to check it.");
         attentionPage();
       } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
     }}));

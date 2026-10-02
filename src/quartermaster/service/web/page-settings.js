@@ -63,6 +63,11 @@ export async function settingsPage() {
       h("div", {}, h("div", {class: "label"}, "Video"),
         segmented([["off", "None"], ["on-failure", "Keep on failure"], ["always", "Always"]], opt.video, (v) => keep("video", v), "Video"),
         h("div", {class: "hint"}, "Videos are kept next to the document and shown in the run's Video tab.")),
+      h("div", {}, h("div", {class: "label"}, "If a step fails"),
+        segmented([["0", "Stop at once"], ["1", "Try once more"], ["2", "Try twice more"]], String(st.default_options.retries ?? 1), async (v) => {
+          try { await api("/api/settings", {retries: v}); toast("Saved. Runs started from now on use it."); } catch (err) { toast(err.message); }
+        }, "Retries"),
+        h("div", {class: "hint"}, "A slow page is not a changed page. A step that fails is tried again after a short wait, before the test fails. Only steps that are safe to repeat are tried again: a click is repeated only when its item was not found (so it was never clicked), and a REST call only when it reads. A test that passes this way is marked Flaky when it keeps happening.")),
       h("label", {class: "switch"}, headed, "Show the browser while it runs"),
       h("div", {}, h("label", {class: "switch"}, highlight, "Highlight clicks"),
         h("div", {class: "hint"}, "A red box (and a red dot for a click) shows what each step clicks or fills, in the browser and the video, and a red box marks it in the screenshots. Turn off for clean pictures.")),
@@ -175,11 +180,12 @@ function aiCard(ai) {
   keyRow.append(field("API key", key, keyNote, "ai-key-value"));
   drawKeyRow();
   drawWorkspace();
+  const suggest = h("input", {type: "checkbox", checked: ai.suggest !== false});
   const result = h("div", {class: "meta", role: "status", "aria-live": "polite"});
   const save = button("Save", {kind: "primary", onClick: async (e) => {
     e.currentTarget.disabled = true;
     try {
-      await api("/api/settings", {ai_provider: provider.value, ai_model: model.value.trim(), ai_base_url: baseUrl.value.trim(), ai_key_env: keyEnv.value.trim(), ai_workspace: workspace.value.trim()});
+      await api("/api/settings", {ai_suggest: suggest.checked ? "on" : "off", ai_provider: provider.value, ai_model: model.value.trim(), ai_base_url: baseUrl.value.trim(), ai_key_env: keyEnv.value.trim(), ai_workspace: workspace.value.trim()});
       if (key.value.trim()) await api("/api/ai/key", {key: key.value.trim()});
       key.value = "";
       toast("Saved.");
@@ -206,6 +212,8 @@ function aiCard(ai) {
       ai.provider ? h("div", {class: "row", style: "gap:8px;flex-wrap:nowrap"},
         h("span", {class: `icon-tile tone-${ai.problem ? "danger" : "success"}`}, icon(ai.problem ? "x" : "check")),
         h("span", {class: "meta"}, ai.problem || `Ready: ${ai.label}.${ai.key_env ? " Key saved (hidden)." : ""}`)) : null,
+      h("div", {}, h("label", {class: "switch"}, suggest, "Suggest a fix when a step cannot find its item"),
+        h("div", {class: "hint"}, "When a test fails because a button or field is not on the screen any more, the AI is shown the step and the names on the screen and may suggest what it became. You see it in Needs attention and accept or ignore it: nothing changes by itself. Needs the AI above to be ready. Names that look like the old one are suggested without any AI.")),
       h("div", {class: "row"}, save, test, forget), result,
       h("details", {class: "disclose"}, h("summary", {}, icon("right"), "Advanced: web address, key variable, workspace"),
         h("div", {class: "fields", style: "margin-top:12px"},
