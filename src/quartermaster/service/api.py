@@ -10,6 +10,7 @@ computers and other web sites cannot start runs.
     POST /api/ai/check               does the AI chosen in Settings answer? (a one-word question)
     POST /api/ai/key                 {"key"} the AI key, kept in memory only until Quartermaster stops ("" forgets it)
     GET  /api/dashboard              pass rate, coverage, release readiness, activity
+    GET  /api/attention/sr?run=&test= a draft Oracle service request for a failure the update caused
     GET  /api/certification?release=26A  the release's certification pack (.zip): a Word summary to
                                      sign and each test's latest evidence document on that release
     GET  /api/attention              what needs a person, by kind
@@ -80,6 +81,7 @@ from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQue
 from quartermaster.service.schedules import Schedules
 from quartermaster.service.settings import Settings, check_pod
 from quartermaster.service.store import Store
+from quartermaster.service.triage import sr_draft
 
 WEB_DIR = Path(__file__).parent / "web"
 _WEB_FILE = re.compile(r"^/([a-z0-9-]+\.(?:js|css))$")  # the page's own scripts and styles, nothing else
@@ -203,6 +205,8 @@ class App:
             return Reply(HTTPStatus.OK, body, "application/zip", name)
         if method == "GET" and route == ["attention"]:
             return _json(self.attention())
+        if method == "GET" and route == ["attention", "sr"]:
+            return _json(self.sr_draft(str((query.get("run") or [""])[0]), str((query.get("test") or [""])[0])))
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -685,6 +689,24 @@ class App:
             item["picture_url"] = self._url_rel(item.pop("picture", None))
             item["document_url"] = self._url_rel(item.pop("document", None))
         return result
+
+    def sr_draft(self, run_id: str, test_id: str) -> dict[str, str]:
+        """A draft Oracle service request for a failed test that Needs attention lists."""
+        result = insights.attention(
+            self.tests(), self.queue.store.list(limit=500), self.tests_root, self.settings.get()["release"]
+        )
+        item = next(
+            (
+                i
+                for i in result["items"]
+                if i.get("run_id") == run_id and i.get("test_id") == test_id and (i.get("cause") or {}).get("sr")
+            ),
+            None,
+        )
+        if item is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "no failure of that test that looks caused by the update")
+        record = insights.read_json(self.evidence_root / str(item.get("folder") or "") / "run.json")
+        return sr_draft(item, record if isinstance(record, dict) else {})
 
     def accept_update(self, data: dict[str, Any]) -> dict[str, Any]:
         path = self._test_file(str(data.get("file") or ""))

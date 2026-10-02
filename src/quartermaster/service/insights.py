@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from quartermaster.evidence.document import plain_error
+from quartermaster.service.triage import likely_cause
 
 _cache: dict[str, tuple[float, Any]] = {}
 PASSING = ("passed", "healed")
@@ -313,6 +314,7 @@ def attention(
                     "compare": expected_observed(raw),
                 }
             )
+            items[-1]["cause"] = likely_cause(items[-1])
         spec = _load_spec(tests_root / test["file"])
         for h in r.get("healing") or []:
             strategies = _strategies(spec, h.get("step_index", -1))

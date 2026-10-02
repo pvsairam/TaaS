@@ -1,5 +1,5 @@
 // Needs attention: the failure and maintenance workspace.
-import {api, badge, button, chips, clock, disclose, emptyState, h, icon, toast, when} from "./ui.js";
+import {api, badge, button, callout, chips, clock, disclose, drawer, emptyState, h, icon, toast, when} from "./ui.js";
 import {openRunDrawer, openViewer} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
@@ -70,6 +70,7 @@ function item(i) {
       i.compare ? h("div", {class: "compare"},
         h("div", {}, h("span", {class: "caption"}, "Expected"), i.compare.expected || "(empty)"),
         h("div", {}, h("span", {class: "caption"}, "Observed"), i.compare.observed || "(empty)")) : null,
+      i.cause ? callout(i.cause.sr ? "warning" : "info", `Likely cause: ${i.cause.title}.`, i.cause.advice) : null,
       i.detail && i.detail !== i.error ? disclose("Technical details", h("pre", {class: "block"}, i.detail)) : null);
   } else {
     body = h("div", {class: "stack", style: "gap:8px"}, h("div", {}, i.error),
@@ -105,6 +106,7 @@ function actions(i) {
       } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
     }}));
   }
+  if (i.cause?.sr) out.push(button("Draft SR", {size: "sm", ic: "file", title: "A draft service request for Oracle, to copy into My Oracle Support", onClick: () => openSr(i)}));
   if (i.run_id) out.push(button("See the run", {size: "sm", href: runLink(i.run_id)}));
   if (i.category === "authentication") out.push(button("Settings", {size: "sm", href: "#/settings"}));
   if (i.file && i.category !== "ui_change" && i.category !== "unreadable") {
@@ -112,6 +114,31 @@ function actions(i) {
   }
   if (i.category === "unreadable") out.push(button("Open the test", {size: "sm", href: testLink(i.file)}));
   return out;
+}
+
+// A draft Oracle service request: Quartermaster only writes the text; the person checks it and pastes it.
+async function openSr(i) {
+  let draft;
+  try { draft = await api(`/api/attention/sr?run=${encodeURIComponent(i.run_id)}&test=${encodeURIComponent(i.test_id)}`); } catch (err) { toast(err.message); return; }
+  const text = h("textarea", {class: "input", rows: "22", "aria-label": "Service request text", style: "width:100%;font:inherit;font-size:13px;line-height:1.45"});
+  text.value = draft.text;
+  drawer({
+    title: "Draft service request",
+    sub: i.title,
+    body: () => [
+      callout("info", "Quartermaster does not send this.", "Read it, fill in the business impact, remove anything private, then paste it into a new service request in My Oracle Support. Attach the evidence document."),
+      text,
+    ],
+    foot: (close) => [
+      i.document_url ? button("Evidence document", {ic: "file", href: i.document_url}) : null,
+      h("span", {class: "grow"}),
+      button("Close", {onClick: close}),
+      button("Copy", {kind: "primary", ic: "check", onClick: async () => {
+        try { await navigator.clipboard.writeText(text.value); toast("Copied. Paste it into My Oracle Support."); }
+        catch { text.select(); toast("Select all the text and copy it (Ctrl+C)."); }
+      }}),
+    ],
+  });
 }
 
 function fact(k, v) {

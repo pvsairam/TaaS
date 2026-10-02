@@ -306,6 +306,31 @@ def test_certification_pack_for_a_release(app: App) -> None:
     assert empty.namelist() == ["Certification 27A.docx"]
 
 
+def test_needs_attention_explains_and_drafts(app: App) -> None:
+    add_suite_tests(app)
+    # an earlier run on 26C where every test passed, then the 26D run where one failed
+    root = app.evidence_root
+    first = finished_suite_run(app)
+    suite = json.loads((suite_folder(root, "S1") / "suite.json").read_text())
+    earlier = json.loads(json.dumps(suite))
+    earlier["release"] = "26C"
+    for e in earlier["runs"]:
+        e["status"], e["failed_step"] = "passed", None
+    write_suite_record(earlier, suite_folder(root, "S0"))
+    app.queue.store.update(first["id"], suite_dir=str(suite_folder(root, "S0")), status="passed")
+    later = app.queue.store.create("hcm", {"screenshots": "every-step", "video": "off"})
+    app.queue.store.update(later["id"], status="failed", suite_dir=str(suite_folder(root, "S1")))
+
+    items = call(app, "GET", "/api/attention")["items"]
+    failed = next(i for i in items if i.get("test_id") == "hcm.create-location" and i.get("step"))
+    assert failed["cause"]["key"] == "release_change" and failed["cause"]["sr"]
+    draft = call(app, "GET", f"/api/attention/sr?run={later['id']}&test=hcm.create-location")
+    assert "after the update to 26D" in draft["subject"] and "It worked on release 26C" in draft["text"]
+    assert 'The screen shows "Redwood City".' in draft["text"]
+    with pytest.raises(ApiError, match="no failure"):
+        call(app, "GET", f"/api/attention/sr?run={later['id']}&test=hcm.view-worker")
+
+
 def test_pod_check_reports_what_happened(app: App) -> None:
     from http.server import BaseHTTPRequestHandler, HTTPServer
 

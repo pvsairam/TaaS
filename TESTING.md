@@ -327,6 +327,16 @@ values, never the password. The key is never stored by Quartermaster.
 You should see: failed runs grouped by kind (for example "Item not found"), with the failed step,
 what was expected, what was found and a screenshot. If nothing failed it says all clear.
 
+Each failed test also says its **Likely cause**, worked out from its history: passed on an
+earlier release and fails on this one (probably the Oracle update), passed before on this same
+release (the data or the pod changed), or never passed (the test or its data). When the update is
+the likely cause there is a **Draft SR** button: it opens the text of an Oracle service request
+(steps to reproduce, expected and actual result, releases, pod). Click **Copy** and paste it into
+My Oracle Support. Quartermaster never sends it.
+
+To see Draft SR, a test must have passed on one release and failed on the next: run it with the
+release set to, say, `26B` in Settings, then change the release and run it again.
+
 ### 6.9 Record a test
 
 1. Click **Record a test**.
