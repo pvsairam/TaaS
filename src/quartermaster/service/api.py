@@ -32,6 +32,11 @@ computers and other web sites cannot start runs.
     POST /api/manual/run             {"id", "by_hand", "prepare", "release", "tester"} run a scenario: it plays
                                      by itself once done by hand (or prepared by AI and approved); otherwise it is
                                      done by hand now, or with "prepare" an AI does it and it waits for review
+    GET  /api/schedules              scheduled runs, with when each runs next
+    POST /api/schedules              {"id"?, "name", "target", "days": [0-6, Monday 0], "time": "HH:MM",
+                                     "enabled", "options"} create or change one
+    POST /api/schedules/delete       {"id"}
+    POST /api/schedules/run          {"id"} run it now
     POST /api/manual/data            {"id", "values": {step number: text}} test data for steps the script leaves open
     POST /api/manual/approve         {"id"} or {"ids": [...]} a person checked what the AI prepared: Run may now play it
     GET  /api/manual/review          scenarios an AI prepared that wait for review, with each step's picture
@@ -69,6 +74,7 @@ from quartermaster.service.manual import ManualScripts, needs_data
 from quartermaster.service.prepare_all import PrepareAll
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
+from quartermaster.service.schedules import Schedules
 from quartermaster.service.settings import Settings, check_pod
 from quartermaster.service.store import Store
 
@@ -134,12 +140,15 @@ class App:
             stop_current=self.recording.stop,
         )
         self.recording.on_finished = self.prepare_all.finished
+        self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
 
     def start(self) -> None:
         self.evidence_root.mkdir(parents=True, exist_ok=True)
         self.queue.start()
+        self.schedules.start()
 
     def stop(self) -> None:
+        self.schedules.stop()
         self.recording.shutdown()
         self.queue.stop()
 
@@ -226,6 +235,8 @@ class App:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
         if route[:1] == ["releases"]:
             return self._releases(method, route[1:], query, data)
+        if route[:1] == ["schedules"]:
+            return self._schedules(method, route[1:], data)
         if route[:1] == ["manual"]:
             return self._manual(method, route[1:], query, data)
         if method == "POST" and route == ["open"]:
@@ -249,6 +260,34 @@ class App:
         except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _schedules(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        try:
+            if method == "GET" and not route:
+                return _json({"schedules": self.schedules.listing()})
+            if method == "POST" and not route:
+                return _json(self.schedules.save(data, self.queue._inside_tests), HTTPStatus.CREATED)
+            if method == "POST" and route == ["delete"]:
+                self.schedules.delete(str(data.get("id") or ""))
+                return _json({"deleted": data.get("id")})
+            if method == "POST" and route == ["run"]:
+                return _json(self._run_view(self.schedules.run_now(str(data.get("id") or ""))), HTTPStatus.CREATED)
+        except LookupError as e:
+            raise ApiError(HTTPStatus.NOT_FOUND, str(e).strip("'\"")) from e
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _scheduled_run(self, schedule: dict[str, Any]) -> dict[str, Any]:
+        """Queue the run of a schedule, labelled with its name and the release the pod is on."""
+        options = {
+            "screenshots": "every-step",
+            **(schedule.get("options") or {}),
+            "label": f"Scheduled: {schedule.get('name', '')}"[:80],
+            "release": self.settings.get().get("release", ""),
+            "tester": "Scheduled run",
+        }
+        return self.queue.submit(str(schedule.get("target") or "."), options)
 
     def _manual(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
         try:

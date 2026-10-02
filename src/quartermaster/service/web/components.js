@@ -153,7 +153,7 @@ export function openPalette(setTheme) {
     {group: "Commands", label: "Open the evidence folder", ic: "folder", go: () => api("/api/open", {path: "."}).catch((e) => toast(e.message))},
     {group: "Commands", label: "Switch light or dark", ic: "moon", go: setTheme},
     ...[["", "Overview", "overview"], ["runs", "Runs", "runs"], ["tests", "Tests", "tests"], ["impact", "Release impact", "target"],
-      ["attention", "Needs attention", "attention"],
+      ["attention", "Needs attention", "attention"], ["schedules", "Schedules", "clock"],
       ["record", "Record a test", "record"], ["settings", "Settings", "settings"]]
       .map(([id, label, ic]) => ({group: "Pages", label: `Go to ${label}`, ic, go: () => { location.hash = "#/" + id; }})),
     ...modules.map((m) => ({group: "Modules", label: `${m} tests`, ic: "layers", hint: plural(state.tests.filter((t) => t.module === m).length, "test"),

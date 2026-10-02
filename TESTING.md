@@ -341,7 +341,23 @@ what was expected, what was found and a screenshot. If nothing failed it says al
 You should see: each click appears as a step while you record. After saving, the new test is
 listed under **Tests** and you can run it.
 
-### 6.10 Search and shortcuts
+### 6.10 Schedules (tests that run by themselves)
+
+1. Click **Schedules**, then **New schedule**.
+2. Name: `Nightly check`. What to test: one short test. Days: today only. Time: two minutes from
+   now on this computer's clock. Keep **On** ticked. Click **Save**.
+
+You should see: the schedule in the list, with "Next run" at the time you chose. Keep `qm serve`
+running. Within a minute of that time a run labelled "Scheduled: Nightly check" starts under
+**Runs**, and "Last run" on the Schedules page links to it.
+
+3. Click **Run now** on the schedule. It starts the same run straight away.
+4. Click the schedule, then **Delete** to remove it. Its runs stay in Runs.
+
+Note: schedules only start while `qm serve` is running. A time missed while it was stopped
+starts only if Quartermaster is back within the hour.
+
+### 6.11 Search and shortcuts
 
 - Press **Ctrl+K**. Type `release impact`. Press Enter. It opens Release impact.
 - Press **N**. The New run panel opens. Press Esc to close it.

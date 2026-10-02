@@ -11,6 +11,7 @@ import {settingsPage} from "./page-settings.js";
 import {impactPage} from "./page-impact.js";
 import {manualPage} from "./page-manual.js";
 import {reviewPage} from "./page-review.js";
+import {schedulesPage} from "./page-schedules.js";
 import {manualRunPage} from "./page-manual-run.js";
 
 const NAV = [
@@ -20,6 +21,7 @@ const NAV = [
   {id: "tests", label: "Tests", ic: "tests"},
   {id: "impact", label: "Release impact", ic: "target"},
   {id: "attention", label: "Needs attention", ic: "attention"},
+  {id: "schedules", label: "Schedules", ic: "clock"},
   {section: "Create"},
   {id: "record", label: "Record a test", ic: "record"},
   {section: "System"},
@@ -176,6 +178,7 @@ export async function route() {
     else if (page === "record") await recordPage();
     else if (page === "manual-run") await manualRunPage();
     else if (page === "settings") await settingsPage();
+    else if (page === "schedules") await schedulesPage();
     else await overviewPage();
   } catch (e) {
     show([{label: "Problem"}], h("div", {class: "callout danger", role: "alert"}, icon("attention"),
