@@ -261,5 +261,5 @@ def _execute(
         actual = driver.text_of(s, v)
         # Oracle pages pad text with tabs and line breaks, so compare with whitespace collapsed.
         if value is None or " ".join(value.split()) not in " ".join(actual.split()):
-            raise StepFailure(f"expected text {value!r}, found {actual!r}")
+            raise StepFailure(f"expected text {value!r}, found {' '.join(actual.split())!r}")
     return res

@@ -290,14 +290,35 @@ class PlaywrightDriver:
     def fill(self, strategy: LocatorStrategy, value: str, text: str) -> None:
         loc = self._locator(strategy, value)
         if loc.get_attribute("role") == "group" and loc.get_by_role("spinbutton").count():
-            # Redwood date fields are month/day/year spinbuttons: typing digits from the first
-            # one fills each part in turn, so "01/01/1951" is typed as 01011951.
-            loc.get_by_role("spinbutton").first.focus()
-            self.page.keyboard.type(re.sub(r"\D", "", text), delay=50)
-            self.page.keyboard.press("Tab")
+            self._fill_date(loc, text)
         else:
             loc.fill(text)
         self._settle()
+
+    def _fill_date(self, group: Any, text: str) -> None:
+        """Redwood date fields are month / day / year spinbuttons. Each part is typed into its own
+        box: typing all the digits from the first box and letting the field move on by itself
+        loses digits on a busy pod (1951 became 951, or 1). What the field then shows is read
+        back, and typed once more if it is wrong."""
+        boxes = group.get_by_role("spinbutton")
+        parts = re.findall(r"\d+", text)
+        if len(parts) != boxes.count():  # not one number per box: type the digits from the first box
+            boxes.first.focus()
+            self.page.keyboard.type(re.sub(r"\D", "", text), delay=50)
+            self.page.keyboard.press("Tab")
+            return
+        shown: list[str] = []
+        for _ in range(2):
+            for i, part in enumerate(parts):
+                boxes.nth(i).focus()
+                self.page.keyboard.type(part, delay=80)
+                self.page.wait_for_timeout(200)  # let the box take the value before the next one
+            self.page.keyboard.press("Tab")
+            self._settle()
+            shown = [str(boxes.nth(i).get_attribute("aria-valuenow") or "") for i in range(len(parts))]
+            if not any(shown) or all(s.isdigit() and int(s) == int(p) for s, p in zip(shown, parts, strict=True)):
+                return  # right, or a field that does not say its value (nothing to compare)
+        raise ValueError(f"the date field shows {'/'.join(v or '?' for v in shown)} instead of {text}")
 
     def select(self, strategy: LocatorStrategy, value: str, option: str, pick: str | None = None) -> None:
         """Choose `option`; in type-ahead lists, type `option` and choose the suggestion `pick` (default: option)."""

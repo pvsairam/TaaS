@@ -152,3 +152,48 @@ def test_a_rest_step_calls_the_pod_with_the_signed_in_session() -> None:
     assert method == "POST" and body == {"LocationName": "HQ"} and "json" in headers["Content-Type"]
     with pytest.raises(ValueError, match="may only call the pod"):
         d.api_call("GET", "https://example.com/steal")
+
+
+# ---------------------------------------------------------------------- Redwood date fields
+
+DATE_PAGE = Path(__file__).parent / "fixtures" / "redwood_date.html"
+
+
+def _date_driver(page: Any) -> PlaywrightDriver:
+    d = PlaywrightDriver(settle_ms=300)
+    d.page = page
+    return d
+
+
+def test_a_redwood_date_is_typed_box_by_box_and_read_back() -> None:
+    pytest.importorskip("playwright")
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    from quartermaster.domain.models import LocatorStrategy
+
+    chromium = os.environ.get("QM_CHROMIUM_PATH") or (
+        "/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else None
+    )
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(executable_path=chromium)
+        try:
+            page = browser.new_page()
+            page.goto(DATE_PAGE.as_uri())
+            # All digits from the first box lose the ones typed while the field moves on.
+            page.get_by_role("spinbutton").first.focus()
+            page.keyboard.type("01011951", delay=50)
+            assert page.locator("#full").inner_text() != "January 1, 1951"
+
+            page.goto(DATE_PAGE.as_uri())
+            _date_driver(page).fill(LocatorStrategy.ROLE, "group:Effective Start Date", "01/01/1951")
+            assert page.locator("#full").inner_text() == "January 1, 1951"
+
+            # A field that does not take the date says so at once, instead of a later check failing.
+            page.goto(DATE_PAGE.as_uri() + "#year3")
+            page.reload()
+            with pytest.raises(ValueError, match="the date field shows 1/1/951 instead of 01/01/1951"):
+                _date_driver(page).fill(LocatorStrategy.ROLE, "group:Effective Start Date", "01/01/1951")
+        finally:
+            browser.close()
