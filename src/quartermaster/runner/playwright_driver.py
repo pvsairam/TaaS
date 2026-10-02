@@ -229,7 +229,15 @@ class PlaywrightDriver:
         if strategy is LocatorStrategy.TEST_ID:
             return p.get_by_test_id(value)
         if strategy is LocatorStrategy.TEXT:
-            return p.get_by_text(value, exact=True)
+            # An icon button has no text, only a tooltip (title), e.g. ADF's "Search: Name" next to a
+            # list field. The recorder saves that tooltip as its text, so when no text on the page
+            # matches, the tooltip is looked for instead. Text that is on the page still wins.
+            by_text = p.get_by_text(value, exact=True)
+            if by_text.count() == 0:
+                by_title = p.get_by_title(value, exact=True)
+                if by_title.count():
+                    return by_title
+            return by_text
         if strategy is LocatorStrategy.CSS:
             return p.locator(value)
         if strategy is LocatorStrategy.XPATH:
@@ -237,12 +245,14 @@ class PlaywrightDriver:
         raise ValueError(f"unsupported strategy {strategy}")
 
     def count(self, strategy: LocatorStrategy, value: str) -> int:
-        loc = self._locator(strategy, value)
         # ADF pages render after the load event (partial page rendering), so give the element a
         # moment to appear before counting. Zero matches still falls through to the next strategy.
+        waiting = self._locator(strategy, value)
+        if strategy is LocatorStrategy.TEXT:  # the text, or a tooltip by that name (see _locator)
+            waiting = self.page.get_by_text(value, exact=True).or_(self.page.get_by_title(value, exact=True))
         with suppress(Exception):  # playwright TimeoutError; the count below reports the 0
-            loc.first.wait_for(state="attached", timeout=self._settle_ms)
-        return int(loc.count())
+            waiting.first.wait_for(state="attached", timeout=self._settle_ms)
+        return int(self._locator(strategy, value).count())
 
     # ------------------------------------------------------------------ actions
 

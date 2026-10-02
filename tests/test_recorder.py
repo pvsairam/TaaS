@@ -176,3 +176,70 @@ def test_commands_while_recording(tmp_path: Path) -> None:
     assert "QM_HCM_VIEW_WORKER_1" in text and "1234" not in text
     r.command("stop")
     assert r.stopped
+
+
+# An ADF list field's search button: an icon with only a tooltip, like "Search: Name" in Schedule New
+# Process. Elsewhere on the page the word "Name" and a link with the visible text "Search" also appear.
+LOV_PAGE = """<!doctype html><html><body>
+<form id="login"><label for="u">User ID</label><input id="u">
+<label for="p">Password</label><input id="p" type="password"><button type="submit">Sign In</button></form>
+<script>
+document.getElementById("login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  document.body.innerHTML = `
+    <a href="#">Search</a><span>Name</span>
+    <div role="dialog"><h2>Schedule New Process</h2>
+      <label for="pt1:r1:0:lov::content">Name</label><input id="pt1:r1:0:lov::content" role="combobox">
+      <a id="pt1:r1:0:lov::btn" title="Search: Name" class="lovbtn" style="display:inline-block;width:16px;height:16px"
+         onclick="document.getElementById('opened').textContent = 'list opened'"><span class="icon"></span></a>
+      <div id="opened"></div></div>`;
+});
+</script></body></html>"""
+
+
+def test_an_icon_button_known_only_by_its_tooltip_replays(tmp_path: Path) -> None:
+    pytest.importorskip("playwright")
+    from quartermaster.domain.models import Locator, Step, TestCase
+    from quartermaster.recorder.recorder import Recorder
+    from quartermaster.runner.engine import run_test
+    from quartermaster.runner.playwright_driver import PlaywrightDriver
+
+    environ = {"QM_FUSION_USER": "Mock User", "QM_FUSION_PASSWORD": "not-a-real-secret"}
+    if CHROMIUM:
+        environ["QM_CHROMIUM_PATH"] = CHROMIUM
+    env = Environment(name="mock", url=POD, kind=EnvironmentKind.DEV)
+
+    def serve(context: Any) -> None:
+        context.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=LOV_PAGE))
+
+    rec_driver = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve)
+    rec_driver.open(env, "")
+    try:
+        recorder = Recorder()
+        recorder.attach(rec_driver.page)
+        rec_driver.page.locator("a.lovbtn").click()
+        rec_driver.page.wait_for_timeout(200)
+    finally:
+        rec_driver.close()
+    recorded = events_to_test(recorder.events, **META)
+    [click] = recorded.steps
+    assert click.intent == "Click Search: Name"
+    assert click.target is not None and (LocatorStrategy.TEXT, "Search: Name") in click.target.ordered()
+
+    # The step as it was saved, and as earlier recordings saved it (text only), both replay.
+    as_before = Step(
+        action=Action.CLICK,
+        intent="Click Search: Name",
+        target=Locator(strategies=[{"text": "Search: Name"}]),
+    )
+    check = Step(
+        action=Action.ASSERT_TEXT,
+        intent="The list opened",
+        value="list opened",
+        target=Locator(strategies=[{"css": "#opened"}]),
+    )
+    for steps in ([*recorded.steps, check], [as_before, check]):
+        test = TestCase(id="t", title="t", module="HCM", product="p", steps=steps)
+        driver = PlaywrightDriver(evidence_dir=str(tmp_path), environ=environ, context_hook=serve, settle_ms=2_000)
+        result = run_test(test, env, driver)
+        assert result.status is StepStatus.PASSED, [s.error for s in result.steps]
