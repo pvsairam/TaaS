@@ -89,6 +89,14 @@ Record a test, Settings.
 
 ### 6.1 Settings: clients and environments
 
+The very first time (nothing set up yet, and no pod set in the terminal), Quartermaster opens the
+**Set up Quartermaster** guide by itself: four steps (Client, Pod, Sign-in, Check). Fill them in and
+click **Save and check**. If the pod does not answer, check the address or your VPN and click
+**Check again**. To add another client the same way later, open Settings and click **Setup guide**.
+
+Settings has four tabs: **Clients & environments**, **Evidence**, **AI assistant** and **General**
+(folders, theme, keyboard shortcuts).
+
 1. Click **Settings**. On the left, **In use now** shows the pod runs use, and
    **Clients and environments** lists your clients and their pods.
 2. If it is empty, click **Add a client**, type the client's name (for example `Acme Corp`) and
@@ -115,7 +123,7 @@ your Windows user only.
 6. Try adding a production pod (an address without dev, test, stage or uat, such as
    `https://acme.fa.us6.oraclecloud.com`): Quartermaster refuses it. If a real test pod has no such
    word in its address, tick **This is a test pod, not production** and save again.
-7. In **Evidence** (right side), choose Screenshots and Video and whether to show the browser.
+7. In the **Evidence** tab, choose Screenshots and Video and whether to show the browser.
    Each change is saved at once. Every run you start afterwards uses them.
 8. **Highlight clicks** is on by default. Start a run with **Show the browser while it runs** on:
    before each click a red box and a small red dot appear on the item for a moment (also in the

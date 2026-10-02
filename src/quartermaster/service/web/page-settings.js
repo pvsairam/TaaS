@@ -1,6 +1,6 @@
 // Settings: clients and environments, sign-in, AI, evidence, storage, appearance and shortcuts.
 // Passwords are never shown.
-import {api, button, card, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
+import {api, button, card, chips, field, h, icon, input, remember, segmented, toast, when} from "./ui.js";
 import {checkPod, openFolder} from "./components.js";
 import {connection, envName, loadCommon, schedule, state} from "./state.js";
 import {setTheme, show} from "./app.js";
@@ -32,7 +32,8 @@ export async function settingsPage() {
         ? `${st.user} · password ${st.password_set ? "saved" : "not saved yet: edit the environment below"}`
         : "No test user yet: edit the environment below.", Boolean(st.user && st.password_set)),
       byHandRow(st))});
-  const environments = await environmentsCard(settingsPage);
+  const tab = TABS.some(([id]) => id === state.query.tab) ? state.query.tab : "environments";
+  const environments = tab === "environments" ? await environmentsCard(settingsPage) : null;
   if (state.page !== "settings") return;
 
   const ai = aiCard(st.ai);
@@ -76,10 +77,22 @@ export async function settingsPage() {
   const shortcuts = card({title: "Keyboard shortcuts",
     body: h("dl", {class: "kv"}, keys.flatMap(([k, d]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, d)]))});
 
-  show([{label: "Settings"}],
-    h("div", {class: "page-head"}, h("div", {}, h("h1", {}, "Settings"), h("p", {class: "lead"}, "Environment, sign-in, AI, evidence, storage and appearance."))),
-    h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse, environments, ai), h("div", {class: "stack"}, evidence, storage, appearance, shortcuts)));
+  const content = {
+    environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse), h("div", {class: "stack"}, environments)),
+    evidence: h("div", {style: "max-width:720px"}, evidence),
+    ai: h("div", {style: "max-width:720px"}, ai),
+    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, appearance), h("div", {class: "stack"}, shortcuts)),
+  }[tab];
+  show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
+    h("div", {class: "page-head"},
+      h("div", {}, h("h1", {}, "Settings"), h("p", {class: "lead"}, "Clients and their pods, evidence, the AI assistant, and how Quartermaster looks.")),
+      tab === "environments" ? h("div", {class: "row"}, button("Setup guide", {ic: "plus", title: "Add another client step by step", href: "#/setup?new=1"})) : null),
+    h("div", {class: "toolbar"}, chips(TABS.map(([id, label]) => [id, label]), tab,
+      (v) => { location.hash = v === "environments" ? "#/settings" : `#/settings?tab=${v}`; }, "Settings")),
+    content);
 }
+
+const TABS = [["environments", "Clients & environments"], ["evidence", "Evidence"], ["ai", "AI assistant"], ["general", "General"]];
 
 // The AI that prepares manual scenarios. Any provider. The key is pasted here (kept in memory only,
 // until Quartermaster stops) or set on the computer; it is never stored or shown again.

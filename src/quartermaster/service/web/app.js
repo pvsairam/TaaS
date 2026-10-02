@@ -13,6 +13,7 @@ import {manualPage} from "./page-manual.js";
 import {reviewPage} from "./page-review.js";
 import {schedulesPage} from "./page-schedules.js";
 import {auditPage} from "./page-audit.js";
+import {setupPage} from "./page-setup.js";
 import {manualRunPage} from "./page-manual-run.js";
 
 const NAV = [
@@ -182,6 +183,7 @@ export async function route() {
     else if (page === "settings") await settingsPage();
     else if (page === "schedules") await schedulesPage();
     else if (page === "audit") await auditPage();
+    else if (page === "setup") await setupPage();
     else await overviewPage();
   } catch (e) {
     show([{label: "Problem"}], h("div", {class: "callout danger", role: "alert"}, icon("attention"),

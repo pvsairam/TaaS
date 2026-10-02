@@ -10,6 +10,10 @@ export async function overviewPage() {
   const [, dash, runs] = await Promise.all([loadCommon(), api("/api/dashboard"), api("/api/runs")]);
   if (state.page !== "") return;
   const st = state.status;
+  if (!st.pod_url && !st.set_up_in) { // nothing set up yet: the setup guide first
+    location.replace("#/setup");
+    return;
+  }
   const att = state.attention;
   const latestSummary = runs.find((r) => r.summary_url);
 
@@ -61,7 +65,7 @@ export async function overviewPage() {
       h("dt", {}, "Last execution"), h("dd", {}, last ? h("a", {href: runLink(last.id), class: "row", style: "gap:6px"}, statusBadge(last.status), when(last.at)) : "None yet"))});
 
   const firstRun = !runs.length ? callout("info", "Get started.", [
-    st.ready ? "The pod is set up. " : h("span", {}, "First set the pod and its sign-in (", h("a", {href: "#/settings"}, "Settings"), "). "),
+    st.ready ? "The pod is set up. " : h("span", {}, "First finish the pod's sign-in (", h("a", {href: "#/settings"}, "Settings"), "). "),
     state.tests.length ? `${plural(state.tests.length, "test")} ready: ` : "Record your first test, ",
     state.tests.length ? h("a", {href: "#", onclick: (e) => { e.preventDefault(); openRunDrawer("."); }}, "run them all") : h("a", {href: "#/record"}, "Record a test"),
     ". Every run makes a Word evidence document per test and a summary.",
