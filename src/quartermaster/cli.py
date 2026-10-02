@@ -462,7 +462,7 @@ def _answers(address: str) -> bool:
 
     try:
         with urllib.request.urlopen(f"{address}/api/status", timeout=3) as res:  # noqa: S310 - this computer
-            return res.headers.get("Server", "").startswith("Quartermaster")
+            return str(res.headers.get("Server", "")).startswith("Quartermaster")
     except OSError:
         return False
 
