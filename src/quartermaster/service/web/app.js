@@ -12,6 +12,7 @@ import {impactPage} from "./page-impact.js";
 import {manualPage} from "./page-manual.js";
 import {reviewPage} from "./page-review.js";
 import {schedulesPage} from "./page-schedules.js";
+import {auditPage} from "./page-audit.js";
 import {manualRunPage} from "./page-manual-run.js";
 
 const NAV = [
@@ -26,6 +27,7 @@ const NAV = [
   {id: "record", label: "Record a test", ic: "record"},
   {section: "System"},
   {id: "settings", label: "Settings", ic: "settings"},
+  {id: "audit", label: "Audit log", ic: "file"},
 ];
 
 const root = document.documentElement;
@@ -179,6 +181,7 @@ export async function route() {
     else if (page === "manual-run") await manualRunPage();
     else if (page === "settings") await settingsPage();
     else if (page === "schedules") await schedulesPage();
+    else if (page === "audit") await auditPage();
     else await overviewPage();
   } catch (e) {
     show([{label: "Problem"}], h("div", {class: "callout danger", role: "alert"}, icon("attention"),

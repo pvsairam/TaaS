@@ -154,7 +154,7 @@ export function openPalette(setTheme) {
     {group: "Commands", label: "Switch light or dark", ic: "moon", go: setTheme},
     ...[["", "Overview", "overview"], ["runs", "Runs", "runs"], ["tests", "Tests", "tests"], ["impact", "Release impact", "target"],
       ["attention", "Needs attention", "attention"], ["schedules", "Schedules", "clock"],
-      ["record", "Record a test", "record"], ["settings", "Settings", "settings"]]
+      ["record", "Record a test", "record"], ["settings", "Settings", "settings"], ["audit", "Audit log", "file"]]
       .map(([id, label, ic]) => ({group: "Pages", label: `Go to ${label}`, ic, go: () => { location.hash = "#/" + id; }})),
     ...modules.map((m) => ({group: "Modules", label: `${m} tests`, ic: "layers", hint: plural(state.tests.filter((t) => t.module === m).length, "test"),
       go: () => { location.hash = "#/tests?module=" + encodeURIComponent(m); }})),

@@ -6,6 +6,7 @@ computers and other web sites cannot start runs.
 
     GET  /api/status                 pod, credentials set or not, environment name and release, folders
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
+    GET  /api/audit, /api/audit.csv  the audit log: who changed what, when (newest first; the CSV oldest first)
     GET  /api/signin                 the sign-in done by hand (single sign-on, MFA): none, waiting, done, failed
     POST /api/signin                 open a browser on the pod for a person to sign in; the session is kept
                                      in memory only, and the runs started from here use it
@@ -66,6 +67,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
@@ -81,6 +83,7 @@ from quartermaster.evidence.certification import write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
+from quartermaster.service.audit import AuditLog, describe
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
 from quartermaster.service.manual import ManualScripts, needs_data
@@ -157,6 +160,7 @@ class App:
         )
         self.recording.on_finished = self.prepare_all.finished
         self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
+        self.audit = AuditLog(data_dir / "audit.jsonl")
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
 
     def start(self) -> None:
@@ -173,6 +177,22 @@ class App:
     # ------------------------------------------------------------------ routing
 
     def handle(self, method: str, raw_path: str, body: bytes) -> Reply:
+        reply = self._handle(method, raw_path, body)
+        if method == "POST" and reply.status < 400 and reply.content_type == "application/json":
+            self._audit(raw_path, body, reply)
+        return reply
+
+    def _audit(self, raw_path: str, body: bytes, reply: Reply) -> None:
+        """Add a successful change to the audit log. A problem here never fails the request."""
+        with suppress(Exception):
+            route = [p for p in unquote(urlsplit(raw_path).path).split("/") if p][1:]
+            data = self._body(body)
+            said = describe(route, data, json.loads(reply.body or b"null"))
+            if said is not None:
+                who = str(data.get("tester") or "").strip()[:60]
+                self.audit.add(*said, who=who)
+
+    def _handle(self, method: str, raw_path: str, body: bytes) -> Reply:
         url = urlsplit(raw_path)
         path, query = unquote(url.path), parse_qs(url.query)
         parts = [p for p in path.split("/") if p]
@@ -190,6 +210,11 @@ class App:
 
         if method == "GET" and route == ["status"]:
             return _json(self.status())
+        if method == "GET" and route == ["audit"]:
+            return _json({"entries": self.audit.entries()})
+        if method == "GET" and route == ["audit.csv"]:
+            name = f"quartermaster-audit-{datetime.now():%Y%m%d}.csv"
+            return Reply(HTTPStatus.OK, self.audit.as_csv().encode("utf-8-sig"), "text/csv; charset=utf-8", name)
         if method == "GET" and route == ["tests"]:
             return _json(self.tests())
         if route == ["settings"]:
@@ -326,7 +351,11 @@ class App:
             "release": self.settings.get().get("release", ""),
             "tester": "Scheduled run",
         }
-        return self.queue.submit(str(schedule.get("target") or "."), options)
+        run = self.queue.submit(str(schedule.get("target") or "."), options)
+        self.audit.add(
+            "Started a scheduled run", str(schedule.get("name") or ""), {"run": run.get("id")}, who="Schedule"
+        )
+        return run
 
     def _manual(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
         try:

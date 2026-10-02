@@ -413,7 +413,17 @@ counts by module, every test with its result and evidence file, what failed with
 tests not yet run on the release, and a sign-off table. In **Release comparison** (shown once
 tests ran on two releases), the download icon on each row gets the pack for that release.
 
-### 6.12 Search and shortcuts
+### 6.12 Audit log
+
+1. Click **Audit log** (under System).
+
+You should see: what you changed in this test session, newest first, with who and when: the run
+you started, the schedule you added, settings, test data saved (only which steps, never the
+values), approvals. Type a word in the search box to filter. Click **Download CSV** for the whole
+log in a file Excel opens. "Who" is the user signed in to this computer, or the tester's name for
+a run by hand; scheduled runs show "Schedule".
+
+### 6.13 Search and shortcuts
 
 - Press **Ctrl+K**. Type `release impact`. Press Enter. It opens Release impact.
 - Press **N**. The New run panel opens. Press Esc to close it.
