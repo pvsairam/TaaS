@@ -91,6 +91,7 @@ def run_test(
                 "action": step.action.value,
                 "value": display_value(step.value, test.data, runtime),  # masked values stay hidden
                 "expected": step.expected,
+                "written_step": step.written_step,
             }
             if failed:
                 results.append(StepResult(**base, status=StepStatus.SKIPPED))
@@ -183,6 +184,7 @@ def run_test(
         started_at=started_at,
         finished_at=_now(),
         screenshots=screenshots,
+        written_steps=test.written_steps,
     )
     emit("run_end", status=result.status.value)
     return result

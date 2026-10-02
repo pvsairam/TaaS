@@ -252,6 +252,7 @@ class Autopilot:
         # person can see why it stopped. Only labels from the screen, never typed values or keys.
         run_dir = getattr(guide, "run_dir", None)
         self.diary = Path(run_dir) / "ai-diary.txt" if run_dir else None
+        self.step_no = 1  # the written step being done now
         self.nav_pages: dict[str, str] = {}  # page link -> its Navigator group, once a group was opened
 
     # ------------------------------------------------------------------ the loop
@@ -261,6 +262,7 @@ class Autopilot:
         steps = self.guide.steps
         for i, step in enumerate(steps):
             number = i + 1
+            self.step_no = number
             if not self._do_step(number, step, len(steps)):
                 return False
             if number == len(steps) and not self._add_checks(number, step):
@@ -435,7 +437,7 @@ class Autopilot:
             )
             self._say(f"Step {number}: {value} is not in the Navigator. Trying another way.")
             return
-        self.recorder.events.append({"kind": "navigate", "value": value})
+        self._record({"kind": "navigate", "value": value})
         done.append(f'navigate "{value}"')
 
     def _links(self) -> list[str]:
@@ -480,6 +482,10 @@ class Autopilot:
         except Exception:
             return []
         return [str(n)[:60] for n in names][:40] if isinstance(names, list) else []
+
+    def _record(self, event: dict[str, Any]) -> None:
+        """Keep an action for the saved test, with the written step it was done for."""
+        self.recorder.events.append({**event, "guide_step": self.step_no})
 
     def _note(self, line: str) -> None:
         if self.diary is None:
@@ -545,7 +551,7 @@ class Autopilot:
         event: dict[str, Any] = {"kind": what, "intent": item.get("title") or item["name"], "candidates": candidates}
         if what in ("fill", "select"):
             event["value"] = value
-        self.recorder.events.append(event)
+        self._record(event)
 
     def _add_checks(self, number: int, step: dict[str, str]) -> bool:
         """Checks that prove the last page is right. When the script lists fields to check, those
@@ -574,7 +580,7 @@ class Autopilot:
                 continue
             for text in found[:3]:
                 if self._checkable(text) and text not in added:
-                    self.recorder.events.append(
+                    self._record(
                         {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
                     )
                     added.append(text)
@@ -643,7 +649,7 @@ class Autopilot:
             return
         ways = self._toggle_ways(toggle, found)
         if ways:
-            self.recorder.events.append({"kind": "click", "intent": f"Open {section}", "candidates": ways})
+            self._record({"kind": "click", "intent": f"Open {section}", "candidates": ways})
         self._note(
             f"  Section {section}: opened"
             + ("" if self._shown(wanted) else ", but its fields are not in it")
@@ -718,7 +724,7 @@ class Autopilot:
             fallback = [*screen.get("headings", []), step["action"].removeprefix("Select ").strip()]
             added = [t for t in dict.fromkeys(fallback) if t and self._checkable(t)][:1]
         for text in added:
-            self.recorder.events.append(
+            self._record(
                 {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
             )
         self._note(f"  Checks added: {', '.join(added) if added else 'none could be found'}")

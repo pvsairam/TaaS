@@ -228,6 +228,15 @@ by hand.
 chose and what did not work. Send it when you report a problem with Prepare. It is also kept in the
 run's folder in `evidence\` as `ai-diary.txt`.
 
+**The evidence document of a scenario that plays by itself**
+
+When **Run** plays a scenario, its Word document follows the steps of your script (Login, Me,
+Personal Information, Select My Compensation), each with the actions done for it and their
+pictures. A step without its own action says why, for example "Quartermaster signed in before the
+test started" or "done as part of step 3 (Open Me > Personal Information)". A click has two
+pictures: just before it, with what it clicks boxed in red, and after it. Scenarios saved before
+this change keep the old layout until you prepare them again or do them by hand again.
+
 **Check what a scenario does, and prepare it again**
 
 - The written steps: in **Manual scenarios**, click the scenario's name. The panel lists each test

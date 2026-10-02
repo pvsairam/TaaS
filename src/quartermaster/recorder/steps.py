@@ -70,7 +70,7 @@ def events_to_steps(
         if kind == "navigate":
             path = str(ev.get("value") or "").strip()
             if path:
-                steps.append({"action": "navigate", "intent": f"Open {path}", "value": path})
+                steps.append(_written({"action": "navigate", "intent": f"Open {path}", "value": path}, ev))
             continue
         strategies = _strategies(ev)
         if not strategies:
@@ -99,8 +99,16 @@ def events_to_steps(
             step["intent"] = f"Check {name} is shown"
         else:
             step["intent"] = f"Click {name}"
-        steps.append(step)
+        steps.append(_written(step, ev))
     return steps, data
+
+
+def _written(step: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    """Keep the number of the written step (of a manual scenario) the action was done for."""
+    n = event.get("guide_step")
+    if isinstance(n, int) and n >= 1:
+        step["written_step"] = n
+    return step
 
 
 def preview(events: list[dict[str, Any]], secret_prefix: str = "QM_SECRET") -> list[dict[str, Any]]:

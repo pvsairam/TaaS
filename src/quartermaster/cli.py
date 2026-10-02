@@ -329,6 +329,7 @@ def _finish_by_hand(
             product=args.product,
             persona=args.persona,
             process=args.process or "",
+            written_steps=[{"action": s["action"], "expected": s["expected"]} for s in guide.steps],
         )
     except ValueError:
         if out is not None:

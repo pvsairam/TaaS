@@ -89,6 +89,7 @@ def build_record(
         "steps": raw["steps"],
         "healing": raw["healing"],
         "evidence_sha256": hashes,
+        **({"written_steps": raw["written_steps"]} if raw.get("written_steps") else {}),
     }
 
 

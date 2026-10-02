@@ -96,6 +96,11 @@ class Guide:
         return [{**st, "number": i + 1, **self.results.get(i, {})} for i, st in enumerate(self.steps)]
 
     @property
+    def current(self) -> int:
+        """The number of the step being done now: the first one not marked yet (or the last)."""
+        return next((i + 1 for i in range(len(self.steps)) if i not in self.results), len(self.steps))
+
+    @property
     def marked(self) -> int:
         return len(self.results)
 

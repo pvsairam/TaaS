@@ -360,6 +360,7 @@ def test_the_fields_the_script_lists_are_checked_and_a_closed_section_is_opened(
         "kind": "click",
         "intent": "Open Additional Compensation",
         "candidates": [{"strategy": "role", "value": "button:Additional Compensation"}],
+        "guide_step": 4,  # done for the last written step, "Select My Compensation"
     } in recorder.events
 
 
@@ -432,6 +433,7 @@ def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: 
         "kind": "assert_visible",
         "intent": "My Compensation",
         "candidates": [{"strategy": "text", "value": "My Compensation"}],
+        "guide_step": 4,
     }
     assert "Checks added: My Compensation" in (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
 
@@ -633,7 +635,11 @@ def test_a_failed_click_is_reported_and_the_navigator_is_used(tmp_path: Path) ->
     assert 'click link "Expand Me" DID NOT WORK (Locator.click: Timeout 8000ms exceeded.)' in ask.prompts[2]
     assert 'navigate "Wrong > Path" DID NOT WORK (no such Navigator entry)' in ask.prompts[3]
     assert [e["kind"] for e in recorder.events] == ["navigate", "click", "assert_visible"]
-    assert recorder.events[0] == {"kind": "navigate", "value": "Me > Personal Information"}
+    assert recorder.events[0] == {
+        "kind": "navigate",
+        "value": "Me > Personal Information",
+        "guide_step": 2,
+    }  # opened for "Me"
 
 
 NAVIGATOR_PAGE = """<!doctype html><html><body>
@@ -740,7 +746,7 @@ def test_prepared_with_the_navigator_in_a_real_browser_then_it_plays_by_itself(t
 
     assert [e["kind"] for e in recorder.events] == ["navigate", "click", "assert_visible"]
     # the page was clicked in the open group, and is remembered as a Navigator path for replays
-    assert recorder.events[0] == {"kind": "navigate", "value": "Me > Personal Information"}
+    assert recorder.events[0] == {"kind": "navigate", "value": "Me > Personal Information", "guide_step": 3}
     test = events_to_test(
         recorder.events,
         test_id="manual.ess.ess-001",

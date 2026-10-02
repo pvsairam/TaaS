@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from quartermaster.recorder.steps import events_to_steps, preview, secret_names
@@ -119,3 +120,31 @@ def test_a_masked_value_is_never_saved() -> None:
     shown = preview(events, "QM_HCM_X")
     assert [s["value"] for s in shown] == ["bob", "••••••", "Leeds"] and "1234" not in str(shown)
     assert secret_names(data) == ["QM_HCM_X_1"]
+
+
+def test_a_test_from_a_manual_scenario_keeps_its_written_steps(tmp_path: Path) -> None:
+    from quartermaster.dsl.loader import load_test
+    from quartermaster.recorder.recorder import events_to_test, to_yaml
+
+    events = [
+        {"kind": "navigate", "value": "Me > Personal Information", "guide_step": 3},
+        {
+            "kind": "click",
+            "intent": "My Compensation",
+            "candidates": [{"strategy": "text", "value": "My Compensation"}],
+            "guide_step": 4,
+        },
+    ]
+    written = [{"action": "Login", "expected": ""}, {"action": "Select My Compensation", "expected": "It opens"}]
+    test = events_to_test(
+        events,
+        test_id="manual.ess.ess-001",
+        title="My Compensation",
+        module="HCM",
+        product="Global Human Resources",
+        written_steps=written,
+    )
+    out = tmp_path / "t.yaml"
+    out.write_text(to_yaml(test))
+    again = load_test(out)
+    assert [s.written_step for s in again.steps] == [3, 4] and again.written_steps == written

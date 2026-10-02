@@ -154,12 +154,15 @@ class _Doc:
             )
         )
 
+        written = _written_groups(run, steps)
+        if written:
+            counts = {k: sum(1 for w in written if w["status"] == k) for k in ("passed", "healed", "failed", "skipped")}
         add(_p([_r("About this test")], style="Heading1"))
         passed = counts["passed"] + counts["healed"]
         about = [
             ("What was tested", run.get("test_title") or run.get("test_id", "")),
             ("Result", _status_label(status)),
-            ("Steps", f"{passed} of {len(steps)} passed" + _step_extras(counts)),
+            ("Steps", f"{passed} of {len(written or steps)} passed" + _step_extras(counts)),
             ("Date and time", _when(run.get("started_at"))),
             ("Time taken", _duration(run.get("started_at"), run.get("finished_at"))),
             ("Run by", run.get("executed_by") or "Not recorded"),
@@ -170,61 +173,70 @@ class _Doc:
             about.append(("Video of the test", "Saved in the videos folder next to this document"))
         add(_kv_table(about, status_row=("Result", status)))
 
-        add(_p([_r("Steps")], style="Heading1"))
-        widths = [700, 7380, 2000]
-        rows = [
-            [
-                _cell("Step", widths[0], header=True),
-                _cell("What was done", widths[1], header=True),
-                _cell("Result", widths[2], header=True),
-            ]
-        ]
-        for s in steps:
-            st = s.get("status", "")
-            rows.append(
+        if written:
+            self._written_steps(written, add)
+        else:
+            add(_p([_r("Steps")], style="Heading1"))
+            widths = [700, 7380, 2000]
+            rows = [
                 [
-                    _cell(str(s.get("index", 0) + 1), widths[0]),
-                    _cell(s.get("intent", ""), widths[1]),
-                    _cell(
-                        _status_label(st), widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True
-                    ),
+                    _cell("Step", widths[0], header=True),
+                    _cell("What was done", widths[1], header=True),
+                    _cell("Result", widths[2], header=True),
                 ]
-            )
-        add(_table(rows, widths))
-
-        # --- one block per step; a step with a picture starts on a new page
-        if any(s.get("evidence") for s in steps):
-            add(_page_break())
-        add(_p([_r("Step details")], style="Heading1"))
-        first = True
-        for s in steps:
-            n = s.get("index", 0) + 1
-            st = s.get("status", "")
-            shots = s.get("evidence", [])
-            if shots and not first:
-                add(_page_break())
-            first = False
-            add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
-            rows_kv: list[tuple[str, Any]] = [("Result", _status_label(st))]
-            if s.get("action") == "manual" and st == "passed":
-                by = "done by the AI" if run.get("mode") == "ai" else "marked by the tester"
-                rows_kv[0] = ("Result", f"Passed ({by})")
-            if s.get("value") and s.get("action") in ("fill", "select", "navigate", "login_as"):
-                rows_kv.append(("Value entered" if s.get("action") in ("fill", "select") else "Opened", s["value"]))
-            rows_kv.append(("What should happen", s.get("expected") or _default_expected(s)))
-            rows_kv.append(("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, "")))
-            if st != "skipped":
-                rows_kv.append(("Time", _clock(s.get("started_at"))))
-            if s.get("screenshot_note") and not [r for r in shots if not _is_before(r)]:
-                rows_kv.append(("Screen picture", s["screenshot_note"]))  # says why the picture is missing
-            add(_kv_table(rows_kv, status_row=("Result", st)))
-            for rel in shots:
-                caption = (
-                    f"Before step {n}: the item about to be clicked is boxed in red"
-                    if _is_before(rel)
-                    else f"Screen after step {n}"
+            ]
+            for s in steps:
+                st = s.get("status", "")
+                rows.append(
+                    [
+                        _cell(str(s.get("index", 0) + 1), widths[0]),
+                        _cell(s.get("intent", ""), widths[1]),
+                        _cell(
+                            _status_label(st),
+                            widths[2],
+                            fill=_STATUS_FILL.get(st),
+                            color=_STATUS_COLOR.get(st),
+                            bold=True,
+                        ),
+                    ]
                 )
-                add(self._image(rel, n, "", caption=caption))
+            add(_table(rows, widths))
+
+            # --- one block per step; a step with a picture starts on a new page
+            if any(s.get("evidence") for s in steps):
+                add(_page_break())
+            add(_p([_r("Step details")], style="Heading1"))
+            first = True
+            for s in steps:
+                n = s.get("index", 0) + 1
+                st = s.get("status", "")
+                shots = s.get("evidence", [])
+                if shots and not first:
+                    add(_page_break())
+                first = False
+                add(_p([_r(f"Step {n}: {s.get('intent', '')}")], style="Heading2"))
+                rows_kv: list[tuple[str, Any]] = [("Result", _status_label(st))]
+                if s.get("action") == "manual" and st == "passed":
+                    by = "done by the AI" if run.get("mode") == "ai" else "marked by the tester"
+                    rows_kv[0] = ("Result", f"Passed ({by})")
+                if s.get("value") and s.get("action") in ("fill", "select", "navigate", "login_as"):
+                    rows_kv.append(("Value entered" if s.get("action") in ("fill", "select") else "Opened", s["value"]))
+                rows_kv.append(("What should happen", s.get("expected") or _default_expected(s)))
+                rows_kv.append(
+                    ("What happened", plain_error(s.get("error")) if s.get("error") else _ACTUAL.get(st, ""))
+                )
+                if st != "skipped":
+                    rows_kv.append(("Time", _clock(s.get("started_at"))))
+                if s.get("screenshot_note") and not [r for r in shots if not _is_before(r)]:
+                    rows_kv.append(("Screen picture", s["screenshot_note"]))  # says why the picture is missing
+                add(_kv_table(rows_kv, status_row=("Result", st)))
+                for rel in shots:
+                    caption = (
+                        f"Before step {n}: the item about to be clicked is boxed in red"
+                        if _is_before(rel)
+                        else f"Screen after step {n}"
+                    )
+                    add(self._image(rel, n, "", caption=caption))
 
         # --- sign-off, then the technical appendix
         add(_page_break())
@@ -237,6 +249,70 @@ class _Doc:
         add(_table(sign, sw, row_height=620))
 
         return document_xml(parts)
+
+    def _written_steps(self, written: list[dict[str, Any]], add: Any) -> None:
+        """The steps of the written test script, each with what was done for it and its pictures."""
+        add(_p([_r("Steps")], style="Heading1"))
+        add(
+            _p(
+                [
+                    _r(
+                        "These are the steps of the written test script. Under each one are the actions "
+                        "Quartermaster did for it, with their pictures."
+                    )
+                ]
+            )
+        )
+        widths = [700, 7380, 2000]
+        rows = [
+            [
+                _cell("Step", widths[0], header=True),
+                _cell("What the script says", widths[1], header=True),
+                _cell("Result", widths[2], header=True),
+            ]
+        ]
+        for w in written:
+            st = w["status"]
+            rows.append(
+                [
+                    _cell(str(w["number"]), widths[0]),
+                    _cell(w["action"], widths[1]),
+                    _cell(
+                        _status_label(st), widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True
+                    ),
+                ]
+            )
+        add(_table(rows, widths))
+        if any(a.get("evidence") for w in written for a in w["actions"]):
+            add(_page_break())
+        add(_p([_r("Step details")], style="Heading1"))
+        first = True
+        for w in written:
+            n, st = w["number"], w["status"]
+            shots = [r for a in w["actions"] for r in a.get("evidence", [])]
+            if shots and not first:
+                add(_page_break())
+            first = False
+            add(_p([_r(f"Step {n}: {w['action']}")], style="Heading2"))
+            how = "; ".join(a.get("intent", "") for a in w["actions"]) or w["note"]
+            rows_kv: list[tuple[str, Any]] = [
+                ("Result", _status_label(st)),
+                ("What should happen", w["expected"] or "Not written in the script."),
+                ("What was done", how),
+            ]
+            failed = next((a for a in w["actions"] if a.get("status") == "failed"), None)
+            if failed is not None:
+                rows_kv.append(("What happened", plain_error(failed.get("error")) or _ACTUAL["failed"]))
+            add(_kv_table(rows_kv, status_row=("Result", st)))
+            for a in w["actions"]:
+                for rel in a.get("evidence", []):
+                    what = a.get("intent", "")
+                    caption = (
+                        f"Step {n}, before \u201c{what}\u201d: the item about to be clicked is boxed in red"
+                        if _is_before(rel)
+                        else f"Step {n}, after \u201c{what}\u201d"
+                    )
+                    add(self._image(rel, n, "", caption=caption))
 
     def _image(self, rel: str, step_no: int, sha256: str, caption: str | None = None) -> str:
         path = self.run_dir / rel
@@ -609,3 +685,48 @@ def _default_expected(step: dict[str, Any]) -> str:
 def _is_before(rel: str) -> bool:
     """A picture taken just before a click (see the runner), not after the step."""
     return Path(rel).stem.endswith("-before")
+
+
+_SIGN_IN = re.compile(r"^\s*(log\s*-?\s*in|sign\s*-?\s*in)\b", re.I)
+_WORST = ("failed", "skipped", "healed", "passed")
+
+
+def _written_groups(run: dict[str, Any], steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """For a test made from a manual scenario (run["written_steps"]): each written step with the
+    actions done for it (step["written_step"]), its result, and, when it needed no action of its
+    own, why. Empty for other tests, and for runs done by hand or by the AI (their steps are the
+    written steps already)."""
+    written = run.get("written_steps") or []
+    if not written or run.get("mode") in ("manual", "ai"):
+        return []
+    groups: list[dict[str, Any]] = [
+        {
+            "number": i + 1,
+            "action": str(w.get("action", "")),
+            "expected": str(w.get("expected", "")),
+            "actions": [],
+        }
+        for i, w in enumerate(written)
+    ]
+    current = 1
+    for st in steps:
+        n = st.get("written_step")
+        if isinstance(n, int) and 1 <= n <= len(groups):
+            current = n
+        groups[current - 1]["actions"].append(st)  # an action without a number goes with the one before
+    for i, g in enumerate(groups):
+        if g["actions"]:
+            found = {a.get("status") for a in g["actions"]}
+            g["status"] = next((k for k in _WORST if k in found), "passed")
+            g["note"] = ""
+            continue
+        later = next((h for h in groups[i + 1 :] if h["actions"]), None)
+        if i == 0 and _SIGN_IN.match(g["action"]):
+            g["status"], g["note"] = "passed", "Quartermaster signed in to Oracle Fusion before the test started."
+        elif later is not None:
+            first = later["actions"][0]
+            g["status"] = "skipped" if first.get("status") == "skipped" else "passed"
+            g["note"] = f"No separate action: done as part of step {later['number']} ({first.get('intent', '')})."
+        else:
+            g["status"], g["note"] = "passed", "No separate action was needed."
+    return groups

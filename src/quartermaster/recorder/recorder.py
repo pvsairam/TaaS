@@ -33,8 +33,10 @@ def events_to_test(
     persona: str = "",
     priority: Priority = Priority.MEDIUM,
     process: str = "",
+    written_steps: list[dict[str, str]] | None = None,
 ) -> TestCase:
-    """Turn captured events into a test (conversion rules: `recorder.steps`)."""
+    """Turn captured events into a test (conversion rules: `recorder.steps`). `written_steps`: the
+    manual scenario's steps, when the test was made from one."""
     steps, data = events_to_steps(events, secret_prefix(test_id))
     if not steps:
         raise ValueError("no usable actions were recorded")
@@ -50,6 +52,7 @@ def events_to_test(
             "tags": ["recorded"],
             "data": data,
             "steps": steps,
+            **({"written_steps": written_steps} if written_steps else {}),
         }
     )
 
@@ -132,6 +135,8 @@ class Recorder:
         elif self.paused:
             return
         else:
+            if self.guide is not None and "guide_step" not in payload:
+                payload["guide_step"] = self.guide.current  # the written step the tester is on
             self.events.append(payload)
             if kind in ("assert_text", "assert_visible"):
                 self.checking = False

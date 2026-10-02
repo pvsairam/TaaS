@@ -199,3 +199,45 @@ def test_a_click_shows_the_screen_before_it_and_after_it(tmp_path: Path) -> None
     run["steps"][0]["evidence"] = ["screenshots/step-01-before.png", "screenshots/step-01.png"]
     _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
     assert text.index("Before step 1: the item about to be clicked is boxed in red") < text.index("Screen after step 1")
+
+
+def test_a_test_made_from_a_manual_scenario_follows_its_written_steps(tmp_path: Path) -> None:
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    for name in ("step-01.png", "step-02-before.png", "step-02.png", "step-03.png"):
+        (shots / name).write_bytes(tiny_png())
+
+    def action(i: int, intent: str, action: str, written: int, evidence: list[str]) -> dict[str, Any]:
+        return {
+            "index": i,
+            "intent": intent,
+            "action": action,
+            "status": "passed",
+            "written_step": written,
+            "evidence": [f"screenshots/{e}" for e in evidence],
+            "started_at": "2026-10-02T09:56:30+05:30",
+        }
+
+    run = sample_run(tmp_path / "other")
+    run.update(
+        status="passed",
+        test_title="My Compensation",
+        written_steps=[
+            {"action": "Login", "expected": ""},
+            {"action": "Me", "expected": ""},
+            {"action": "Personal Information", "expected": ""},
+            {"action": "Select My Compensation", "expected": "Current Salary is shown"},
+        ],
+        steps=[
+            action(0, "Open Me > Personal Information", "navigate", 3, ["step-01.png"]),
+            action(1, "Click My Compensation", "click", 4, ["step-02-before.png", "step-02.png"]),
+            action(2, "Check Current Salary is shown", "assert_visible", 4, ["step-03.png"]),
+        ],
+    )
+    _, text = _open(write_evidence_document(run, tmp_path, tmp_path / "evidence.docx"))
+    assert "4 of 4 passed" in text  # counted by the written steps, not the 3 actions
+    assert text.index("Step 1: Login") < text.index("Step 2: Me") < text.index("Step 4: Select My Compensation")
+    assert "signed in to Oracle Fusion before the test started" in text
+    assert "done as part of step 3 (Open Me > Personal Information)" in text
+    assert "Click My Compensation; Check Current Salary is shown" in text
+    assert "Step 4, before “Click My Compensation”: the item about to be clicked is boxed in red" in text

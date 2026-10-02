@@ -124,6 +124,8 @@ class Step(_Strict):
     value: str | None = None
     expected: str = Field(default="", description="Expected result, shown in the evidence document")
     options: dict[str, Any] = Field(default_factory=dict)
+    # For a test made from a manual scenario: the number of the written step this action does.
+    written_step: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _check_shape(self) -> Step:
@@ -163,6 +165,9 @@ class TestCase(_Strict):
     estimated_minutes: float = Field(default=5.0, gt=0)
     data: dict[str, str] = Field(default_factory=dict)
     steps: list[Step] = Field(min_length=1)
+    # For a test made from a manual scenario: its written steps ({"action", "expected"}), so the
+    # evidence follows the script the tester knows rather than the recorded clicks.
+    written_steps: list[dict[str, str]] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- results
@@ -198,6 +203,7 @@ class StepResult(_Strict):
     locator: str | None = None  # the locator actually used, e.g. "role=button:Search"
     started_at: str | None = None  # ISO 8601 with time zone
     screenshot_note: str | None = None  # why a screenshot that was asked for is missing
+    written_step: int | None = None  # see Step.written_step
 
 
 class ScreenshotMode(StrEnum):
@@ -219,6 +225,7 @@ class RunResult(_Strict):
     started_at: str | None = None
     finished_at: str | None = None
     screenshots: ScreenshotMode = ScreenshotMode.ON_FAILURE
+    written_steps: list[dict[str, str]] = Field(default_factory=list)  # see TestCase.written_steps
 
     @property
     def status(self) -> StepStatus:
