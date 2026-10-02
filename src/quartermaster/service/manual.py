@@ -270,7 +270,7 @@ class ManualScripts:
         entered = self.test_data_all().get(str(scenario.get("id")), {})
         if not entered:
             return scenario
-        out = json.loads(json.dumps(scenario))
+        out: dict[str, Any] = json.loads(json.dumps(scenario))
         for number, case_index, step_index in numbered_steps(out):
             text = entered.get(str(number))
             if text and step_index is not None:

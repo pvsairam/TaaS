@@ -267,7 +267,8 @@ class App:
                 return _json(scenario)
             if method == "POST" and route == ["data"]:
                 scenario = self.manual.get(str(data.get("id") or ""))
-                values = data.get("values") if isinstance(data.get("values"), dict) else {}
+                raw = data.get("values")
+                values: dict[str, Any] = raw if isinstance(raw, dict) else {}
                 return _json({"test_data": self.manual.set_test_data(scenario["id"], values)})
             if method == "POST" and route == ["run"]:
                 return _json(self.run_manual(data), HTTPStatus.CREATED)
