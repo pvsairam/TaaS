@@ -16,11 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from quartermaster.importers.manual_scripts import ScriptError, parse_scripts, slug
+from quartermaster.importers.manual_scripts import ScriptError, finish_scenario, new_scenario, parse_scripts, slug
 from quartermaster.importers.xlsx import SpreadsheetError
 
 MAX_UPLOAD = 20 * 1024 * 1024
 MAX_FILES = 50
+TYPED = "typed"  # scenarios typed in Quartermaster are kept in typed.json, like one more workbook
+MAX_TYPED_STEPS = 200
 
 
 @dataclass(frozen=True)
@@ -74,17 +76,18 @@ class ManualScripts:
                 continue
             items = [s for s in data.get("scenarios", []) if isinstance(s, dict)]
             entered = self.test_data_all()
-            files.append(
-                {
-                    "key": path.stem,
-                    "file": data.get("file", path.stem),
-                    "module": data.get("module", ""),
-                    "product": data.get("product", ""),
-                    "imported_at": data.get("imported_at"),
-                    "scenarios": len(items),
-                    "warnings": data.get("warnings", []),
-                }
-            )
+            if path.stem != TYPED:  # typed scenarios are changed one by one, not as a file
+                files.append(
+                    {
+                        "key": path.stem,
+                        "file": data.get("file", path.stem),
+                        "module": data.get("module", ""),
+                        "product": data.get("product", ""),
+                        "imported_at": data.get("imported_at"),
+                        "scenarios": len(items),
+                        "warnings": data.get("warnings", []),
+                    }
+                )
             for s in items:
                 need = needs_data(s, entered.get(str(s.get("id")), {}))
                 scenarios.append(
@@ -186,6 +189,93 @@ class ManualScripts:
                 view["saved"] = True
             results.append(view)
         return {"files": results, "saved": sum(r.get("saved", False) for r in results)}
+
+    # ------------------------------------------------------------------ scenarios typed in Quartermaster
+
+    def save_typed(self, data: dict[str, Any]) -> dict[str, Any]:
+        """{"id" (to change one), "title", "module", "product", "description", "steps": [{"action",
+        "expected"}], "fields"}: a new manual scenario typed in the web UI instead of imported."""
+        title = " ".join(str(data.get("title") or "").split())[:200]
+        module = " ".join(str(data.get("module") or "").split())[:60]
+        product = " ".join(str(data.get("product") or "").split())[:80]
+        if not title:
+            raise ValueError("give the scenario a name")
+        if not (module and product):
+            raise ValueError("enter the module and product, for example HCM and Global Human Resources")
+        given = data.get("steps")
+        raw: list[Any] = given if isinstance(given, list) else []
+        steps: list[dict[str, str]] = []
+        for item in raw:
+            item = item if isinstance(item, dict) else {}
+            action = str(item.get("action") or "").strip()[:2000]
+            expected = str(item.get("expected") or "").strip()[:2000]
+            if action or expected:
+                steps.append({"step": f"step {len(steps) + 1}", "action": action, "expected": expected, "result": ""})
+        if not steps:
+            raise ValueError("write at least one step")
+        if len(steps) > MAX_TYPED_STEPS:
+            raise ValueError(f"write at most {MAX_TYPED_STEPS} steps")
+        if any(not st["action"] for st in steps):
+            raise ValueError("every step needs what to do, not only what should happen")
+        listed = data.get("fields")
+        fields_in: list[Any] = listed if isinstance(listed, list) else []
+        fields = [" ".join(str(f).split())[:200] for f in fields_in if str(f).strip()][:100]
+        description = str(data.get("description") or "").strip()[:2000]
+
+        record = self._load(self.folder / f"{TYPED}.json") or {
+            "file": "Typed in Quartermaster",
+            "kind": TYPED,
+            "module": "",
+            "product": "",
+            "warnings": [],
+            "scenarios": [],
+        }
+        items = [x for x in record.get("scenarios", []) if isinstance(x, dict)]
+        old = next((x for x in items if x.get("id") == data.get("id")), None) if data.get("id") else None
+        if data.get("id") and old is None:
+            raise LookupError("that typed scenario is no longer there")
+        if old:
+            ref = str(old["ref"])
+        else:
+            # never reused, so a new scenario does not take over a deleted one's saved test
+            used = {str(x.get("ref")) for x in items}
+            n = int(record.get("last_number") or 0) + 1
+            while f"T{n:03d}" in used:
+                n += 1
+            ref, record["last_number"] = f"T{n:03d}", n
+        scenario = new_scenario(ref, title, "")
+        scenario["description"] = description
+        scenario["cases"].append(
+            {"id": ref, "name": title, "description": description, "precondition": "", "steps": steps}
+        )
+        scenario["fields"] = fields
+        finish_scenario(scenario)
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        scenario.update(
+            id=f"{TYPED}/{ref}",
+            file=record["file"],
+            module=module,
+            product=product,
+            typed=True,
+            created_at=old.get("created_at", now) if old else now,
+            changed_at=now,
+        )
+        items = [scenario if x is old else x for x in items] if old else [*items, scenario]
+        record.update(scenarios=items, imported_at=now)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        (self.folder / f"{TYPED}.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
+        return scenario
+
+    def delete_typed(self, scenario_id: str) -> dict[str, Any]:
+        path = self.folder / f"{TYPED}.json"
+        record = self._load(path) or {}
+        items = [x for x in record.get("scenarios", []) if isinstance(x, dict)]
+        kept = [x for x in items if x.get("id") != scenario_id]
+        if len(kept) == len(items):
+            raise LookupError("that typed scenario is no longer there")
+        record["scenarios"] = kept
+        path.write_text(json.dumps(record, indent=1), encoding="utf-8")
+        return {"removed": scenario_id}
 
     # ------------------------------------------------------------------ drafts prepared by AI
 

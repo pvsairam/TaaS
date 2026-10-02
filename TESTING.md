@@ -320,6 +320,25 @@ values, never the password. The key is never stored by Quartermaster.
   of the release. In the **Features** tab, a feature only a manual script covers is "Manual only".
 - To remove a workbook: **Imported files**, then **Remove**. To update one, import it again.
 
+#### Type a new scenario (no Excel needed)
+
+1. Click **Tests**, then **Manual scenarios**, then **New scenario**.
+2. Name: `Update my home address`. Module: `HCM`. Product: `Global Human Resources`.
+3. In the first step box, paste these four lines at once:
+
+   ```
+   1. Click Me
+   2. Click Personal Information
+   3. Enter 10 Main Street in Address Line 1
+   4. Click Cancel
+   ```
+
+You should see: four steps, one per line, without the numbers.
+
+4. Click **Save**. The scenario opens, marked "Typed in Quartermaster". It is in the list like an
+   imported one: **Run by hand** or **Prepare** work the same.
+5. Click **Change**, edit a step, and **Save**. Or **Delete** to remove it (past runs stay).
+
 ### 6.8 Needs attention
 
 1. Click **Needs attention**.

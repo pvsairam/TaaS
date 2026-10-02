@@ -7,8 +7,12 @@ import {
 import {loadCommon, runLink, state} from "./state.js";
 import {show} from "./app.js";
 import {startPrepareAll} from "./page-review.js";
+import {openTypedScenario} from "./page-manual-typed.js";
 
 const filters = {q: "", module: "all"};
+const known = {modules: [], products: []}; // suggestions for a new typed scenario
+const newScenario = (kind = "") => button("New scenario", {kind, size: kind ? "sm" : undefined, ic: "plus",
+  title: "Type a scenario's steps here instead of importing a workbook", onClick: () => openTypedScenario(null, known)});
 
 // Run a scenario: by hand the first time (or when asked), by itself once it has been done by hand.
 export async function runScenario(id, {byHand = false, prepare = false} = {}) {
@@ -73,6 +77,8 @@ export async function manualPage() {
   if (state.page !== "tests" || state.query.view !== "manual") return;
   const all = data.scenarios;
   const modules = [...new Set(all.map((s) => s.module).filter(Boolean))].sort();
+  known.modules = modules;
+  known.products = [...new Set(all.map((s) => s.product).filter(Boolean))].sort();
   if (!modules.includes(filters.module)) filters.module = "all";
   const body = h("div", {});
 
@@ -105,7 +111,7 @@ export async function manualPage() {
       ? {ic: "search", title: "No scenarios match", text: "Try another search or module."}
       : {ic: "file", tone: "primary", title: "No manual scripts yet",
         text: "Import your Excel test scripts (a Test Scenarios and Test Cases workbook, or a list of actions with reference numbers). They are read on this computer and matched to Oracle release features.",
-        actions: button("Import manual scripts", {kind: "primary", size: "sm", ic: "download", onClick: () => openManualImport()})}));
+        actions: [button("Import manual scripts", {kind: "primary", size: "sm", ic: "download", onClick: () => openManualImport()}), newScenario("ghost")]}));
   };
   draw();
 
@@ -130,16 +136,20 @@ export async function manualPage() {
   const toPrepare = all.filter((s) => !s.automated && !s.review && !s.blank_data && !s.values_missing && s.step_count);
   const leftOut = all.filter((s) => !s.automated && !s.review && (s.blank_data || s.values_missing || !s.step_count)).length;
   const totals = {cases: all.reduce((a, s) => a + s.case_count, 0), steps: all.reduce((a, s) => a + s.step_count, 0)};
+  const typed = all.filter((x) => x.typed).length;
+  const workbooks = plural(data.files.length, "workbook");
+  const source = !typed ? ` from ${workbooks}` : data.files.length ? ` from ${workbooks} and ${typed} typed here` : ", all typed here";
   show([{label: "Tests", href: "#/tests"}, {label: "Manual scenarios"}],
     h("div", {class: "page-head"},
       h("div", {}, h("h1", {}, "Tests"),
         h("p", {class: "lead"}, all.length
-          ? `${plural(all.length, "manual scenario")}, ${plural(totals.cases, "test case")} and ${plural(totals.steps, "step")} from ${plural(data.files.length, "workbook")}.`
-          : "Manual test scripts imported from Excel.")),
+          ? `${plural(all.length, "manual scenario")}, ${plural(totals.cases, "test case")} and ${plural(totals.steps, "step")}${source}.`
+          : "Manual test scripts imported from Excel, or typed here.")),
       h("div", {class: "row"}, filesBtn,
         aiReady() && toPrepare.length && !batchRunning ? button(`Prepare all (${toPrepare.length})`, {ic: "target", disabled: !state.status.ready,
           title: "The AI prepares every scenario that does not play by itself yet, one after another; you review them after",
           onClick: () => startPrepareAll(toPrepare.length, leftOut)}) : null,
+        newScenario(),
         button("Import manual scripts", {kind: all.length ? "" : "primary", ic: "download", onClick: () => openManualImport()}))),
     h("div", {class: "toolbar"}, testsViewSwitch("manual", {automated: state.tests.length, manual: all.length,
       review: all.filter((s) => s.review === "needs_review").length})),
@@ -188,7 +198,7 @@ export async function openScenario(id) {
     } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
   }});
   const facts = [
-    ["Product", `${s.module} · ${s.product}`], ["Workbook", s.file], ["Scenario", [s.use_case, s.ref].filter(Boolean).join(" · ")],
+    ["Product", `${s.module} · ${s.product}`], [s.typed ? "Source" : "Workbook", s.file], ["Scenario", [s.use_case, s.ref].filter(Boolean).join(" · ")],
     s.tester ? ["Tester in workbook", s.tester] : null, s.minutes ? ["Time in workbook", `${s.minutes} min`] : null,
     s.releases?.length ? ["Workbook says tested in", s.releases.join(", ")] : null,
   ].filter(Boolean);
@@ -200,6 +210,7 @@ export async function openScenario(id) {
       button("Do it by hand", {ic: "file", disabled: !state.status.ready, onClick: () => runScenario(s.id, {byHand: true})}),
       button("Approve", {kind: "primary", ic: "check", onClick: () => approveScenario(s.id)}),
     ] : [
+      s.typed ? button("Change", {ic: "wrench", title: "Change the name, product or steps", onClick: () => openTypedScenario(s, known)}) : null,
       h("span", {class: "meta grow"}, s.automated ? (aiReady() ? "Ready: Run plays it by itself." : "Run plays it by itself. To prepare it again, paste the AI key in Settings.") : aiReady() ? "Prepare: an AI does it and you review. Or do it by hand once." : "Do it by hand once; after that it plays by itself."),
       s.automated ? button("Prepare again", {ic: "target", disabled: !state.status.ready || !aiReady(),
         title: aiReady() ? "The AI does it again, for example when the saved steps are wrong or incomplete"

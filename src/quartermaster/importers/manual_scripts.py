@@ -268,6 +268,16 @@ def _read_actions(result: ScriptImport, rows: list[list[str]]) -> None:
         result.scenarios.append(s)
 
 
+def new_scenario(ref: str, title: str, use_case: str) -> dict[str, Any]:
+    """An empty scenario, as read from a workbook (also used for scenarios typed in Quartermaster)."""
+    return _scenario(ref, title, use_case)
+
+
+def finish_scenario(s: dict[str, Any]) -> None:
+    """Count a scenario's cases, steps, blank test data and sign-ins."""
+    _finish(s)
+
+
 def _some(refs: list[str]) -> str:
     return ", ".join(refs) if len(refs) <= 4 else f"{', '.join(refs[:3])} and {len(refs) - 3} more"
 

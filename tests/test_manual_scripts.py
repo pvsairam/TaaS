@@ -274,3 +274,48 @@ def test_test_data_entered_in_quartermaster_fills_the_steps_the_script_leaves_op
     assert m.get("pay/TS001")["cases"][0]["steps"][0]["action"] == "Enter the start date"  # the import is unchanged
     m.set_test_data("pay/TS001", {})
     assert m.test_data_all() == {}
+
+
+def test_a_scenario_typed_in_quartermaster(tmp_path: Path) -> None:
+    app = App(tests_root=tmp_path / "tests", evidence_root=tmp_path / "ev", data_dir=tmp_path / ".qm")
+    new = {
+        "title": "Update my  home address",
+        "module": "HCM",
+        "product": "Global Human Resources",
+        "steps": [
+            {"action": "Click Me, then Personal Information", "expected": ""},
+            {"action": "", "expected": ""},  # an empty row is left out
+            {"action": "Enter 10 Main Street in Address Line 1", "expected": "The new address is shown"},
+        ],
+        "fields": ["Address Line 1", " "],
+    }
+    made = call(app, "POST", "/api/manual/typed", new)
+    assert made["id"] == "typed/T001" and made["title"] == "Update my home address" and made["typed"]
+    assert (made["step_count"], made["fields"]) == (2, ["Address Line 1"])
+    listing = call(app, "GET", "/api/manual")
+    assert listing["files"] == []  # typed scenarios are not an imported file
+    [row] = listing["scenarios"]
+    assert (row["module"], row["product"], row["values_missing"]) == ("HCM", "Global Human Resources", 0)
+    opened = call(app, "GET", "/api/manual/scenario?id=typed/T001")
+    assert [s["action"] for s in opened["cases"][0]["steps"]][1] == "Enter 10 Main Street in Address Line 1"
+
+    changed = call(app, "POST", "/api/manual/typed", {**new, "id": "typed/T001", "title": "Change my address"})
+    assert changed["id"] == "typed/T001" and changed["created_at"] == made["created_at"]
+    second = call(app, "POST", "/api/manual/typed", new)
+    call(app, "POST", "/api/manual/typed/delete", {"id": second["id"]})
+    third = call(app, "POST", "/api/manual/typed", new)
+    assert (second["id"], third["id"]) == ("typed/T002", "typed/T003")  # a deleted number is not used again
+    assert [s["title"] for s in call(app, "GET", "/api/manual")["scenarios"]] == [
+        "Change my address",
+        "Update my home address",
+    ]
+
+    for bad, message in (
+        ({**new, "title": " "}, "give the scenario a name"),
+        ({**new, "product": ""}, "enter the module and product"),
+        ({**new, "steps": [{"action": "", "expected": ""}]}, "at least one step"),
+        ({**new, "steps": [{"action": "", "expected": "Saved"}]}, "what to do"),
+        ({**new, "id": "typed/T999"}, "no longer there"),
+    ):
+        with pytest.raises(ApiError, match=message):
+            app.handle("POST", "/api/manual/typed", json.dumps(bad).encode())

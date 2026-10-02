@@ -32,6 +32,9 @@ computers and other web sites cannot start runs.
     GET  /api/manual/scenario?id=<id>   one manual scenario with its test cases and steps
     POST /api/manual/import          {"files": [{"name", "content" (base64), "module", "product"}], "save"}
     POST /api/manual/remove          {"key"} forget one imported workbook
+    POST /api/manual/typed           {"id"?, "title", "module", "product", "description", "steps": [{"action",
+                                     "expected"}], "fields"} a manual scenario typed here, not imported
+    POST /api/manual/typed/delete    {"id"} delete a typed scenario
     POST /api/manual/run             {"id", "by_hand", "prepare", "release", "tester"} run a scenario: it plays
                                      by itself once done by hand (or prepared by AI and approved); otherwise it is
                                      done by hand now, or with "prepare" an AI does it and it waits for review
@@ -344,6 +347,10 @@ class App:
                 return _json(self.manual.import_files(data))
             if method == "POST" and route == ["remove"]:
                 return _json(self.manual.remove(str(data.get("key") or "")))
+            if method == "POST" and route == ["typed"]:
+                return _json(self.manual.save_typed(data), HTTPStatus.CREATED)
+            if method == "POST" and route == ["typed", "delete"]:
+                return _json(self.manual.delete_typed(str(data.get("id") or "")))
         except LookupError as e:
             raise ApiError(HTTPStatus.NOT_FOUND, str(e)) from e
         except ValueError as e:
