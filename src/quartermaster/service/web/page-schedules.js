@@ -1,6 +1,6 @@
 // Scheduled runs: tests that run by themselves on chosen days at a chosen time, while qm serve runs.
 import {api, badge, button, callout, card, drawer, emptyState, field, h, input, plural, remember, table, toast, when} from "./ui.js";
-import {loadCommon, runLink, state} from "./state.js";
+import {loadCommon, runLink, schedule, state} from "./state.js";
 import {show} from "./app.js";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -39,6 +39,14 @@ export async function schedulesPage() {
     callout("info", "Scheduled runs only start while Quartermaster is running.",
       "Keep qm serve running on a computer that stays on (and is signed in to the pod's network). A run missed while it was stopped starts only if Quartermaster is back within the hour."),
     h("div", {class: "card"}, body));
+  // Keep "Next run" and "Last run" current while the page is open (the timer checks every 30 s),
+  // but never redraw under a schedule being edited.
+  const refresh = () => {
+    if (state.page !== "schedules") return;
+    if (document.querySelector(".scrim")) schedule(refresh, 5000);
+    else schedulesPage();
+  };
+  schedule(refresh, 15000);
 }
 
 function openSchedule(s) {
