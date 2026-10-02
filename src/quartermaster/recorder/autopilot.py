@@ -103,6 +103,71 @@ EXPANDED_JS = r"""(text) => {
   return null;
 }"""
 
+# The toggle that opens the section with this heading: the heading's own clickable ancestor, or the
+# one toggle (arrow or header button) in the smallest container around it. Looks inside web
+# components too. It is marked data-qm-toggle="1" so Playwright can click it; returns its state,
+# role and name, or null.
+TOGGLE_JS = r"""(text) => {
+  const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const sel = '[aria-expanded], button, [role=button], summary, oj-button, oj-c-button';
+  const all = [];
+  const walk = (root) => root.querySelectorAll('*').forEach((e) => {
+    all.push(e);
+    if (e.shadowRoot) walk(e.shadowRoot);
+  });
+  walk(document);
+  all.forEach((e) => e.removeAttribute && e.removeAttribute('data-qm-toggle'));
+  const el = all.find((e) => clean(e.textContent) === text
+    && ![...e.children].some((c) => clean(c.textContent) === text));
+  if (!el) return null;
+  const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+  const mark = (t) => {
+    t.setAttribute('data-qm-toggle', '1');
+    const role = t.getAttribute('role') || (t.tagName === 'BUTTON' ? 'button' : '');
+    return {expanded: t.getAttribute('aria-expanded'), role,
+      name: clean(t.getAttribute('aria-label') || t.getAttribute('title') || t.textContent).slice(0, 80)};
+  };
+  for (let n = el, depth = 0; n && n !== document.body && depth < 8; n = up(n), depth++) {
+    if (n.matches && n.matches(sel)) return mark(n);
+    const inside = n.querySelectorAll ? [...n.querySelectorAll(sel)] : [];
+    const deep = n.shadowRoot ? [...n.shadowRoot.querySelectorAll(sel)] : [];
+    const found = [...inside, ...deep];
+    const withState = found.filter((t) => t.hasAttribute('aria-expanded'));
+    if (withState.length === 1) return mark(withState[0]);
+    if (withState.length > 1 || found.length > 2) return null;  // other sections are in here too
+    if (found.length) return mark(found[found.length - 1]);  // the arrow comes after the heading
+  }
+  return null;
+}"""
+
+# How the section around a heading is built: tag, role, aria and tabindex of its ancestors and of
+# their children (no text but the heading), for the diary.
+SECTION_INFO_JS = r"""(text) => {
+  const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const all = [];
+  const walk = (root) => root.querySelectorAll('*').forEach((e) => {
+    all.push(e);
+    if (e.shadowRoot) walk(e.shadowRoot);
+  });
+  walk(document);
+  const el = all.find((e) => clean(e.textContent) === text
+    && ![...e.children].some((c) => clean(c.textContent) === text));
+  if (!el) return 'heading not found';
+  const desc = (e) => {
+    const a = (k) => (e.getAttribute(k) !== null ? `[${k}=${e.getAttribute(k)}]` : '');
+    const names = typeof e.className === 'string' ? e.className.trim().split(/\s+/).filter(Boolean) : [];
+    const cls = names.length ? '.' + names.slice(0, 3).join('.') : '';
+    return e.tagName.toLowerCase() + cls + a('role') + a('aria-expanded') + a('tabindex')
+      + (e.shadowRoot ? '(shadow)' : '');
+  };
+  const out = [];
+  const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+  for (let n = el, depth = 0; n && n !== document.body && depth < 4; n = up(n), depth++) {
+    out.push(desc(n) + ' > ' + [...(n.children || [])].slice(0, 6).map(desc).join(' , '));
+  }
+  return out.join(' || ');
+}"""
+
 # What the AI is shown of the page: never values typed in fields, only labels and visible names.
 SNAPSHOT_JS = r"""() => {
   const vis = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
@@ -532,53 +597,88 @@ class Autopilot:
             hit = next((t for t in texts if t.lower() == low), None) or next(
                 (t for t in texts if t.lower().startswith(low + " ") or t.lower().startswith(low + ":")), None
             )
+            if hit is None and _count(_visible(self.page.get_by_text(w, exact=True))) >= 1:
+                hit = w  # shown, inside a part of the page the screen list does not reach
             if hit and hit not in out:
                 out.append(hit)
         return out
 
     def _open_section(self, section: str, wanted: list[str]) -> None:
-        """Open a collapsed section by clicking its heading, and record that so replays open it too.
-        A section that is open already is left alone (a click would close it). Every outcome is
-        written in the diary."""
-        heading = self.page.get_by_text(section, exact=True)
-        shown = _visible(heading)
-        if _count(shown) != 1:
-            self._note(f"  Section {section}: its heading is shown {_count(shown)} times, so it was not clicked")
-            return
+        """Open a closed section with its toggle (the arrow or header button next to its heading;
+        on Redwood pages a click on the heading text itself does nothing), and record that click so
+        replays open it too. A section that is open already is left alone. The diary says what
+        happened, and how the section is built when it could not be opened."""
         try:
-            state = self.page.evaluate(EXPANDED_JS, section)
+            found = self.page.evaluate(TOGGLE_JS, section)
         except Exception:
-            state = None
-        if state is True:
+            found = None
+        if not isinstance(found, dict):
+            self._note(f"  Section {section}: no toggle found near its heading")
+            self._note_section(section)
+            return
+        if found.get("expanded") == "true":
             self._note(f"  Section {section}: open already, and its fields are not in it")
             return
-        before = len(self._screen().get("texts", []))
+        toggle = self.page.locator('[data-qm-toggle="1"]')
+        before = self._amount_shown()
         try:
-            shown.first.click(timeout=8000)
+            toggle.first.click(timeout=8000)
         except Exception as e:
-            self._note(f"  Section {section}: its heading could not be clicked ({_first_line(e)})")
+            self._note(f"  Section {section}: its toggle could not be clicked ({_first_line(e)})")
+            self._note_section(section)
             return
         self.settle()
-        after = len(self._screen().get("texts", []))
-        unique = _count(heading) == 1  # a replay finds the heading by its text: it must be the only one
-        if self._shown(wanted) or (after > before and state is not True):
-            # It opened (its fields, or at least more on the screen): keep it open, so the picture
-            # shows what is in it, and so replays open it too.
-            if unique:
-                self.recorder.events.append(
-                    {"kind": "click", "intent": section, "candidates": [{"strategy": "text", "value": section}]}
-                )
-            self._note(
-                f"  Section {section}: opened" + ("" if self._shown(wanted) else ", but its fields are not in it")
-            )
-        elif after < before:
-            # That click closed it (it was open): open it again, so the page stays as it was
-            with suppress(Exception):
-                shown.first.click(timeout=8000)
-                self.settle()
-            self._note(f"  Section {section}: it was open already, and its fields are not in it")
-        else:
-            self._note(f"  Section {section}: clicking its heading showed nothing new")
+        now = self._expanded(toggle)
+        opened = self._shown(wanted) or now == "true" or (now is None and self._amount_shown() > before)
+        if not opened:
+            self._note(f"  Section {section}: clicking its toggle showed nothing new")
+            self._note_section(section)
+            return
+        ways = self._toggle_ways(toggle, found)
+        if ways:
+            self.recorder.events.append({"kind": "click", "intent": f"Open {section}", "candidates": ways})
+        self._note(
+            f"  Section {section}: opened"
+            + ("" if self._shown(wanted) else ", but its fields are not in it")
+            + ("" if ways else " (a replay cannot find its toggle again, so it will not open it)")
+        )
+        with suppress(Exception):
+            self.page.evaluate("() => document.querySelector('[data-qm-toggle]')?.removeAttribute('data-qm-toggle')")
+
+    def _expanded(self, toggle: Any) -> str | None:
+        try:
+            value = toggle.first.get_attribute("aria-expanded", timeout=2000)
+        except Exception:
+            return None
+        return str(value) if value is not None else None
+
+    def _amount_shown(self) -> int:
+        try:
+            return int(self.page.evaluate("() => document.body.innerText.length"))
+        except Exception:
+            return 0
+
+    def _toggle_ways(self, toggle: Any, found: dict[str, Any]) -> list[dict[str, str]]:
+        """How a replay finds the toggle again: by its button name, or by its place on the page."""
+        ways: list[dict[str, str]] = []
+        name = str(found.get("name") or "")
+        role = str(found.get("role") or "")
+        if name and role and _count(self.page.get_by_role(role, name=name, exact=True)) == 1:
+            ways.append({"strategy": "role", "value": f"{role}:{name}"})
+        css = self._css_path(toggle.first)
+        if css:
+            ways.append({"strategy": "css", "value": css})
+        return ways
+
+    def _note_section(self, section: str) -> None:
+        """How the section around this heading is built (tags, roles, toggles; no data), so the
+        diary shows what to click when it could not be opened."""
+        try:
+            info = self.page.evaluate(SECTION_INFO_JS, section)
+        except Exception:
+            return
+        if isinstance(info, str) and info:
+            self._note("    How it is built: " + info[:1500])
 
     def _choose_checks(self, step: dict[str, str]) -> None:
         """Checks that prove the last page is the right one, so a replay cannot pass on a wrong page.

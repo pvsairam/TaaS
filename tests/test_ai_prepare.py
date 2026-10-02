@@ -197,7 +197,11 @@ class Locator:
         self.page, self.key = page, key
 
     def count(self) -> int:
-        return self.page.counts.get(self.key, 0)
+        if self.key in self.page.counts:
+            return self.page.counts[self.key]
+        # a text not set up: on the page when the current screen shows it
+        shown = self.page.screens[self.page.screen].get("texts", [])
+        return 1 if self.key.startswith("text:") and self.key[5:] in shown else 0
 
     @property
     def first(self) -> Locator:
@@ -217,9 +221,17 @@ class ScriptedPage(FakePage):
         self.screens, self.screen, self.counts = screens, start, counts
         self.after = {f"role:link:{n}": n for n in screens}
         self.done: list[tuple[str, ...]] = []
+        self.toggles: dict[str, dict[str, Any]] = {}  # section heading -> its toggle (see TOGGLE_JS)
 
-    def evaluate(self, script: str) -> dict[str, Any]:
+    def evaluate(self, script: str, arg: Any = None) -> Any:
+        if "setAttribute('data-qm-toggle'" in script:
+            return self.toggles.get(arg)
+        if "innerText.length" in script:
+            return sum(len(t) for t in self.screens[self.screen]["texts"])
         return self.screens[self.screen]
+
+    def locator(self, css: str) -> Locator:
+        return Locator(self, f"css:{css}")
 
     def get_by_role(self, role: str, name: str, exact: bool) -> Locator:
         return Locator(self, f"role:{role}:{name}")
@@ -327,9 +339,11 @@ def comp_run(tmp_path: Path, last: dict[str, Any]) -> tuple[Autopilot, ScriptedP
             texts=("Current Salary", "Salary", "Annual Salary", "Additional Compensation", "Plan", "Amount")
         ),
     }
-    texts = {f"text:{t}": 1 for scr in screens.values() for t in scr["texts"]}
-    page = ScriptedPage(screens, "home", {f"role:link:{n}": 1 for n in screens} | texts)
-    page.after["text:Additional Compensation"] = "open"  # clicking the heading opens the section
+    page = ScriptedPage(screens, "home", {f"role:link:{n}": 1 for n in screens})
+    # the arrow next to the heading opens the section (a click on the heading text does nothing)
+    page.toggles["Additional Compensation"] = {"expanded": "false", "role": "button", "name": "Additional Compensation"}
+    page.counts["role:button:Additional Compensation"] = 1
+    page.after['css:[data-qm-toggle="1"]'] = "open"
     recorder = Recorder(test_id="t")
     guide = Guide({**SCENARIO, "fields": COMP_FIELDS}, tmp_path / "run")
     answers = [{"do": "done"}] + [{"do": "click", "element": 1}, {"do": "done"}] * 3
@@ -344,8 +358,8 @@ def test_the_fields_the_script_lists_are_checked_and_a_closed_section_is_opened(
     assert checks == ["Salary", "Annual Salary", "Plan", "Amount"]  # not just the section headings
     assert {
         "kind": "click",
-        "intent": "Additional Compensation",
-        "candidates": [{"strategy": "text", "value": "Additional Compensation"}],
+        "intent": "Open Additional Compensation",
+        "candidates": [{"strategy": "role", "value": "button:Additional Compensation"}],
     } in recorder.events
 
 
@@ -353,7 +367,7 @@ def test_a_page_without_the_fields_to_check_stops_instead_of_passing(tmp_path: P
     # Current Salary shows "There's nothing here so far": the test user has no salary on the pod
     empty = screen(texts=("Current Salary", "There's nothing here so far.", "Additional Compensation"))
     pilot, page, recorder, guide = comp_run(tmp_path, empty)
-    page.after["text:Additional Compensation"] = "My Compensation"  # and the section stays empty
+    page.after['css:[data-qm-toggle="1"]'] = "My Compensation"  # and the section stays empty
     assert pilot.run() is False
     assert "does not show Current Salary (Salary, Adjustment, Start Date, Annual Salary)" in pilot.reason
     assert "test user may have no data" in pilot.reason
@@ -364,7 +378,7 @@ def test_an_empty_section_is_left_open_for_the_picture_and_the_diary_says_why(tm
     empty = screen(texts=("Current Salary", "There's nothing here so far.", "Additional Compensation"))
     pilot, page, recorder, guide = comp_run(tmp_path, empty)
     page.screens["empty open"] = screen(texts=(*empty["texts"], "No additional compensation."))
-    page.after["text:Additional Compensation"] = "empty open"  # it opens, but holds no fields
+    page.after['css:[data-qm-toggle="1"]'] = "empty open"  # it opens, but holds no fields
     assert pilot.run() is False and "test user may have no data" in pilot.reason
     assert page.screen == "empty open"  # left open: the picture shows that it is empty
     diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
