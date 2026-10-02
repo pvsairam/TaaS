@@ -160,6 +160,33 @@ export async function manualPage() {
 export async function openScenario(id) {
   let s;
   try { s = await api("/api/manual/scenario?id=" + encodeURIComponent(id)); } catch (e) { toast(e.message); return; }
+  // Step numbers as the scenario is done (a case without steps counts as one), and a test data box
+  // for each step whose script does not give the value, or that has test data entered already.
+  const numbers = new Map();
+  let count = 0;
+  for (const c of s.cases) { if (!c.steps.length) count += 1; for (const st of c.steps) numbers.set(st, ++count); }
+  const entered = s.test_data || {};
+  const boxes = new Map();
+  const dataBox = (n) => {
+    const need = (s.needs_data || {})[n];
+    if (!need && !entered[n]) return null;
+    const box = input({value: entered[n] || "", maxlength: "500", "aria-label": `Test data for step ${n}`,
+      placeholder: need === "blank" ? "The script says <> here: type the value to use" : "e.g. Start Date: 01/10/2026; Supplier: Acme"});
+    boxes.set(n, box);
+    return h("label", {class: "stack", style: "gap:4px;margin-top:6px"},
+      h("span", {class: "caption", style: need && !entered[n] ? "color:var(--warning)" : ""}, need && !entered[n] ? "TEST DATA NEEDED" : "TEST DATA"), box);
+  };
+  const saveData = button("Save test data", {kind: "primary", size: "sm", ic: "check", onClick: async (e) => {
+    e.currentTarget.disabled = true;
+    const values = Object.fromEntries([...boxes].map(([n, box]) => [n, box.value.trim()]));
+    try {
+      await api("/api/manual/data", {id: s.id, values});
+      toast("Test data saved. Prepare and Run by hand use it from now on.");
+      document.querySelector(".scrim")?.click();
+      if (location.hash.startsWith("#/tests?view=manual")) manualPage();
+      openScenario(s.id);
+    } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+  }});
   const facts = [
     ["Product", `${s.module} · ${s.product}`], ["Workbook", s.file], ["Scenario", [s.use_case, s.ref].filter(Boolean).join(" · ")],
     s.tester ? ["Tester in workbook", s.tester] : null, s.minutes ? ["Time in workbook", `${s.minutes} min`] : null,
@@ -198,14 +225,21 @@ export async function openScenario(id) {
       s.blank_data ? callout("warning", "Test data missing.", "Some steps say <> where a value should be, such as a user or supplier. Fill these in before testing.") : null,
       s.fields?.length ? h("div", {}, h("div", {class: "caption", style: "margin-bottom:6px"}, "FIELDS TO CHECK"),
         h("ul", {style: "margin:0;padding-left:18px"}, s.fields.map((f) => h("li", {}, f)))) : null,
+      Object.keys(s.needs_data || {}).length ? callout("warning", "Some steps need test data.",
+        "The script does not give the value to type (or says <>). Type it below each marked step, then Save test data. The AI and the tester then see it as part of the step; the workbook is not changed. Never type a password here: test data is kept as plain text and sent to the AI. Do steps that need a sign-in by hand.") : null,
       ...s.cases.map((c) => h("section", {class: "card", style: "padding:14px 16px"},
         h("div", {class: "row", style: "gap:8px;margin-bottom:4px"}, h("span", {class: "tag"}, c.id), h("strong", {}, c.name)),
         c.description && c.description !== c.name ? h("p", {class: "meta", style: "margin:0 0 8px"}, c.description) : null,
         c.precondition ? h("p", {class: "meta", style: "margin:0 0 8px;white-space:pre-line"}, h("strong", {}, "Before you start: "), c.precondition) : null,
-        c.steps.length ? h("ol", {class: "stack", style: "gap:8px;margin:0;padding-left:20px"}, c.steps.map((st) => h("li", {},
-          h("div", {style: "white-space:pre-line"}, st.action),
-          st.expected ? h("div", {class: "meta", style: "white-space:pre-line"}, "Expected: ", st.expected) : null))) :
+        c.steps.length ? h("ol", {class: "stack", style: "gap:8px;margin:0;padding-left:20px"}, c.steps.map((st) => {
+          const n = String(numbers.get(st));
+          return h("li", {},
+            h("div", {style: "white-space:pre-line"}, st.action),
+            st.expected ? h("div", {class: "meta", style: "white-space:pre-line"}, "Expected: ", st.expected) : null,
+            dataBox(n));
+        })) :
           h("p", {class: "muted", style: "margin:0"}, "No steps written."))),
+      boxes.size ? h("div", {class: "row"}, saveData) : null,
     ],
   });
 }

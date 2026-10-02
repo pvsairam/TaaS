@@ -73,6 +73,7 @@ class ManualScripts:
             if not data:
                 continue
             items = [s for s in data.get("scenarios", []) if isinstance(s, dict)]
+            entered = self.test_data_all()
             files.append(
                 {
                     "key": path.stem,
@@ -84,10 +85,16 @@ class ManualScripts:
                     "warnings": data.get("warnings", []),
                 }
             )
-            scenarios.extend(
-                {**{k: v for k, v in s.items() if k not in ("cases", "fields")}, "values_missing": values_missing(s)}
-                for s in items
-            )
+            for s in items:
+                need = needs_data(s, entered.get(str(s.get("id")), {}))
+                scenarios.append(
+                    {
+                        **{k: v for k, v in s.items() if k not in ("cases", "fields")},
+                        # what still needs a value nobody has given (in the workbook or in Quartermaster)
+                        "values_missing": sum(1 for kind in need.values() if kind == "value"),
+                        "blank_data": any(kind == "blank" for kind in need.values()),
+                    }
+                )
         return {"files": files, "scenarios": scenarios}
 
     @staticmethod
@@ -222,6 +229,55 @@ class ManualScripts:
         if data.pop(scenario_id, None) is not None:
             self._save_reviews(data)
 
+    # ------------------------------------------------------------------ test data entered here
+
+    @property
+    def _data_file(self) -> Path:
+        return self._review_file.parent / "test_data.json"
+
+    def test_data_all(self) -> dict[str, dict[str, str]]:
+        """Values entered in Quartermaster for steps whose script does not give them, per scenario:
+        {scenario id: {step number: text}}. Kept on this computer; the workbook is not changed."""
+        try:
+            data = json.loads(self._data_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_test_data(self, scenario_id: str, values: dict[str, Any]) -> dict[str, str]:
+        scenario = self.get(scenario_id)
+        count = len(numbered_steps(scenario))
+        clean: dict[str, str] = {}
+        for key, text in (values or {}).items():
+            number = str(key).strip()
+            value = " ".join(str(text or "").split())[:500]
+            if not number.isdigit() or not 1 <= int(number) <= count:
+                raise ValueError(f"step {key} is not in this scenario")
+            if value:
+                clean[number] = value
+        data = self.test_data_all()
+        if clean:
+            data[scenario_id] = clean
+        else:
+            data.pop(scenario_id, None)
+        self._data_file.parent.mkdir(parents=True, exist_ok=True)
+        self._data_file.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        return clean
+
+    def with_test_data(self, scenario: dict[str, Any]) -> dict[str, Any]:
+        """The scenario with the values entered here written into its steps ("Test data: ..."), as
+        the AI and the tester then read them."""
+        entered = self.test_data_all().get(str(scenario.get("id")), {})
+        if not entered:
+            return scenario
+        out = json.loads(json.dumps(scenario))
+        for number, case_index, step_index in numbered_steps(out):
+            text = entered.get(str(number))
+            if text and step_index is not None:
+                st = out["cases"][case_index]["steps"][step_index]
+                st["action"] = f"{st.get('action', '')}\nTest data: {text}"
+        return out
+
     def remove(self, key: str) -> dict[str, Any]:
         if not re.fullmatch(r"[a-z0-9-]+", key or ""):
             raise ValueError("unknown file")
@@ -236,9 +292,38 @@ _TYPES = re.compile(r"\b(enter|type|fill(?:\s+in)?|input|provide|key\s+in)\b", r
 _GIVES = re.compile(r"\d|\bas\s+\S|[:=]\s*\S|\be\.g\.", re.I)
 
 
+def numbered_steps(scenario: dict[str, Any]) -> list[tuple[int, int, int | None]]:
+    """(step number, case index, step index) in the order a scenario is done (see guided.guide_steps:
+    a case without steps counts as one step, with step index None)."""
+    out: list[tuple[int, int, int | None]] = []
+    for ci, case in enumerate(scenario.get("cases") or []):
+        steps = case.get("steps") or []
+        if not steps:
+            out.append((len(out) + 1, ci, None))
+        for si in range(len(steps)):
+            out.append((len(out) + 1, ci, si))
+    return out
+
+
+def needs_data(scenario: dict[str, Any], entered: dict[str, str] | None = None) -> dict[int, str]:
+    """The steps that need a value nobody has given yet, by step number: "blank" where the script
+    says <> (test data missing), "value" where it says to type something without saying what
+    ("Enter required data", "enter the date"). The AI never makes values up, so Prepare stops at
+    them. Names in quotes are usually field names, not values, so they do not count as a value."""
+    entered = entered or {}
+    out: dict[int, str] = {}
+    for number, ci, si in numbered_steps(scenario):
+        if si is None or entered.get(str(number)):
+            continue
+        st = scenario["cases"][ci]["steps"][si]
+        action, expected = str(st.get("action", "")), str(st.get("expected", ""))
+        if re.search(r"<\s*>", f"{action} {expected}"):
+            out[number] = "blank"
+        elif _TYPES.search(action) and not _GIVES.search(action):
+            out[number] = "value"
+    return out
+
+
 def values_missing(scenario: dict[str, Any]) -> int:
-    """How many steps say to type something without saying what ("Enter required data", "enter
-    the date"). A person fills those in; the AI never makes values up, so Prepare stops there.
-    Names in quotes are usually field names, not values, so they do not count as a value."""
-    steps = [st for c in scenario.get("cases") or [] for st in c.get("steps") or []]
-    return sum(1 for st in steps if _TYPES.search(st.get("action", "")) and not _GIVES.search(st.get("action", "")))
+    """How many steps say to type something without saying what (see needs_data)."""
+    return sum(1 for kind in needs_data(scenario).values() if kind == "value")

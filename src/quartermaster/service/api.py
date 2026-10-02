@@ -32,6 +32,7 @@ computers and other web sites cannot start runs.
     POST /api/manual/run             {"id", "by_hand", "prepare", "release", "tester"} run a scenario: it plays
                                      by itself once done by hand (or prepared by AI and approved); otherwise it is
                                      done by hand now, or with "prepare" an AI does it and it waits for review
+    POST /api/manual/data            {"id", "values": {step number: text}} test data for steps the script leaves open
     POST /api/manual/approve         {"id"} or {"ids": [...]} a person checked what the AI prepared: Run may now play it
     GET  /api/manual/review          scenarios an AI prepared that wait for review, with each step's picture
     GET  /api/manual/prepare-all     progress of Prepare all
@@ -64,7 +65,7 @@ from quartermaster.evidence.document import plain_error
 from quartermaster.service import insights
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
-from quartermaster.service.manual import ManualScripts
+from quartermaster.service.manual import ManualScripts, needs_data
 from quartermaster.service.prepare_all import PrepareAll
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
@@ -257,9 +258,17 @@ class App:
                 summary["prepare_all"] = self.prepare_all.view()
                 return _json(summary)
             if method == "GET" and route == ["scenario"]:
-                scenario = self.manual.get(str((query.get("id") or [""])[0]))
+                scenario = dict(self.manual.get(str((query.get("id") or [""])[0])))
                 self._with_results([scenario], history=True)
+                entered = self.manual.test_data_all().get(scenario["id"], {})
+                scenario["test_data"] = entered
+                # step number -> "blank" (<> in the script) or "value" (says to type, without what)
+                scenario["needs_data"] = {str(n): k for n, k in needs_data(scenario).items()}
                 return _json(scenario)
+            if method == "POST" and route == ["data"]:
+                scenario = self.manual.get(str(data.get("id") or ""))
+                values = data.get("values") if isinstance(data.get("values"), dict) else {}
+                return _json({"test_data": self.manual.set_test_data(scenario["id"], values)})
             if method == "POST" and route == ["run"]:
                 return _json(self.run_manual(data), HTTPStatus.CREATED)
             if method == "POST" and route == ["approve"]:
@@ -334,8 +343,9 @@ class App:
 
     def run_manual(self, data: dict[str, Any], batch: bool = False) -> dict[str, Any]:
         """Once a scenario has been done by hand, Run plays it by itself; before that (or when asked
-        with by_hand) the tester does it by hand while Quartermaster takes pictures and records."""
-        scenario = self.manual.get(str(data.get("id") or ""))
+        with by_hand) the tester does it by hand while Quartermaster takes pictures and records.
+        Test data entered in Quartermaster is written into the scenario's steps."""
+        scenario = self.manual.with_test_data(self.manual.get(str(data.get("id") or "")))
         guided = (
             data.get("prepare")
             or data.get("by_hand")

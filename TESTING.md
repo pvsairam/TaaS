@@ -249,6 +249,15 @@ this change keep the old layout until you prepare them again or do them by hand 
   (or **Do it by hand**). The new version waits in **To review** until you approve it; if the AI
   stops, the current version stays.
 
+**Fill in test data the script does not give**
+
+When a scenario shows **Values not written** or **Test data missing**, click its name. Each step
+that needs a value has a box (**TEST DATA NEEDED**). Type the value, for example "Start Date:
+01/10/2026; Absence Type: Vacation", and click **Save test data**. The badge goes away, Prepare all
+includes the scenario, and the AI and the tester see the value as part of the step. The workbook is
+not changed; the values are kept in `.qm`. Never type a password there: do steps that need a
+sign-in by hand.
+
 **Prepare many at once (optional)**
 
 14. In **Manual scenarios**, click **Prepare all (N)**. N is the number of scenarios that do not

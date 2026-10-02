@@ -227,3 +227,50 @@ def test_import_list_open_remove_and_match_to_a_release(tmp_path: Path) -> None:
             app.handle("POST", path, json.dumps(body).encode())
     with pytest.raises(ApiError, match="no manual scenario"):
         app.handle("GET", "/api/manual/scenario?id=nope", b"")
+
+
+def test_test_data_entered_in_quartermaster_fills_the_steps_the_script_leaves_open(tmp_path: Path) -> None:
+    from quartermaster.service.manual import ManualScripts
+
+    folder = tmp_path / "manual"
+    folder.mkdir()
+    scenario = {
+        "id": "pay/TS001",
+        "ref": "TS001",
+        "title": "Submit an absence",
+        "module": "HCM",
+        "product": "Absence Management",
+        "blank_data": True,
+        "step_count": 3,
+        "cases": [
+            {
+                "id": "TC1",
+                "name": "Submit",
+                "steps": [
+                    {"action": "Enter the start date", "expected": ""},
+                    {"action": "Choose the absence type <>", "expected": ""},
+                    {"action": "Click Submit", "expected": "It is submitted"},
+                ],
+            }
+        ],
+    }
+    (folder / "pay.json").write_text(json.dumps({"file": "pay.xlsx", "scenarios": [scenario]}))
+    m = ManualScripts(folder)
+    [row] = m.summary()["scenarios"]
+    assert (row["values_missing"], row["blank_data"]) == (1, True)  # Prepare all leaves it out
+
+    with pytest.raises(ValueError, match="step 9 is not in this scenario"):
+        m.set_test_data("pay/TS001", {"9": "x"})
+    assert m.set_test_data("pay/TS001", {"1": " 01/10/2026 ", "2": "Vacation", "3": ""}) == {
+        "1": "01/10/2026",
+        "2": "Vacation",
+    }
+    [row] = m.summary()["scenarios"]
+    assert (row["values_missing"], row["blank_data"]) == (0, False)  # ready for Prepare all now
+
+    steps = m.with_test_data(m.get("pay/TS001"))["cases"][0]["steps"]
+    assert steps[0]["action"] == "Enter the start date\nTest data: 01/10/2026"  # what the AI and tester read
+    assert steps[2]["action"] == "Click Submit"
+    assert m.get("pay/TS001")["cases"][0]["steps"][0]["action"] == "Enter the start date"  # the import is unchanged
+    m.set_test_data("pay/TS001", {})
+    assert m.test_data_all() == {}
