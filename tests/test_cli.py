@@ -224,3 +224,56 @@ def test_serve_keeps_your_tests_apart_from_the_examples(
     assert "next to the examples" in capsys.readouterr().out
     assert _tests_folder("nowhere") is None
     assert "no tests folder" in capsys.readouterr().err
+
+
+def test_starting_again_opens_the_quartermaster_already_running(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from quartermaster.cli import _answers
+
+    class Running(BaseHTTPRequestHandler):
+        server_version = "Quartermaster"
+
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Running)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+    monkeypatch.chdir(tmp_path)  # no tests folder here: a second start must not need one
+    try:
+        assert _answers(f"http://127.0.0.1:{port}")
+        assert main(["serve", "--port", str(port)]) == 0
+        assert opened == [f"http://127.0.0.1:{port}"]
+        assert "already running" in capsys.readouterr().out
+        assert not (tmp_path / ".qm").exists()  # nothing set up by the second start
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert not _answers(f"http://127.0.0.1:{port}")
+
+
+def test_start_files_and_the_desktop_icon(capsys: pytest.CaptureFixture[str]) -> None:
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    start = (root / "Start Quartermaster.bat").read_text()
+    assert 'cd /d "%~dp0"' in start and "quartermaster.cli serve" in start and "quartermaster.cli shortcut" in start
+    assert "playwright install chromium" in start  # the first start installs the browser too
+    assert "git pull" in (root / "Update Quartermaster.bat").read_text()
+    assert "*.bat text eol=crlf" in (root / ".gitattributes").read_text()  # double-click needs Windows line ends
+    if sys.platform != "win32":
+        assert main(["shortcut"]) == 0
+        assert "Windows only" in capsys.readouterr().out

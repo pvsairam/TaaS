@@ -456,12 +456,59 @@ def _tests_folder(name: str) -> Path | None:
     return tests
 
 
+def _answers(address: str) -> bool:
+    """A Quartermaster answers at this address."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{address}/api/status", timeout=3) as res:  # noqa: S310 - this computer
+            return res.headers.get("Server", "").startswith("Quartermaster")
+    except OSError:
+        return False
+
+
+def _ps(path: Path) -> str:
+    """A path inside single quotes in PowerShell."""
+    return str(path).replace("'", "''")
+
+
+def _shortcut(args: argparse.Namespace) -> int:
+    """Put a Quartermaster icon on the desktop that runs Start Quartermaster.bat (Windows)."""
+    start = Path(__file__).resolve().parents[2] / "Start Quartermaster.bat"
+    if sys.platform != "win32":
+        print("Desktop icons are made on Windows only. Here, start with ./start-quartermaster.sh")
+        return 0
+    if not start.is_file():
+        print(f"error: {start} is missing", file=sys.stderr)
+        return 2
+    script = (
+        "$desktop = [Environment]::GetFolderPath('Desktop'); "
+        "$link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop 'Quartermaster.lnk')); "
+        f"$link.TargetPath = '{_ps(start)}'; $link.WorkingDirectory = '{_ps(start.parent)}'; "
+        "$link.Description = 'Start Quartermaster'; $link.Save()"
+    )
+    import subprocess
+
+    done = subprocess.run(["powershell", "-NoProfile", "-Command", script], check=False)
+    if done.returncode:
+        print("The desktop icon could not be made. Start with 'Start Quartermaster' in the TaaS folder.")
+        return 0
+    print("Added a Quartermaster icon to the desktop. Double-click it to start Quartermaster.")
+    return 0
+
+
 def _serve(args: argparse.Namespace) -> int:
     import webbrowser
 
     from quartermaster.service.api import make_server, port_of
     from quartermaster.service.hub import Hub
 
+    address = f"http://127.0.0.1:{args.port}"
+    if _answers(address):  # started a second time, e.g. the desktop icon double-clicked again
+        print(f"Quartermaster is already running at {address}. Opening it.")
+        if not args.no_browser:
+            webbrowser.open(address)
+        return 0
     tests = _tests_folder(args.tests)
     if tests is None:
         return 2
@@ -474,7 +521,12 @@ def _serve(args: argparse.Namespace) -> int:
         seed_tests=examples if examples.is_dir() else None,
         releases_root=Path(args.releases),
     )
-    server = make_server(app, port=args.port)
+    try:
+        server = make_server(app, port=args.port)
+    except OSError:
+        print(f"error: port {args.port} is used by another program; start with --port 8766", file=sys.stderr)
+        app.stop()
+        return 2
     address = f"http://127.0.0.1:{port_of(server)}"
     app.start()
     print(f"Quartermaster is running at {address}  (tests: {tests}, evidence: {args.evidence})")
@@ -568,6 +620,9 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--ai-key-env", default="", help="NAME of the environment variable with the AI key")
     rc.add_argument("--ai-workspace", default="", help="Anthropic only: workspace ID, for a key not tied to one")
     rc.set_defaults(func=_record)
+
+    sc = sub.add_parser("shortcut", help="put a Quartermaster icon on the desktop (Windows)")
+    sc.set_defaults(func=_shortcut)
 
     si = sub.add_parser("signin", help="sign in to the pod by hand (single sign-on, MFA); used by qm serve")
     si.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])

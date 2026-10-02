@@ -13,6 +13,24 @@ Commands are for Windows PowerShell. Type them in the `TaaS` folder.
 - Git. Check with `git --version`.
 - The pod address, a test user name and its password. Use a test pod only, never production.
 
+## The easy way: no terminal
+
+1. Get the `TaaS` folder onto the laptop once (the `git clone` lines below, or a copy of the
+   folder).
+2. Open the `TaaS` folder and double-click **Start Quartermaster**.
+
+You should see: a black window. The first time it says it is installing (a few minutes, only
+once), then it puts a **Quartermaster** icon on the desktop. Your browser opens Quartermaster. If
+nothing is set up yet, the setup guide opens (see 6.1).
+
+- From then on, double-click the **Quartermaster** icon on the desktop to start it.
+- Keep the black window open while you use Quartermaster. Close it to stop.
+- Double-clicking the icon again while it runs just opens the browser.
+- To get the latest version: close the black window, then double-click **Update Quartermaster**
+  in the `TaaS` folder.
+
+The parts below are the same steps done by hand in a terminal, for testers and developers.
+
 ## Part 2. One-time setup
 
 Do this once on a new laptop.

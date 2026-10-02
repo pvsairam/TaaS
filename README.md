@@ -34,6 +34,13 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Release feature list import (Oracle feature-listing .xlsx, .csv, .json/.yaml) and manual test script import (.xlsx), standard library only | `src/quartermaster/importers/` |
 | Web UI on your own computer (`qm serve`): start runs, follow them live, record, open evidence | `src/quartermaster/service/` |
 
+## Start it (no terminal)
+
+On Windows, double-click **Start Quartermaster** in this folder. The first time it installs what it
+needs and adds a **Quartermaster** icon to the desktop; after that, double-click the icon. Your
+browser opens Quartermaster, and the setup guide asks for the client, its pod and a test user.
+**Update Quartermaster** gets the latest version. On Mac or Linux, run `./start-quartermaster.sh`.
+
 ## Quick start
 
 ```bash
