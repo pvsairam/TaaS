@@ -99,7 +99,8 @@ def run_test(
             emit("step_start", index=i, intent=step.intent)
             start = time.perf_counter()
             step_started = _now()
-            status, error, evidence = StepStatus.PASSED, None, []
+            status, error = StepStatus.PASSED, None
+            evidence: list[str] = []
             seen: dict[str, Resolution] = {}
 
             def before_click(res: Resolution, i: int = i, evidence: list[str] = evidence) -> None:
