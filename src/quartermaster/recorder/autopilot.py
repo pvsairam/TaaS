@@ -411,35 +411,46 @@ class Autopilot:
         self.recorder.events.append(event)
 
     def _add_checks(self, step: dict[str, str]) -> None:
-        """Checks that prove the last page is the right one, so a replay cannot pass on a wrong page."""
+        """Checks that prove the last page is the right one, so a replay cannot pass on a wrong page.
+        The AI chooses up to two texts; when none of its choices can be used, the page's heading (or
+        the name of what the last step opened) is checked instead, so a saved scenario always proves
+        something."""
         screen = self._screen()
         texts = screen.get("texts", [])
-        if not texts:
-            return
         scenario = self.guide.scenario
         fields = scenario.get("fields") or []
-        prompt = "\n".join(
-            [
-                f"Scenario: {scenario.get('title', '')}",
-                f"Last step: {step['action']}",
-                f"What should happen: {step['expected'] or 'not written'}",
-                "Fields the page should show: " + (", ".join(fields) if fields else "not written"),
-                "TEXTS:",
-                *(f"[{i}] {t}" for i, t in enumerate(texts, 1)),
-            ]
-        )
-        try:
-            chosen = parse_json(self.ask(CHECK_SYSTEM, prompt)).get("check") or []
-        except AIError:
-            return
-        for n in chosen[:2]:
-            if isinstance(n, int) and 1 <= n <= len(texts):
-                text = texts[n - 1]
-                if _count(self.page.get_by_text(text, exact=True)) >= 1:
-                    self.recorder.events.append(
-                        {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
-                    )
-        self._say(f"Added {len(chosen[:2])} check(s) that prove the page is right.")
+        chosen: list[Any] = []
+        if texts:
+            prompt = "\n".join(
+                [
+                    f"Scenario: {scenario.get('title', '')}",
+                    f"Last step: {step['action']}",
+                    f"What should happen: {step['expected'] or 'not written'}",
+                    "Fields the page should show: " + (", ".join(fields) if fields else "not written"),
+                    "TEXTS:",
+                    *(f"[{i}] {t}" for i, t in enumerate(texts, 1)),
+                ]
+            )
+            try:
+                chosen = parse_json(self.ask(CHECK_SYSTEM, prompt)).get("check") or []
+            except AIError:
+                chosen = []
+        picked = [texts[n - 1] for n in chosen if isinstance(n, int) and 1 <= n <= len(texts)]
+        added = [t for t in dict.fromkeys(picked) if self._checkable(t)][:2]
+        if not added:
+            fallback = [*screen.get("headings", []), step["action"].removeprefix("Select ").strip()]
+            added = [t for t in dict.fromkeys(fallback) if t and self._checkable(t)][:1]
+        for text in added:
+            self.recorder.events.append(
+                {"kind": "assert_visible", "intent": text, "candidates": [{"strategy": "text", "value": text}]}
+            )
+        self._note(f"  Checks added: {', '.join(added) if added else 'none could be found'}")
+        self._say(f"Added {len(added)} check(s) that prove the page is right.")
+
+    def _checkable(self, text: str) -> bool:
+        """A replay finds a check by its text: exactly one element may have it, and it is shown now."""
+        found = self.page.get_by_text(text, exact=True)
+        return _count(found) == 1 and _count(_visible(found)) == 1
 
 
 def _visible(locator: Any) -> Any:

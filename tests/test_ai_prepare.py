@@ -278,6 +278,28 @@ def test_the_ai_does_each_step_and_adds_checks(tmp_path: Path) -> None:
     assert '[1] link "Me"' in ask.prompts[0] and "Step 1 of 4: Login" in ask.prompts[0]
 
 
+def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: Path) -> None:
+    screens = {
+        "home": screen("Me"),
+        "Me": screen("Personal Information"),
+        "Personal Information": screen("My Compensation"),
+        "My Compensation": {**screen("Me", texts=("Salary",)), "headings": ["My Compensation"]},
+    }
+    # "Salary" is on the page twice, so a replay could not use it; the page heading is used instead
+    counts = {f"role:link:{n}": 1 for n in screens} | {"text:Salary": 2, "text:My Compensation": 1}
+    page = ScriptedPage(screens, "home", counts)
+    recorder = Recorder(test_id="t")
+    guide = Guide(SCENARIO, tmp_path / "run")
+    answers = [{"do": "done"}] + [{"do": "click", "element": 1}, {"do": "done"}] * 3 + [{"check": [1]}]
+    assert Autopilot(page, guide, recorder, scripted_ai(answers)).run() is True
+    assert recorder.events[-1] == {
+        "kind": "assert_visible",
+        "intent": "My Compensation",
+        "candidates": [{"strategy": "text", "value": "My Compensation"}],
+    }
+    assert "Checks added: My Compensation" in (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     ("answers", "why"),
     [
