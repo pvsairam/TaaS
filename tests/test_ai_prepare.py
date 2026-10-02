@@ -360,6 +360,17 @@ def test_a_page_without_the_fields_to_check_stops_instead_of_passing(tmp_path: P
     assert guide.state()[-1]["status"] == "failed"
 
 
+def test_an_empty_section_is_left_open_for_the_picture_and_the_diary_says_why(tmp_path: Path) -> None:
+    empty = screen(texts=("Current Salary", "There's nothing here so far.", "Additional Compensation"))
+    pilot, page, recorder, guide = comp_run(tmp_path, empty)
+    page.screens["empty open"] = screen(texts=(*empty["texts"], "No additional compensation."))
+    page.after["text:Additional Compensation"] = "empty open"  # it opens, but holds no fields
+    assert pilot.run() is False and "test user may have no data" in pilot.reason
+    assert page.screen == "empty open"  # left open: the picture shows that it is empty
+    diary = (tmp_path / "run" / "ai-diary.txt").read_text(encoding="utf-8")
+    assert "Section Additional Compensation: opened, but its fields are not in it" in diary
+
+
 def test_a_scenario_always_gets_a_check_even_when_the_ai_chooses_none(tmp_path: Path) -> None:
     screens = {
         "home": screen("Me"),

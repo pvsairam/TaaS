@@ -538,31 +538,47 @@ class Autopilot:
 
     def _open_section(self, section: str, wanted: list[str]) -> None:
         """Open a collapsed section by clicking its heading, and record that so replays open it too.
-        A section that is open already is left alone (a click would close it)."""
+        A section that is open already is left alone (a click would close it). Every outcome is
+        written in the diary."""
         heading = self.page.get_by_text(section, exact=True)
-        if _count(heading) != 1:
+        shown = _visible(heading)
+        if _count(shown) != 1:
+            self._note(f"  Section {section}: its heading is shown {_count(shown)} times, so it was not clicked")
             return
         try:
             state = self.page.evaluate(EXPANDED_JS, section)
         except Exception:
             state = None
-        if state is True:  # open already: its fields are simply not there
+        if state is True:
+            self._note(f"  Section {section}: open already, and its fields are not in it")
             return
+        before = len(self._screen().get("texts", []))
         try:
-            heading.first.click(timeout=8000)
-        except Exception:
+            shown.first.click(timeout=8000)
+        except Exception as e:
+            self._note(f"  Section {section}: its heading could not be clicked ({_first_line(e)})")
             return
         self.settle()
-        if self._shown(wanted):
-            self.recorder.events.append(
-                {"kind": "click", "intent": section, "candidates": [{"strategy": "text", "value": section}]}
+        after = len(self._screen().get("texts", []))
+        unique = _count(heading) == 1  # a replay finds the heading by its text: it must be the only one
+        if self._shown(wanted) or (after > before and state is not True):
+            # It opened (its fields, or at least more on the screen): keep it open, so the picture
+            # shows what is in it, and so replays open it too.
+            if unique:
+                self.recorder.events.append(
+                    {"kind": "click", "intent": section, "candidates": [{"strategy": "text", "value": section}]}
+                )
+            self._note(
+                f"  Section {section}: opened" + ("" if self._shown(wanted) else ", but its fields are not in it")
             )
-            self._note(f"  Opened the section {section}")
-        elif state is None:
-            # it could not be told whether it was open: undo the click, so the page stays as it was
+        elif after < before:
+            # That click closed it (it was open): open it again, so the page stays as it was
             with suppress(Exception):
-                heading.first.click(timeout=8000)
+                shown.first.click(timeout=8000)
                 self.settle()
+            self._note(f"  Section {section}: it was open already, and its fields are not in it")
+        else:
+            self._note(f"  Section {section}: clicking its heading showed nothing new")
 
     def _choose_checks(self, step: dict[str, str]) -> None:
         """Checks that prove the last page is the right one, so a replay cannot pass on a wrong page.
