@@ -1,5 +1,7 @@
 # Quartermaster: report on four ideas, and what is still missing
 
+**Note (October 2026):** this report is from earlier in the project. Most of what it proposes is built now (cleanup steps, What's New, discovery, ticket links, the nightly run). README.md says what works today; this page is kept to show why.
+
 Written for the product owner. No code was changed for this report. Sizes are rough:
 **S** is a few days, **M** one to two weeks, **L** several weeks.
 

@@ -1,4 +1,6 @@
-# Quartermaster — Product & Architecture Plan
+# Quartermaster - Product & Architecture Plan
+
+> **Note (October 2026):** this is the original plan. README.md says what works today and docs/COMPETITORS.md says where we stand against other tools.
 
 > Working title: **Quartermaster** (repo: `TaaS`). An autonomous, AI-assisted regression
 > testing service that certifies each Oracle Fusion Cloud quarterly update before it reaches

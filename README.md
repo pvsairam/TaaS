@@ -1,38 +1,57 @@
-# Quartermaster (working title) — TaaS
+# Quartermaster
 
-AI-assisted regression testing that certifies each **Oracle Fusion Cloud quarterly update**
-(A/B/C/D releases) before it reaches production.
+Quartermaster tests your Oracle Fusion Cloud pod before each quarterly update reaches production, and gives you
+proof of what passed.
 
-> Core idea: **deterministic core, AI at the edges.** Tests are replayable YAML specs run by a
-> Playwright/REST engine. AI ranks release impact, drafts tests, proposes locator heals and
-> triages failures. Every AI output is validated and reviewable.
+You write a test once, in a plain text file. Quartermaster runs it in a real browser (or calls Oracle's REST
+services), takes screenshots, and writes a Word document that an auditor can read. It runs on your own computer, so
+there is no per-seat licence and your tests are files you keep.
 
-**Build order:** HCM first, then ERP, then SCM. Product model: commercial multi-tenant SaaS
-that is also used internally.
+AI is optional and only ever suggests. A person accepts every change. Nothing runs against a production pod.
 
-The full product and architecture plan (market analysis, architecture, roadmap, risks, open
-questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
+**New here and want to try it?** Follow **[TESTING.md](TESTING.md)** step by step. The longer product plan is in
+[docs/PLAN.md](docs/PLAN.md), and how we compare with other tools is in [docs/COMPETITORS.md](docs/COMPETITORS.md).
 
-**New here and want to try it?** Follow **[TESTING.md](TESTING.md)**, step by step.
+## What you can do with it
 
-## What works today (Phase 0)
-
-| Area | Module |
+| You want to | Where |
 |---|---|
-| Domain model (releases, features, tests, locators, results) | `src/quartermaster/domain/models.py` |
-| YAML test DSL + validation (placeholders, duplicate ids, strict fields) | `src/quartermaster/dsl/loader.py` |
-| Release impact analysis + time-budgeted regression planner (explainable) | `src/quartermaster/impact/analyzer.py` |
-| Multi-strategy locator resolution with fallback self-healing | `src/quartermaster/locators/resolver.py` |
-| Step engine with evidence capture, skip-on-failure, AI healer hook | `src/quartermaster/runner/engine.py` |
-| Playwright driver for Fusion (**Phase 1, partial**) | `src/quartermaster/runner/playwright_driver.py` |
-| Production guard (blocks PROD kind and prod-looking pod hosts) | `src/quartermaster/safety/guards.py` |
-| Claude-backed test author + failure triage, with PII masking | `src/quartermaster/ai/` |
-| Per-persona credentials from environment variables; `login_as` persona switching | `src/quartermaster/runner/credentials.py` |
-| Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
-| Evidence per run: screenshots (off / on failure / every step), video, `run.json`, Word document | `src/quartermaster/evidence/` |
-| `qm` CLI (`validate`, `plan`, `run`, `record`, `document`, `serve`) | `src/quartermaster/cli.py` |
-| Release feature list import (Oracle feature-listing .xlsx, .csv, .json/.yaml, a saved What's New page .html or pasted text) and manual test script import (.xlsx), standard library only | `src/quartermaster/importers/` |
-| Web UI on your own computer (`qm serve`): start runs, follow them live, record, open evidence | `src/quartermaster/service/` |
+| See what to test for a release, ranked by what Oracle changed | Release impact |
+| Write, record or import tests | Tests, Record a test, Import manual scripts |
+| Run one test, a saved group (suite), or everything, now or on a schedule | Runs, Suites, Schedules |
+| Keep each client's own names (business unit, ledger) out of the test | Test data |
+| Copy a test for another client or case | Tests, Make a copy |
+| Get proof for an auditor | Word evidence document, Audit log, Approvals |
+| Start from ready-made tests | Test library |
+| Learn why something failed and what to do | Needs attention |
+
+![The Tests page](docs/images/tests.png)
+
+## Each client has its own values: one test, many clients
+
+Every client has its own business unit, ledger, supplier names and so on. A test should not have them typed into it.
+The test says `${business_unit}`, and a small **data set** says what that is on each pod.
+
+1. The test refers to a name, for example `${business_unit}`, and says which data set to use: `data_sets: [hcm-basics]`.
+2. The data set (a file in the client's `_data` folder) holds the value: one for every pod, and a different one for any
+   pod that differs.
+3. Every client has its own tests folder, so it has its own `_data` folder. To use a test for a new client, copy it and
+   fill in that client's data set. The steps do not change.
+
+You do not need a text editor for this. On the **Test data** page, press **Edit values** (or **New data set**) and fill
+in the table: one row per name, one column for every pod.
+
+![Edit the values of a data set](docs/images/edit-values.png)
+
+To copy a test, open it and press **Make a copy**. Give the copy its own id and title. Comments, steps and the data
+sets it uses are kept. Then change the values in Test data for the client the copy is for.
+
+![Make a copy of a test](docs/images/make-a-copy.png)
+
+If a pod has no value for a name, the test stops at step 1 with the message "No test data for ..." and the page Needs
+attention lists it as "Test data not ready". It is never reported as a broken release. See
+[Test data](#test-data-names-that-belong-to-a-pod-and-values-made-fresh-for-every-run) for the file format and for
+values made fresh for every run (invoice numbers, dates).
 
 ## Start it (no terminal)
 
@@ -452,7 +471,7 @@ Use them in steps as `${invoice_no}`, like any other data. The values come from 
 same all through one run and the evidence shows exactly what was typed. A generated name may not clash with a name in
 `data`, and a `data` value may use a generated one (`code: "C-${invoice_no}"`).
 
-**Data sets for each pod.** Put a file in the `_data` folder inside your tests folder:
+**Data sets for each pod.** The easy way is the **Test data** page: **New data set**, or **Edit values** on a set, then fill in the table (one row per name, one column per pod). The same thing as a file: put it in the `_data` folder inside your tests folder:
 
 ```yaml
 dataset: hcm-basics

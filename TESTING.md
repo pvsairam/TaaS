@@ -1311,6 +1311,44 @@ You should see: the list says which packs are installed and when they were last 
 
 7. If you want to see exactly what a pack's tests do to your pod, nothing: open any file of a pack. Every step is `GET`. The test library never creates, changes or deletes anything.
 
+### 6.35 Copy a test and edit a client's values
+
+This answers "each client has its own business unit and ledger, how do I handle that?" Nothing here touches the pod.
+
+1. Click **Test data**, then **New data set**.
+
+You should see: a side panel with a Name box, a Title box and a table with the columns "Value name" and "Every pod", then one column for each pod you added in Settings.
+
+2. Type the name `acme-gl` and press **Save** without filling anything in.
+
+You should see: a red message "Could not save." and the reason (a set needs at least one value). Nothing is saved.
+
+3. In the first row type `ledger_name` as the Value name, and `US Primary Ledger` under **Every pod**. In a pod's own column type a different ledger if that pod uses another one. Press **Save**.
+
+You should see: "Saved". The new set appears on the page with a table of what each pod gets. In Notepad, open `my_tests\_data\acme-gl.yaml`: the values are there as plain text. If you saved over an existing set, the old file is kept in the backups folder.
+
+4. Press **Edit values** on a set that exists, change a value, press **Save**.
+
+You should see: the table on the page shows the new value. Every test that uses the set follows it.
+
+5. Click **Tests**, open a test, press **Make a copy**.
+
+You should see: a side panel with an Id (the old id with "-copy"), a Title (with "(copy)") and a Folder (the same folder).
+
+6. Change the id to `view-worker-acme` and the title to `View a worker (Acme)`, press **Make the copy**.
+
+You should see: the copy opens. Its Steps and File tabs match the original, comments included, only `id:` and `title:` differ. Click **Tests**: both are listed.
+
+7. Open the copy, press **Make a copy**, and keep the same id as the first copy.
+
+You should see: "Could not copy." and "a test with the id 'view-worker-acme' already exists". Nothing is created.
+
+8. Try the Folder box with `..` or `_data`.
+
+You should see: a refusal that the folder must be inside the tests folder, or must not start with an underscore.
+
+To use a test for a new client: add the client, copy the test (or its folder) into that client's tests folder, and fill in that client's data set. The steps stay the same.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.
