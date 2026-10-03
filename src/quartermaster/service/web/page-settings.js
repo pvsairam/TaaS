@@ -75,6 +75,11 @@ export async function settingsPage() {
           try { await api("/api/settings", {retries: v}); toast("Saved. Runs started from now on use it."); } catch (err) { toast(err.message); }
         }, "Retries"),
         h("div", {class: "hint"}, "A slow page is not a changed page. A step that fails is tried again after a short wait, before the test fails. Only steps that are safe to repeat are tried again: a click is repeated only when its item was not found (so it was never clicked), and a REST call only when it reads. A test that passes this way is marked Flaky when it keeps happening.")),
+      h("div", {}, h("div", {class: "label"}, "Tests at the same time"),
+        segmented([["1", "One at a time"], ["2", "2"], ["3", "3"], ["4", "4"]], String(st.default_options.parallel ?? 1), async (v) => {
+          try { await api("/api/settings", {parallel: v}); toast("Saved. Runs started from now on use it."); } catch (err) { toast(err.message); }
+        }, "Tests at the same time"),
+        h("div", {class: "hint"}, "Each test gets its own browser, so a full run finishes sooner. Each browser needs about half a gigabyte of memory, and the pod sees several sign-ins at once, so start with 2. Do not use it if your tests depend on each other or change the same record. Tag such a test serial (tags: [serial]) and it runs alone, last. Watching the browser (below) works best with one at a time.")),
       h("label", {class: "switch"}, headed, "Show the browser while it runs"),
       h("div", {}, h("label", {class: "switch"}, highlight, "Highlight clicks"),
         h("div", {class: "hint"}, "A red box (and a red dot for a click) shows what each step clicks or fills, in the browser and the video, and a red box marks it in the screenshots. Turn off for clean pictures.")),

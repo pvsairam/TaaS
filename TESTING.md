@@ -821,6 +821,31 @@ You should see: "2 features found for release 26D" (the text has two features).
    Look at the preview. If products or opt-in marks look wrong, tell me what the page looks like (a screenshot of the
    page and of the preview) and I will adjust the reading.
 
+### 6.23 Running tests at the same time
+
+Safe on your pod: it uses the read-only demo tests (copy them as in 6.21 if they are not in `my_tests`).
+
+1. Click **Settings**, then the **Evidence** tab. Find **Tests at the same time**. It says **One at a time**.
+2. Run all the demo tests once as they are (**Run all tests**, or **New run** with the folder `my_tests`). Note the **Duration**
+   on the run page.
+3. Click **2** under **Tests at the same time**.
+
+You should see: "Saved. Runs started from now on use it."
+
+4. Run the same tests again and open the run page while it runs.
+
+You should see: while it runs, "2 tests running at the same time (0 of 5 finished)", counting up. When it ends: the same
+results as before, in the same order, and a fact **Tests at once: 2 at the same time**. The **Duration** is shorter (with
+read-only demos the gain is small; with 20 or more tests it is large).
+
+5. Open the evidence of two of the tests: each has its own folder, screenshots and Word document.
+6. In one demo file add the line `tags: [serial]` (under `priority:`) and run again with 2.
+
+You should see: that test runs by itself after the other tests have finished.
+
+7. Set it back to **One at a time** when you are done if you prefer. If two tests ever disturb each other, tell me which
+   two and what they change.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

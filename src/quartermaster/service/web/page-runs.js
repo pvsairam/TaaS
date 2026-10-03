@@ -93,6 +93,8 @@ function phase(run, events, live) {
   if (run.status === "queued") return "Waiting for the run before it to finish";
   const last = events[events.length - 1];
   if (!last) return "Starting: opening the browser";
+  const running = live.filter((x) => x.status === "running").length;
+  if (running > 1) return `${running} tests running at the same time (${live.filter((x) => !["waiting", "running"].includes(x.status)).length} of ${live.length} finished)`;
   const t = live.find((x) => x.id === last.test_id);
   const n = live.findIndex((x) => x.id === last.test_id) + 1;
   const of = live.length > 1 ? ` (test ${n} of ${live.length})` : "";
@@ -159,6 +161,7 @@ export async function runPage(id) {
       fact("Ended", run.finished_at ? when(run.finished_at) : isActive ? "Running" : "–"),
       fact("Duration", run.started_at ? took(run.started_at, run.finished_at) : "–"),
       fact("Executed by", run.executed_by || "Not recorded"),
+      (run.options.parallel || 1) > 1 ? fact("Tests at once", `${run.options.parallel} at the same time`) : null,
       fact("Evidence", `${{"every-step": "Screenshot every step", "on-failure": "Screenshots on failure", off: "No screenshots"}[run.options.screenshots]}${run.options.video !== "off" ? ", video" : ""}`)))});
 
   // tests of the run: finished results, or live progress

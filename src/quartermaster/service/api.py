@@ -209,7 +209,7 @@ class App:
         self.approvals = Approvals(data_dir / "approvals.jsonl", audit=self.audit)
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
         self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
-        self.queue.defaults = lambda: {"retries": self._retries()}
+        self.queue.defaults = lambda: {"retries": self._retries(), "parallel": self._parallel()}
 
     def _release_summary(self, release: str) -> dict[str, Any]:
         """Where the tests stand on a release now (what an approval is given on)."""
@@ -262,6 +262,11 @@ class App:
         """How many times a failed step is tried again (Settings, Evidence); 1 until chosen."""
         value = self.settings.get().get("retries") or "1"
         return int(value) if value in ("0", "1", "2", "3") else 1
+
+    def _parallel(self) -> int:
+        """How many tests run at the same time (Settings, Evidence); 1 until chosen."""
+        value = self.settings.get().get("parallel") or "1"
+        return int(value) if value in ("1", "2", "3", "4") else 1
 
     def _with_ai(self, build: CommandBuilder) -> CommandBuilder:
         """The command of a run, plus the AI chosen in Settings so it can suggest what a missing item became.
@@ -904,7 +909,7 @@ class App:
             "tests_folder": str(self.tests_root),
             "releases_folder": str(self.releases.folder or ""),
             "evidence_folder": str(self.evidence_root),
-            "default_options": {**DEFAULT_OPTIONS, "retries": self._retries()},
+            "default_options": {**DEFAULT_OPTIONS, "retries": self._retries(), "parallel": self._parallel()},
             "ai": self._ai_view(settings),
             "signed_in_by_hand": self.signin.view(pod["environment_id"]),
             "ready": bool(

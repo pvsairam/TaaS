@@ -28,6 +28,7 @@ DEFAULT_OPTIONS: dict[str, Any] = {
     "tester": "",
     "headed": False,
     "retries": 1,  # when a step fails, try it again this many times (0 to 3; only steps that are safe to repeat)
+    "parallel": 1,  # tests run at the same time, each in its own browser (1 to 4; tests tagged "serial" run alone)
     "highlight": True,  # red marks on what each step clicks or fills: live, in the video and in the screenshots
     "only": [],  # test ids: run just these from the folder (e.g. the tests a release puts at risk)
     "label": "",  # a name for the run, shown instead of the folder
@@ -62,6 +63,8 @@ def qm_run_command(target: str, options: dict[str, Any], evidence_root: Path, ev
     if not options.get("highlight", True):
         cmd.append("--no-highlight")
     cmd += ["--retries", str(options.get("retries", 1))]
+    if options.get("parallel", 1) > 1:
+        cmd += ["--parallel", str(options["parallel"])]
     if options["release"]:
         cmd += ["--release", options["release"]]
     if options["tester"]:
@@ -82,6 +85,9 @@ def check_options(requested: dict[str, Any]) -> dict[str, Any]:
     retries = options["retries"]
     if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 3:
         raise ValueError("retries must be a whole number from 0 to 3")
+    parallel = options["parallel"]
+    if isinstance(parallel, bool) or not isinstance(parallel, int) or not 1 <= parallel <= 4:
+        raise ValueError("parallel must be a whole number from 1 to 4")
     for key in ("evidence_doc", "headed", "highlight"):
         options[key] = bool(options[key])
     for key in ("release", "tester"):

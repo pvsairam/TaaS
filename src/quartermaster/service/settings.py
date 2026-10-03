@@ -29,6 +29,7 @@ FIELDS = {
     "ai_key_env": 80,
     "ai_workspace": 100,
     "retries": 1,  # when a step fails, try it again this many times (0 to 3); "" means 1
+    "parallel": 1,  # tests run at the same time (1 to 4); "" means 1
     "ai_suggest": 3,  # "off" turns off the AI's suggestions for steps that cannot find their item; else on
 }
 _AI = ("ai_provider", "ai_model", "ai_base_url", "ai_key_env", "ai_workspace")
@@ -64,6 +65,8 @@ class Settings:
         clean.update(check_settings({k: v for k, v in changes.items() if k in _AI}))
         if clean.get("retries", "") not in ("", "0", "1", "2", "3"):
             raise ValueError("retries must be 0, 1, 2 or 3")
+        if clean.get("parallel", "") not in ("", "1", "2", "3", "4"):
+            raise ValueError("tests at the same time must be 1, 2, 3 or 4")
         if not _RELEASE.match(clean.get("release", "")):
             raise ValueError("the release may use letters, digits, spaces, dots and dashes, e.g. 26C")
         env = self.environment() if self.environment else None

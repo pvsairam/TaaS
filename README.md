@@ -266,6 +266,25 @@ Run history is kept in `.qm/` (next to where you started `qm serve`); evidence s
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
 
+## Running tests at the same time
+
+A full regression of many tests takes long when they run one after another. **Settings, Evidence, Tests at the same
+time** (or `qm run my_tests --parallel 3`) runs up to 4 tests at once. The default is one at a time, so nothing
+changes until you choose it.
+
+- Each test gets its **own browser and its own sign-in**, so one test cannot disturb another's screen.
+- The result is the same as a one-at-a-time run: one suite record and summary, the tests listed in the order of the
+  folder, one evidence folder and Word document per test. The run page says how many ran at once and, while running,
+  "3 tests running at the same time (2 of 8 finished)".
+- **Tests must not depend on each other**, and must not change the same record. Names made from `${RUN_ID}` are unique
+  per test, so creating records is safe. For a test that must not share the pod (it changes a setup everyone uses, or
+  needs a quiet system), add `serial` to its tags: `tags: [serial]`. Serial tests run one at a time, after the others.
+- It is gentle on the pod: at most 4 sign-ins at once, and the same user may be signed in several times in Fusion. If
+  your pod logs the user out when a second session opens, keep it at one at a time.
+- Each browser needs about half a gigabyte of memory. On a laptop start with 2.
+- If the pod looks like production, or the password is missing, the run stops at once and nothing is written.
+- Watching the browser ("Show the browser while it runs") with several tests opens several windows; it works best with one.
+
 ## Shared steps
 
 Steps you use in many tests (open a page, create a record) can be written once and shared. Put a YAML file in

@@ -9,6 +9,7 @@ import queue
 import sys
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,8 @@ def _playwright_driver(args: argparse.Namespace, run_dir: Path) -> Driver:
 
 # Replaced in tests with a fake; the real run drives a browser. Gets the run's evidence folder.
 driver_factory: Callable[[argparse.Namespace, Path], Driver] = _playwright_driver
+
+MAX_PARALLEL = 4  # tests run at the same time: each is a browser, and the pod is shared with other people
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -94,40 +97,37 @@ def _run(args: argparse.Namespace) -> int:
     evidence_root = Path(args.evidence)
     suite_started = datetime.now().astimezone().isoformat(timespec="seconds")
     emit = _event_writer(args.events)
-    emit({"type": "suite_start", "at": suite_started, "tests": [t.id for t in tests]})
+    emit({"type": "suite_start", "at": suite_started, "tests": [t.id for t in tests], "parallel": _workers(args)})
 
     healer = _suggester(args)
-    results: list[RunResult] = []
-    suite_runs: list[tuple[dict[str, Any], Path, Path | None]] = []
-    for t, spec_file in zip(tests, files, strict=True):
+    print_lock = threading.Lock()
+    abort = threading.Event()  # set when a run cannot go on at all (unsafe pod, missing login)
+
+    def run_one(t: TestCase, spec_file: Path) -> tuple[RunResult, dict[str, Any], Path, Path | None]:
         run_id = new_run_id()
         run_dir = run_folder(evidence_root, t.id, run_id)
         driver = driver_factory(args, run_dir)
-        try:
-            result = run_test(
-                t,
-                env,
-                driver,
-                run_id=run_id,
-                screenshots=ScreenshotMode(args.screenshots),
-                on_event=emit,
-                healer=healer,
-                retries=args.retries,
-            )
-        except (UnsafeEnvironmentError, MissingCredentialsError) as e:
-            print(f"error: {e}", file=sys.stderr)
-            return 2
-        results.append(result)
-        print(f"{result.status.value.upper():<7} {t.id}")
+        result = run_test(
+            t,
+            env,
+            driver,
+            run_id=run_id,
+            screenshots=ScreenshotMode(args.screenshots),
+            on_event=emit,
+            healer=healer,
+            retries=args.retries,
+        )
+        lines = [f"{result.status.value.upper():<7} {t.id}"]
         for s in result.steps:
             if s.status in (StepStatus.FAILED, StepStatus.HEALED):
-                print(f"        step {s.index + 1} [{s.status.value}] {s.intent}: {s.error or 'used fallback locator'}")
-
+                lines.append(
+                    f"        step {s.index + 1} [{s.status.value}] {s.intent}: {s.error or 'used fallback locator'}"
+                )
         for c in result.cleanup:
             if c.status is StepStatus.FAILED:
-                print(f"        cleanup {c.index + 1} [failed] {c.intent}: {c.error}")
+                lines.append(f"        cleanup {c.index + 1} [failed] {c.intent}: {c.error}")
         if result.cleanup:
-            print(f"        cleanup: {result.cleanup_status}")
+            lines.append(f"        cleanup: {result.cleanup_status}")
         videos: list[str] = list(getattr(driver, "videos", []))
         if args.video == "on-failure" and result.status is not StepStatus.FAILED:
             for v in videos:
@@ -137,12 +137,11 @@ def _run(args: argparse.Namespace) -> int:
             result, run_dir=run_dir, test_file=spec_file, video_mode=args.video, videos=videos, executed_by=args.tester
         )
         write_record(record, run_dir)
-        print(f"        evidence: {run_dir}")
+        lines.append(f"        evidence: {run_dir}")
         doc: Path | None = None
         if args.evidence_doc:
             doc = write_evidence_document(record, run_dir, run_dir / f"{t.id}_{run_id}_evidence.docx")
-            print(f"        document: {doc}")
-        suite_runs.append((record, run_dir, doc))
+            lines.append(f"        document: {doc}")
         emit(
             {
                 "type": "test_saved",
@@ -153,6 +152,39 @@ def _run(args: argparse.Namespace) -> int:
                 "status": result.status.value,
             }
         )
+        with print_lock:  # the lines of one test stay together even when several finish at once
+            print("\n".join(lines))
+        return result, record, run_dir, doc
+
+    pairs = list(zip(tests, files, strict=True))
+    done: dict[int, tuple[RunResult, dict[str, Any], Path, Path | None]] = {}
+    failure: list[str] = []
+
+    def guarded(n: int) -> None:
+        if abort.is_set():
+            return
+        try:
+            done[n] = run_one(*pairs[n])
+        except (UnsafeEnvironmentError, MissingCredentialsError) as e:
+            abort.set()
+            failure.append(str(e))
+
+    workers = _workers(args)
+    alone = [n for n, (t, _) in enumerate(pairs) if "serial" in t.tags]  # tests that must not share the pod
+    together = [n for n in range(len(pairs)) if n not in alone]
+    if workers == 1 or len(together) < 2:
+        for n in range(len(pairs)):
+            guarded(n)
+    else:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="qm-test") as pool:
+            list(pool.map(guarded, together))
+        for n in alone:
+            guarded(n)
+    if failure:
+        print(f"error: {failure[0]}", file=sys.stderr)
+        return 2
+    results = [done[n][0] for n in sorted(done)]
+    suite_runs = [(done[n][1], done[n][2], done[n][3]) for n in sorted(done)]
 
     suite_id = new_run_id()
     suite = build_suite_record(
@@ -189,6 +221,10 @@ def _run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _workers(args: argparse.Namespace) -> int:
+    return max(1, min(int(getattr(args, "parallel", 1) or 1), MAX_PARALLEL))
+
+
 def _event_writer(path: str | None) -> Callable[[dict[str, Any]], None]:
     """Progress events as JSON lines (for the web service); a no-op when no file is given."""
     if not path:
@@ -196,8 +232,10 @@ def _event_writer(path: str | None) -> Callable[[dict[str, Any]], None]:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    lock = threading.Lock()  # tests running at the same time write here together
+
     def write(event: dict[str, Any]) -> None:
-        with out.open("a", encoding="utf-8") as f:
+        with lock, out.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event) + "\n")
 
     return write
@@ -719,6 +757,14 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         choices=[0, 1, 2, 3],
         help="when a step fails, try it again this many times (safe steps only) before giving up",
+    )
+    rn.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        choices=range(1, MAX_PARALLEL + 1),
+        metavar=f"1-{MAX_PARALLEL}",
+        help="run this many tests at the same time, each in its own browser (tests tagged 'serial' run alone, last)",
     )
     rn.add_argument(
         "--ai-suggest",
