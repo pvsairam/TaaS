@@ -125,7 +125,8 @@ def test_tests_can_be_exported_as_plain_playwright_files(site: Site, page: Page)
     expect(link).to_be_visible(timeout=WAIT)
     with page.expect_download() as everything:
         link.click()
-    assert everything.value.suggested_filename.endswith("-playwright.zip")
+    name = everything.value.suggested_filename
+    assert "-playwright-" in name and name.endswith(".zip")
     page.goto(f"{site.url}/#/tests/hcm%2Fshared_user.yaml")
     with page.expect_download() as one:
         page.get_by_role("link", name="Export", exact=True).click()

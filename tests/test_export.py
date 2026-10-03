@@ -448,7 +448,7 @@ def test_the_runtime_finds_items_one_at_a_time_and_fills_a_page(tmp_path: Path) 
 <button id=a onclick="document.getElementById('out').textContent='added'">Add</button>
 <button>Twin</button><button>Twin</button>
 <label>Name <input id=n></label>
-<label>Status <select id=s><option>Active</option><option>Inactive</option></select></label>
+<label for=s>Status</label><select id=s><option>Active</option><option>Inactive</option></select>
 <p id=out>nothing yet</p>"""
     )
     chromium = os.environ.get("QM_CHROMIUM_PATH") or (
