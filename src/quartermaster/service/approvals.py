@@ -98,7 +98,16 @@ class Approvals:
                     f"write why release {release} is approved with tests failed or not run "
                     f"(at least {MIN_REASON} letters)"
                 )
-        return self._add(release, "approved", name, title, comment, summary, acknowledged=bool(open_items))
+        return self._add(
+            release,
+            "approved",
+            name,
+            title,
+            comment,
+            summary,
+            acknowledged=bool(open_items),
+            signed_in_as=str(data.get("signed_in_as") or ""),
+        )
 
     def withdraw(self, release: str, summary: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         release = _release(release)
@@ -107,7 +116,16 @@ class Approvals:
             raise ApprovalError(f"release {release} is not approved, so there is nothing to withdraw")
         if len(reason) < 5:
             raise ApprovalError("write why the approval is withdrawn")
-        return self._add(release, "withdrawn", name, title, reason, summary, acknowledged=False)
+        return self._add(
+            release,
+            "withdrawn",
+            name,
+            title,
+            reason,
+            summary,
+            acknowledged=False,
+            signed_in_as=str(data.get("signed_in_as") or ""),
+        )
 
     def _add(
         self,
@@ -119,6 +137,7 @@ class Approvals:
         summary: dict[str, Any],
         *,
         acknowledged: bool,
+        signed_in_as: str = "",
     ) -> dict[str, Any]:
         record = {
             "id": uuid.uuid4().hex[:10],
@@ -129,6 +148,7 @@ class Approvals:
             "comment": comment,
             "at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "computer_user": str(self._who()),
+            "signed_in_as": signed_in_as,
             "acknowledged_open_items": acknowledged,
             "results": {k: summary[k] for k in ("total", "passed", "failed", "not_run", "fingerprint", "by_test")},
         }
@@ -183,7 +203,10 @@ def _public(summary: dict[str, Any]) -> dict[str, Any]:
 def _view(record: dict[str, Any]) -> dict[str, Any]:
     results = record.get("results") or {}
     return {
-        **{k: record.get(k) for k in ("id", "release", "action", "by", "title", "comment", "at", "computer_user")},
+        **{
+            k: record.get(k)
+            for k in ("id", "release", "action", "by", "title", "comment", "at", "computer_user", "signed_in_as")
+        },
         "acknowledged_open_items": bool(record.get("acknowledged_open_items")),
         "results": {k: results.get(k) for k in ("total", "passed", "failed", "not_run", "fingerprint")},
     }

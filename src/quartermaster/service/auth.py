@@ -1,0 +1,556 @@
+"""Sign-in and roles for Quartermaster itself.
+
+Off by default: Quartermaster then works as it always has, for the person at the computer. It is
+switched on in Settings, Users & sign-in, by creating the first administrator. From then on every
+request needs a signed-in user, and what a user may do depends on the roles they were given:
+
+    admin      everything: settings, clients and pods, users, backups, notifications
+    tester     record, run, import, schedule, accept screen changes, dismiss, switch the pod in use
+    approver   approve or withdraw the approval of a release
+    (none)     look at everything operational, change nothing: a viewer
+
+A user may have several roles (a tester should not also approve their own release: give those to
+different people). Admin includes all the others.
+
+How it is kept safe:
+    - passwords are never stored: only a salted scrypt hash (or PBKDF2 where scrypt is missing);
+    - the sign-in session is a random token kept in memory only (never in a file), sent in a cookie the
+      page's scripts cannot read (HttpOnly, SameSite=Strict); a restart signs everybody out;
+    - 5 wrong passwords for a user name lock it for 15 minutes; a wrong user name and a wrong password
+      give the same answer and take about the same time;
+    - passwords chosen by an administrator (new user, reset) are made by Quartermaster, shown once and
+      must be changed at the first sign-in;
+    - the last active administrator can never be removed, disabled or demoted;
+    - anyone with the files on the computer can always get back in: `qm users` in a terminal.
+
+The users are kept in `users.db` in the data folder, shared by all clients.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import re
+import secrets
+import sqlite3
+import threading
+import time
+from collections.abc import Callable
+from datetime import datetime
+from http import HTTPStatus
+from pathlib import Path
+from typing import Any
+
+ROLES = ("admin", "tester", "approver")
+IDLE_S = 8 * 3600  # a session ends after this long without a request
+LIFETIME_S = 24 * 3600  # and never lasts longer than this
+LOCK_AFTER = 5
+LOCK_S = 15 * 60
+MIN_PASSWORD = 10
+_USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
+_OBVIOUS = {
+    "password",
+    "passw0rd",
+    "1234567890",
+    "0123456789",
+    "qwertyuiop",
+    "quartermaster",
+    "letmein123",
+    "iloveyou12",
+}
+COOKIE = "qm_session"
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, full_name TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+  roles TEXT NOT NULL DEFAULT '', pw TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+  must_change INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, last_login TEXT);
+CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+"""
+
+
+class AuthError(Exception):
+    """Not allowed or not possible. `status` is the HTTP answer; the message is for people."""
+
+    def __init__(self, status: HTTPStatus, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def _bad(message: str) -> AuthError:
+    return AuthError(HTTPStatus.BAD_REQUEST, message)
+
+
+# ---------------------------------------------------------------------- passwords
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    if hasattr(hashlib, "scrypt"):
+        digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+        return f"scrypt$16384$8$1${_b64(salt)}${_b64(digest)}"
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000, dklen=32)
+    return f"pbkdf2$600000${_b64(salt)}${_b64(digest)}"
+
+
+def check_password(password: str, stored: str) -> bool:
+    try:
+        kind, *rest = stored.split("$")
+        if kind == "scrypt" and hasattr(hashlib, "scrypt"):
+            n, r, p, salt, digest = rest
+            got = hashlib.scrypt(password.encode(), salt=_unb64(salt), n=int(n), r=int(r), p=int(p), dklen=32)
+            return hmac.compare_digest(got, _unb64(digest))
+        if kind == "pbkdf2":
+            rounds, salt, digest = rest
+            got = hashlib.pbkdf2_hmac("sha256", password.encode(), _unb64(salt), int(rounds), dklen=32)
+            return hmac.compare_digest(got, _unb64(digest))
+    except (ValueError, TypeError):
+        return False
+    return False
+
+
+def _b64(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _unb64(text: str) -> bytes:
+    return base64.b64decode(text.encode("ascii"))
+
+
+def check_new_password(password: str, username: str = "") -> None:
+    if len(password) < MIN_PASSWORD:
+        raise _bad(f"a password needs at least {MIN_PASSWORD} characters")
+    if len(password) > 200:
+        raise _bad("that password is too long (200 characters at most)")
+    if username and password.lower() == username.lower():
+        raise _bad("the password may not be the user name")
+    if password.lower() in _OBVIOUS or len(set(password)) < 4:
+        raise _bad("that password is too easy to guess: choose a longer one that is less common")
+
+
+def temporary_password() -> str:
+    """A password for an administrator to hand over once: 12 letters and digits, easy to read out."""
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/l/I
+    return "".join(secrets.choice(alphabet) for _ in range(12))
+
+
+# ---------------------------------------------------------------------- what each role may do
+
+
+def required_role(method: str, route: list[str]) -> str:
+    """The role a request needs: "any" (signed in), "tester", "approver" or "admin". What is not listed
+    needs an administrator, so a route added later is closed until someone decides."""
+    head = route[0] if route else ""
+    if method == "GET":
+        return "admin" if head in ("users", "backup", "notifications") else "any"
+    if head == "approvals":
+        return "approver"
+    if head == "environments":
+        return "tester" if route == ["environments", "activate"] else "admin"
+    if head in ("settings", "ai", "notifications", "backup", "users"):
+        return "admin"
+    if head in (
+        "runs",
+        "recording",
+        "manual",
+        "test",
+        "attention",
+        "schedules",
+        "releases",
+        "signin",
+        "check-pod",
+        "open",
+    ):
+        return "tester"
+    return "admin"
+
+
+def allowed(user: dict[str, Any], need: str) -> bool:
+    roles = set(user["roles"])
+    return need == "any" or "admin" in roles or need in roles
+
+
+class Auth:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        now: Callable[[], float] = time.time,
+        record: Callable[[str, str, dict[str, Any], str], None] | None = None,
+    ):
+        """`record(what, subject, details, who)` is told about sign-ins and changes (the audit log)."""
+        self.path = path
+        self._now = now
+        self._record = record
+        self._lock = threading.RLock()
+        self._sessions: dict[str, dict[str, Any]] = {}  # token -> {user, born, seen}; in memory only
+        self._failures: dict[str, list[float]] = {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(str(path), check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        with self._db:
+            self._db.executescript(_SCHEMA)
+
+    # ------------------------------------------------------------------ on or off
+
+    @property
+    def enabled(self) -> bool:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM state WHERE key = 'enabled'").fetchone()
+        return bool(row) and row["value"] == "1"
+
+    def _set_enabled(self, on: bool) -> None:
+        with self._lock, self._db:
+            self._db.execute("INSERT OR REPLACE INTO state (key, value) VALUES ('enabled', ?)", ("1" if on else "0",))
+
+    def enable(self, username: str, full_name: str, password: str) -> tuple[str, dict[str, Any]]:
+        """Turn sign-in on by creating the first administrator, who is signed in at once.
+        Returns (session token, user)."""
+        with self._lock:
+            if self.enabled:
+                raise _bad("sign-in is already on")
+            if self._count_admins() == 0 or not self._find(username):
+                user = self._insert(username, full_name, "", ["admin"], password, must_change=False)
+            else:  # turned off earlier and on again: the same account, with the password typed now
+                existing = self._find(username)
+                assert existing is not None
+                if "admin" not in existing["roles"] or not existing["active"]:
+                    raise _bad("that user name exists but is not an active administrator")
+                check_new_password(password, username)
+                self._set_password(existing["id"], password, must_change=False)
+                user = self._user(existing["id"])
+            with self._db:
+                self._db.execute("UPDATE users SET last_login = ? WHERE id = ?", (self._stamp(), user["id"]))
+            self._set_enabled(True)
+            self._tell("Turned on sign-in", "Users", {"first administrator": user["username"]}, user["full_name"])
+            return self._open_session(user), user
+
+    def disable(self, user: dict[str, Any], password: str) -> None:
+        with self._lock:
+            self._need_password(user["id"], password)
+            self._set_enabled(False)
+            self._sessions.clear()
+            self._tell("Turned off sign-in", "Users", {}, user["full_name"])
+
+    def disable_from_terminal(self) -> None:
+        """For `qm users disable-signin`: whoever has the computer's files can always get back in."""
+        with self._lock:
+            self._set_enabled(False)
+            self._sessions.clear()
+            self._tell("Turned off sign-in (from the terminal)", "Users", {}, "Terminal")
+
+    # ------------------------------------------------------------------ signing in and out
+
+    def login(self, username: str, password: str) -> tuple[str, dict[str, Any]]:
+        key = " ".join(str(username or "").lower().split())[:64]
+        with self._lock:
+            wait = self._locked_for(key)
+            if wait:
+                raise AuthError(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    f"too many wrong attempts: try again in {max(1, round(wait / 60))} minute(s)",
+                )
+            row = self._db.execute("SELECT * FROM users WHERE username = ?", (key,)).fetchone()
+        # an unknown name costs the same time as a wrong password, and says the same
+        ok = check_password(str(password or ""), row["pw"] if row else hash_password("not a real password"))
+        if not (row and ok and row["active"]):
+            self._fail(key)
+            self._tell("Sign-in failed", key, {}, key or "unknown")
+            raise AuthError(HTTPStatus.UNAUTHORIZED, "wrong user name or password")
+        with self._lock:
+            self._failures.pop(key, None)
+            with self._db:
+                self._db.execute("UPDATE users SET last_login = ? WHERE id = ?", (self._stamp(), row["id"]))
+            user = self._user(row["id"])
+            self._tell("Signed in", user["username"], {}, user["full_name"])
+            return self._open_session(user), user
+
+    def logout(self, token: str) -> None:
+        with self._lock:
+            session = self._sessions.pop(token, None)
+        if session:
+            user = self._user(session["user"])
+            self._tell("Signed out", user["username"], {}, user["full_name"])
+
+    def user_for(self, token: str) -> dict[str, Any] | None:
+        """The signed-in user of a session token, or None. Each use keeps the session alive."""
+        if not token:
+            return None
+        with self._lock:
+            session = self._sessions.get(token)
+            if session is None:
+                return None
+            now = self._now()
+            if now - session["seen"] > IDLE_S or now - session["born"] > LIFETIME_S:
+                del self._sessions[token]
+                return None
+            user = self._find_id(session["user"])
+            if user is None or not user["active"]:
+                del self._sessions[token]
+                return None
+            session["seen"] = now
+            return user
+
+    def _open_session(self, user: dict[str, Any]) -> str:
+        token = secrets.token_urlsafe(32)
+        now = self._now()
+        self._sessions[token] = {"user": user["id"], "born": now, "seen": now}
+        return token
+
+    def _locked_for(self, key: str) -> float:
+        recent = [t for t in self._failures.get(key, []) if self._now() - t < LOCK_S]
+        self._failures[key] = recent
+        if len(recent) >= LOCK_AFTER:
+            return LOCK_S - (self._now() - recent[-1])
+        return 0
+
+    def _fail(self, key: str) -> None:
+        with self._lock:
+            if len(self._failures) > 1000:  # a flood of invented names must not grow without end
+                self._failures.clear()
+            self._failures.setdefault(key, []).append(self._now())
+
+    # ------------------------------------------------------------------ users
+
+    def users(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM users ORDER BY lower(full_name)").fetchall()
+        return [_public(_user_row(r)) for r in rows]
+
+    def create(self, admin: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        """A new user with a temporary password. Returns the user and the password, shown once."""
+        with self._lock:
+            roles = _roles(data.get("roles"))
+            password = temporary_password()
+            user = self._insert(
+                str(data.get("username") or ""),
+                str(data.get("full_name") or ""),
+                str(data.get("title") or ""),
+                roles,
+                password,
+                must_change=True,
+            )
+            self._tell("Added a user", user["username"], {"roles": ", ".join(roles) or "viewer"}, admin["full_name"])
+        return {"user": _public(user), "password": password}
+
+    def update(self, admin: dict[str, Any], user_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            user = self._need_user(user_id)
+            changes: dict[str, Any] = {}
+            if "full_name" in data:
+                changes["full_name"] = _full_name(data["full_name"])
+            if "title" in data:
+                changes["title"] = " ".join(str(data["title"] or "").split())[:80]
+            roles = user["roles"]
+            if "roles" in data:
+                roles = _roles(data["roles"])
+                changes["roles"] = ",".join(roles)
+            active = user["active"]
+            if "active" in data:
+                active = bool(data["active"])
+                changes["active"] = int(active)
+            if self._is_last_admin(user) and ("admin" not in roles or not active):
+                raise _bad("this is the last active administrator: make another one first")
+            if changes:
+                sets = ", ".join(f"{k} = ?" for k in changes)
+                with self._db:
+                    self._db.execute(f"UPDATE users SET {sets} WHERE id = ?", (*changes.values(), user_id))  # noqa: S608
+            if not active:
+                self._end_sessions(user_id)
+            self._tell(
+                "Changed a user",
+                user["username"],
+                {"roles": ", ".join(roles) or "viewer", "active": "yes" if active else "no"},
+                admin["full_name"],
+            )
+            return _public(self._user(user_id))
+
+    def reset_password(self, admin: dict[str, Any], user_id: str) -> dict[str, Any]:
+        """A new temporary password, shown once. The user must choose their own at the next sign-in."""
+        with self._lock:
+            user = self._need_user(user_id)
+            password = temporary_password()
+            self._set_password(user_id, password, must_change=True)
+            self._end_sessions(user_id)
+            self._tell("Reset a password", user["username"], {}, admin["full_name"])
+        return {"user": _public(self._user(user_id)), "password": password}
+
+    def delete(self, admin: dict[str, Any], user_id: str) -> None:
+        with self._lock:
+            user = self._need_user(user_id)
+            if user["id"] == admin["id"]:
+                raise _bad("you cannot remove yourself")
+            if self._is_last_admin(user):
+                raise _bad("this is the last active administrator: make another one first")
+            with self._db:
+                self._db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            self._end_sessions(user_id)
+            self._tell("Removed a user", user["username"], {}, admin["full_name"])
+
+    def change_password(self, user: dict[str, Any], current: str, new: str) -> None:
+        with self._lock:
+            self._need_password(user["id"], current)
+            check_new_password(new, user["username"])
+            if new == current:
+                raise _bad("choose a password you have not used just now")
+            self._set_password(user["id"], new, must_change=False)
+            self._tell("Changed their own password", user["username"], {}, user["full_name"])
+
+    def set_password_from_terminal(self, username: str) -> str:
+        """For `qm users passwd`: a new temporary password for one user. Returns it."""
+        with self._lock:
+            user = self._find(username)
+            if user is None:
+                raise _bad(f"there is no user {username!r}")
+            password = temporary_password()
+            self._set_password(user["id"], password, must_change=True)
+            self._end_sessions(user["id"])
+            self._tell("Reset a password (from the terminal)", user["username"], {}, "Terminal")
+            return password
+
+    def add_from_terminal(self, username: str, full_name: str, roles: list[str]) -> str:
+        with self._lock:
+            password = temporary_password()
+            user = self._insert(username, full_name, "", roles, password, must_change=True)
+            self._tell("Added a user (from the terminal)", user["username"], {}, "Terminal")
+            return password
+
+    # ------------------------------------------------------------------ the check on every request
+
+    def authorize(self, user: dict[str, Any], method: str, route: list[str]) -> None:
+        if user["must_change"]:
+            raise AuthError(HTTPStatus.FORBIDDEN, "choose a new password first")
+        need = required_role(method, route)
+        if not allowed(user, need):
+            what = {"admin": "an administrator", "tester": "a tester", "approver": "an approver"}[need]
+            raise AuthError(HTTPStatus.FORBIDDEN, f"this needs {what}. Ask an administrator for that role.")
+
+    # ------------------------------------------------------------------ inside
+
+    def _insert(
+        self, username: str, full_name: str, title: str, roles: list[str], password: str, *, must_change: bool
+    ) -> dict[str, Any]:
+        name = " ".join(str(username).lower().split())
+        if not _USERNAME.match(name):
+            raise _bad(
+                "the user name is 2 to 32 letters, digits, dots, dashes or underscores, starting with a letter or digit"
+            )
+        if self._find(name):
+            raise _bad(f"there is already a user named {name}")
+        full = _full_name(full_name)
+        if not must_change:  # a password somebody chose; a temporary one is ours
+            check_new_password(password, name)
+        uid = secrets.token_hex(6)
+        with self._db:
+            self._db.execute(
+                "INSERT INTO users (id, username, full_name, title, roles, pw, active, must_change, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    uid,
+                    name,
+                    full,
+                    " ".join(str(title).split())[:80],
+                    ",".join(roles),
+                    hash_password(password),
+                    int(must_change),
+                    self._stamp(),
+                ),
+            )
+        return self._user(uid)
+
+    def _set_password(self, user_id: str, password: str, *, must_change: bool) -> None:
+        with self._db:
+            self._db.execute(
+                "UPDATE users SET pw = ?, must_change = ? WHERE id = ?",
+                (hash_password(password), int(must_change), user_id),
+            )
+
+    def _need_password(self, user_id: str, password: str) -> None:
+        row = self._db.execute("SELECT pw FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not (row and check_password(str(password or ""), row["pw"])):
+            raise AuthError(HTTPStatus.FORBIDDEN, "that is not your current password")
+
+    def _end_sessions(self, user_id: str) -> None:
+        for token in [t for t, s in self._sessions.items() if s["user"] == user_id]:
+            del self._sessions[token]
+
+    def _count_admins(self) -> int:
+        return sum(1 for u in self._all() if "admin" in u["roles"] and u["active"])
+
+    def _is_last_admin(self, user: dict[str, Any]) -> bool:
+        return "admin" in user["roles"] and user["active"] and self._count_admins() <= 1
+
+    def _all(self) -> list[dict[str, Any]]:
+        return [_user_row(r) for r in self._db.execute("SELECT * FROM users").fetchall()]
+
+    def _find(self, username: str) -> dict[str, Any] | None:
+        row = self._db.execute(
+            "SELECT * FROM users WHERE username = ?", (" ".join(str(username).lower().split()),)
+        ).fetchone()
+        return _user_row(row) if row else None
+
+    def _find_id(self, user_id: str) -> dict[str, Any] | None:
+        row = self._db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return _user_row(row) if row else None
+
+    def _user(self, user_id: str) -> dict[str, Any]:
+        user = self._find_id(user_id)
+        assert user is not None
+        return user
+
+    def _need_user(self, user_id: str) -> dict[str, Any]:
+        user = self._find_id(str(user_id))
+        if user is None:
+            raise AuthError(HTTPStatus.NOT_FOUND, "no such user")
+        return user
+
+    def _stamp(self) -> str:
+        return datetime.fromtimestamp(self._now()).astimezone().isoformat(timespec="seconds")
+
+    def _tell(self, what: str, subject: str, details: dict[str, Any], who: str) -> None:
+        if self._record is not None:
+            try:
+                self._record(what, subject, details, who)
+            except Exception:  # a log that cannot be written must not stop a sign-in
+                return
+
+
+# ---------------------------------------------------------------------- helpers
+
+
+def _user_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "full_name": row["full_name"],
+        "title": row["title"],
+        "roles": [r for r in row["roles"].split(",") if r],
+        "pw": row["pw"],
+        "active": bool(row["active"]),
+        "must_change": bool(row["must_change"]),
+        "created_at": row["created_at"],
+        "last_login": row["last_login"],
+    }
+
+
+def _public(user: dict[str, Any]) -> dict[str, Any]:
+    """A user as the page may see them: never the password hash."""
+    return {k: v for k, v in user.items() if k != "pw"}
+
+
+def _roles(value: Any) -> list[str]:
+    roles = [str(r) for r in (value or [])] if isinstance(value, list | tuple) else []
+    bad = [r for r in roles if r not in ROLES]
+    if bad:
+        raise _bad(f"unknown role: {bad[0]}")
+    return [r for r in ROLES if r in roles]
+
+
+def _full_name(value: Any) -> str:
+    name = " ".join(str(value or "").split())
+    if len(name) < 2:
+        raise _bad("type the person's full name")
+    if len(name) > 80:
+        raise _bad("the name is too long (80 letters at most)")
+    return name

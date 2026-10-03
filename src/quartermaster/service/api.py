@@ -71,6 +71,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -125,6 +126,7 @@ class Reply:
     body: bytes
     content_type: str = "application/json"
     download_name: str | None = None
+    set_cookie: str | None = None  # a whole Set-Cookie value (sign-in and sign-out)
 
 
 def _json(data: Any, status: HTTPStatus = HTTPStatus.OK) -> Reply:
@@ -154,6 +156,7 @@ class App:
         settings, release lists and AI keys in `shared_dir` are shared by all clients."""
         shared = shared_dir or data_dir
         self.client_id = client_id
+        self._local = threading.local()  # who is making the request now: one value per request, never shared
         self.address: Callable[[], str] = address or (lambda: "")  # where this service answers, for links
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
@@ -224,6 +227,13 @@ class App:
             release = str(data.get("release") or self.settings.get()["release"])
             summary = self._release_summary(release)
             action = str(data.get("action") or "")
+            if self._user:  # with sign-in on, the approver is who is signed in, whatever the form says
+                data = {
+                    **data,
+                    "name": self._user["full_name"],
+                    "title": str(data.get("title") or self._user["title"]),
+                    "signed_in_as": self._user["username"],
+                }
             if action == "approve":
                 self.approvals.approve(release, summary, data)
             elif action == "withdraw":
@@ -303,7 +313,17 @@ class App:
 
     # ------------------------------------------------------------------ routing
 
-    def handle(self, method: str, raw_path: str, body: bytes) -> Reply:
+    @property
+    def _user(self) -> dict[str, Any] | None:
+        """The signed-in user making the request being handled in this thread (sign-in on), else None."""
+        user: dict[str, Any] | None = getattr(self._local, "user", None)
+        return user
+
+    def handle(
+        self, method: str, raw_path: str, body: bytes, cookie: str = "", user: dict[str, Any] | None = None
+    ) -> Reply:
+        """`user`: the signed-in user, when sign-in is on (the hub checked the cookie and the role already)."""
+        self._local.user = user
         reply = self._handle(method, raw_path, body)
         if method == "POST" and reply.status < 400 and reply.content_type == "application/json":
             self._audit(raw_path, body, reply)
@@ -316,7 +336,7 @@ class App:
             data = self._body(body)
             said = describe(route, data, json.loads(reply.body or b"null"))
             if said is not None:
-                who = str(data.get("tester") or "").strip()[:60]
+                who = (self._user or {}).get("full_name") or str(data.get("tester") or "").strip()[:60]
                 self.audit.add(*said, who=who)
 
     def _handle(self, method: str, raw_path: str, body: bytes) -> Reply:
@@ -409,6 +429,8 @@ class App:
                 return _json([self._run_view(r, counts=True) for r in self.queue.store.list()])
             if method == "POST":
                 options = dict(data.get("options") or {})
+                if self._user and not str(options.get("tester") or "").strip():
+                    options["tester"] = self._user["full_name"]  # "Run by" is the signed-in person
                 if not str(options.get("release") or "").strip():
                     options["release"] = self.settings.get()["release"]  # the environment's release by default
                 try:
@@ -1277,7 +1299,7 @@ def port_of(server: Any) -> int:
 
 
 class Handles(Protocol):
-    def handle(self, method: str, raw_path: str, body: bytes) -> Reply: ...
+    def handle(self, method: str, raw_path: str, body: bytes, cookie: str = "") -> Reply: ...
 
 
 def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
@@ -1294,7 +1316,9 @@ def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> Thre
             try:
                 self._check_origin(method)
                 length = int(self.headers.get("Content-Length") or 0)
-                reply = app.handle(method, self.path, self.rfile.read(length) if length else b"")
+                reply = app.handle(
+                    method, self.path, self.rfile.read(length) if length else b"", self.headers.get("Cookie") or ""
+                )
             except ApiError as e:
                 reply = _json({"error": str(e)}, e.status)
             except Exception as e:  # keep serving; show the problem in the page
@@ -1304,6 +1328,8 @@ def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> Thre
             self.send_header("Content-Length", str(len(reply.body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            if reply.set_cookie:
+                self.send_header("Set-Cookie", reply.set_cookie)
             if reply.download_name:
                 self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(reply.download_name)}")
             self.end_headers()

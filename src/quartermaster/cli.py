@@ -615,6 +615,55 @@ def _restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _users(args: argparse.Namespace) -> int:
+    """Manage sign-in from a terminal: for getting back in when nobody can sign in. Whoever has the computer's
+    files could always do this, so it adds no new way in."""
+    from quartermaster.service.auth import ROLES, Auth, AuthError
+
+    path = Path(args.data) / "users.db"
+    if args.action == "list" and not path.is_file():
+        print("Sign-in is off: no users yet.")
+        return 0
+    auth = Auth(path)
+    try:
+        if args.action == "list":
+            print(f"Sign-in is {'ON' if auth.enabled else 'off'}.")
+            for u in auth.users():
+                flags = ", ".join(
+                    [
+                        *(u["roles"] or ["viewer"]),
+                        *(["disabled"] if not u["active"] else []),
+                        *(["must choose a new password"] if u["must_change"] else []),
+                    ]
+                )
+                print(f"  {u['username']:<20} {u['full_name']:<28} {flags}")
+            return 0
+        if args.action == "disable-signin":
+            auth.disable_from_terminal()
+            print("Sign-in is off. Restart Quartermaster, then turn it on again in Settings, Users & sign-in.")
+            return 0
+        if not args.username:
+            print(f"error: give the user name: qm users {args.action} <user name>", file=sys.stderr)
+            return 2
+        if args.action == "passwd":
+            password = auth.set_password_from_terminal(args.username)
+            print(f"New temporary password for {args.username}: {password}")
+            print("They must choose their own at the next sign-in. Restart Quartermaster to sign out anyone who is in.")
+            return 0
+        roles = [r.strip() for r in args.roles.split(",") if r.strip()]
+        bad = [r for r in roles if r not in ROLES]
+        if bad:
+            print(f"error: unknown role {bad[0]}. Roles: {', '.join(ROLES)}", file=sys.stderr)
+            return 2
+        password = auth.add_from_terminal(args.username, args.name or args.username, roles)
+        print(f"Added {args.username}. Temporary password: {password}")
+        print("They must choose their own at the first sign-in. If sign-in is off, turn it on in Settings.")
+        return 0
+    except AuthError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="qm", description="Quartermaster: Oracle Fusion release regression")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -728,6 +777,14 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--no-browser", action="store_true", help="do not open the web browser")
     sv.set_defaults(func=_serve)
+
+    us = sub.add_parser("users", help="sign-in: list users, add one, reset a password, or turn sign-in off")
+    us.add_argument("action", choices=["list", "add", "passwd", "disable-signin"])
+    us.add_argument("username", nargs="?", help="the user name (add, passwd)")
+    us.add_argument("--name", default="", help="add: the person's full name")
+    us.add_argument("--roles", default="tester", help="add: comma separated: admin, tester, approver (none: viewer)")
+    us.add_argument("--data", default=".qm", help="the data folder")
+    us.set_defaults(func=_users)
 
     for name, func, text in (
         ("backup", _backup, "save your tests, run history, clients and settings in one zip (no passwords)"),

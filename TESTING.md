@@ -644,6 +644,51 @@ You should see: the card says **Approval withdrawn** with your reason, and **App
 now lists the approval and the withdrawal. The **Audit log** page has both too. Download the pack again: its
 Approval section says "Approval withdrawn".
 
+### 6.19 Sign-in and roles
+
+Do this on a test copy or be ready to turn sign-in off again (step 11). Sign-in is off until you turn it on.
+
+1. Click **Settings**, then **Users & sign-in**. A blue box says sign-in is off.
+2. Type your full name, a user name (for example `sai`) and a password of at least 10 characters twice.
+   Click **Turn on sign-in** and confirm.
+
+You should see: the page now lists you as an Administrator ("you"), and the menu has an **Account** section
+with your name and **Sign out**.
+
+3. Click **Add a user**. Name `Jo Tester`, user name `jo`, leave **Tester** ticked, click **Add the user**.
+
+You should see: a panel with a 12-character temporary password and the words "This is the only time it is
+shown". Copy it. Click **Done**.
+
+4. Open a second browser (or a private window) and go to http://127.0.0.1:8765
+
+You should see: only a sign-in card, no menu. Try a wrong password: "wrong user name or password".
+
+5. Sign in as `jo` with the temporary password.
+
+You should see: "Choose your own password". Type the temporary one, a new one twice (the two must match) and save.
+
+6. Look at Jo's menu and the Overview.
+
+You should see: Jo can run and record, but there is **no Settings** in the menu, and no **Approve** button on the
+release card. In the address bar type `#/settings?tab=users`: "this needs an administrator".
+
+7. Back as the administrator: **Settings, Users & sign-in**, click **Change** next to Jo, tick **Approver** too, **Save**.
+   In Jo's browser, sign out and in again (or press F5): the **Approve** button is there.
+8. Approve the release as Jo (see 6.18).
+
+You should see: the approval says "Jo Tester", whatever else is typed, and the certification pack says "Signed in as jo".
+
+9. As the administrator, open **Audit log**.
+
+You should see: signing in, adding the user, changing the roles, the approval, each with a name. No passwords.
+
+10. Click **Change** next to Jo, **Reset password**: a new temporary password is shown once, and Jo is signed out.
+    Try signing in as `sai` with a wrong password 5 times: the 6th says to try again in 15 minutes (even with the
+    right password).
+11. To turn it off: **Settings, Users & sign-in**, type your password, **Turn off sign-in**. Quartermaster is
+    open again, as before. If you ever cannot sign in: in a terminal on this computer run `qm users disable-signin`.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

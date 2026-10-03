@@ -20,6 +20,7 @@ import os
 import shutil
 import threading
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -27,8 +28,16 @@ from urllib.parse import parse_qs, urlsplit
 from quartermaster.service import backup
 from quartermaster.service.api import ApiError, App, Reply
 from quartermaster.service.audit import AuditLog
+from quartermaster.service.auth import COOKIE, ROLES, Auth, AuthError
 from quartermaster.service.environments import Environments
 from quartermaster.service.settings import Settings
+
+
+def _me(user: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The signed-in user as the page may see them."""
+    if user is None:
+        return None
+    return {k: user[k] for k in ("id", "username", "full_name", "title", "roles", "must_change")}
 
 
 def _reply(data: Any) -> Reply:
@@ -54,6 +63,11 @@ class Hub:
         old = Settings(data_dir / "settings.json").get()
         self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
         self.audit = AuditLog(data_dir / "audit.jsonl")
+        # Sign-in and roles (off until switched on in Settings); one set of users for all clients.
+        self.auth = Auth(
+            data_dir / "users.db",
+            record=lambda what, subject, details, who: self.audit.add(what, subject, details, who=who),
+        )
         self.address = ""  # where this service answers (set by qm serve), for the links in notifications
         self._keys: set[str] = set()  # AI keys pasted in Settings, shared by all clients, in memory only
         self._apps: dict[str, App] = {}
@@ -119,13 +133,105 @@ class Hub:
 
     # ------------------------------------------------------------------ the web service
 
-    def handle(self, method: str, raw_path: str, body: bytes) -> Reply:
-        if urlsplit(raw_path).path.startswith("/api/backup"):
-            return self._backup(method, raw_path, body)
-        reply = self.app.handle(method, raw_path, body)
+    def handle(self, method: str, raw_path: str, body: bytes, cookie: str = "") -> Reply:
+        path = urlsplit(raw_path).path
+        route = [p for p in path.split("/") if p][1:] if path.startswith("/api") else []
+        try:
+            if route[:1] in (["auth"], ["users"]):
+                return self._accounts(method, route, body, self._token(cookie))
+            user = None
+            # the web page itself stays open (it shows the sign-in); data and files need a signed-in user
+            if self.auth.enabled and path.startswith(("/api/", "/files/")):
+                user = self.auth.user_for(self._token(cookie))
+                if user is None:
+                    raise ApiError(HTTPStatus.UNAUTHORIZED, "sign in first")
+                self.auth.authorize(user, method, route)
+            if path.startswith("/api/backup"):
+                return self._backup(method, raw_path, body)
+            reply = self.app.handle(method, raw_path, body, user=user)
+        except AuthError as e:
+            raise ApiError(e.status, str(e)) from e
         if method == "POST" and raw_path.startswith("/api/environments"):
             self.sync()  # a client added or deleted
         return reply
+
+    # ------------------------------------------------------------------ sign-in, users
+
+    @staticmethod
+    def _token(cookie: str) -> str:
+        try:
+            jar: SimpleCookie = SimpleCookie(cookie)
+        except Exception:  # a cookie header that is not one
+            return ""
+        return jar[COOKIE].value if COOKIE in jar else ""
+
+    def _session_cookie(self, token: str) -> str:
+        return (
+            f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400"
+            if token
+            else (f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        )
+
+    def _accounts(self, method: str, route: list[str], body: bytes, token: str) -> Reply:
+        """Sign in, sign out, change a password, and the users (administrators only)."""
+        auth = self.auth
+        try:
+            data = json.loads(body or b"{}") if method == "POST" else {}
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "the request is not valid JSON") from e
+        if not isinstance(data, dict):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "the request must be a JSON object")
+        key = "/".join(route)
+        user = auth.user_for(token) if auth.enabled else None
+
+        if method == "GET" and key == "auth/status":
+            return _reply({"enabled": auth.enabled, "user": _me(user), "roles": list(ROLES)})
+        if method == "POST" and key == "auth/login":
+            if not auth.enabled:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "sign-in is not turned on")
+            new, who = auth.login(str(data.get("username") or ""), str(data.get("password") or ""))
+            return Reply(HTTPStatus.OK, json.dumps({"user": _me(who)}).encode(), set_cookie=self._session_cookie(new))
+        if method == "POST" and key == "auth/logout":
+            auth.logout(token)
+            return Reply(HTTPStatus.OK, b'{"ok": true}', set_cookie=self._session_cookie(""))
+        if method == "POST" and key == "auth/enable":
+            if auth.enabled:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "sign-in is already on")
+            new, who = auth.enable(
+                str(data.get("username") or ""), str(data.get("full_name") or ""), str(data.get("password") or "")
+            )
+            return Reply(HTTPStatus.OK, json.dumps({"user": _me(who)}).encode(), set_cookie=self._session_cookie(new))
+
+        if not auth.enabled:
+            if method == "GET" and key == "users":
+                return _reply({"enabled": False, "users": [], "roles": list(ROLES)})
+            raise ApiError(HTTPStatus.BAD_REQUEST, "sign-in is not turned on")
+        if user is None:
+            raise ApiError(HTTPStatus.UNAUTHORIZED, "sign in first")
+        if method == "POST" and key == "auth/password":  # allowed while a new password is still owed
+            auth.change_password(user, str(data.get("current") or ""), str(data.get("new") or ""))
+            return _reply({"user": _me(auth.user_for(token))})
+        auth.authorize(user, method, route)
+        if method == "POST" and key == "auth/disable":
+            if "admin" not in user["roles"]:
+                raise AuthError(HTTPStatus.FORBIDDEN, "this needs an administrator")
+            auth.disable(user, str(data.get("password") or ""))
+            return Reply(HTTPStatus.OK, b'{"ok": true}', set_cookie=self._session_cookie(""))
+        if key == "users" and method == "GET":
+            return _reply({"enabled": True, "users": auth.users(), "roles": list(ROLES)})
+        if key == "users" and method == "POST":
+            action = str(data.get("action") or "")
+            if action == "create":
+                return _reply(auth.create(user, data))
+            if action == "update":
+                return _reply({"user": auth.update(user, str(data.get("id") or ""), data)})
+            if action == "reset":
+                return _reply(auth.reset_password(user, str(data.get("id") or "")))
+            if action == "delete":
+                auth.delete(user, str(data.get("id") or ""))
+                return _reply({"ok": True})
+            raise ApiError(HTTPStatus.BAD_REQUEST, "choose create, update, reset or delete")
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
     # ------------------------------------------------------------------ backup and restore
 

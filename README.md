@@ -266,6 +266,38 @@ Run history is kept in `.qm/` (next to where you started `qm serve`); evidence s
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
 
+## Sign-in and roles
+
+Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in
+**Settings, Users & sign-in** (administrators): you create the first administrator, and from then on everyone
+signs in with a user name and password. What a person may do depends on their roles:
+
+| Role | May |
+|---|---|
+| **Administrator** | Everything: settings, clients and pods, users, backups, notifications |
+| **Tester** | Record, run, import and schedule tests, accept screen changes, dismiss items, switch the pod in use |
+| **Approver** | Approve or withdraw the approval of a release (keep this apart from the testers who ran the tests) |
+| *(no role)* | Look at everything operational, change nothing: a viewer |
+
+A person may have several roles. An administrator adds people (**Add a user**), changes their roles, switches
+someone off, or resets a password. A new or reset account gets a **temporary password made by Quartermaster,
+shown once**; the person must choose their own at their first sign-in. The page hides what a person may not do,
+and the service checks every request again, so a hidden button cannot be got round.
+
+- **Passwords** are never stored: only a salted scrypt hash. A password needs 10 characters and may not be the
+  user name or a very common one. Five wrong passwords lock a user name for 15 minutes.
+- **Sessions** are kept in memory only (never in a file), in a cookie the page's scripts cannot read. They end
+  after 8 hours without use, or 24 hours at most, and when Quartermaster restarts.
+- **Who did it:** with sign-in on, the audit log, "Run by" and the release approval carry the signed-in person's
+  name, not a typed one. Every sign-in, failed sign-in and change to a user is in the audit log.
+- **The last active administrator** can never be removed, switched off or demoted.
+- **Backups** never contain the sign-in accounts, and a restore leaves them as they are.
+- **Locked out?** On the computer that runs Quartermaster: `qm users list`, `qm users add jane --name "Jane Doe"
+  --roles admin`, `qm users passwd jane` (a new temporary password) or `qm users disable-signin`. Anyone with
+  the computer's files could always do this, so it adds no new way in.
+- Quartermaster still answers only on the computer it runs on (127.0.0.1). Sign-in matters when several people
+  use that computer (a shared or remote desktop). Reaching it from other computers is a separate step.
+
 ## Approving a release
 
 The certification pack used to end with a blank table to sign on paper. Now a person approves the release
@@ -283,7 +315,7 @@ then has an **Approval** section with all of it, and an `approvals.json` with th
   audit log.
 - Each release, and each client, has its own approvals.
 - Quartermaster has no log-in of its own yet, so the name is the one the approver types, next to the user
-  signed in to the computer. The pack says so. A real sign-in with roles (who may approve) comes later.
+  signed in to the computer. The pack says so. With sign-in on (see Sign-in and roles) the approver is the signed-in person and only approvers may approve.
 
 ## Notifications (tell people when a run fails)
 

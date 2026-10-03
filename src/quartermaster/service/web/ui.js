@@ -141,6 +141,7 @@ export async function api(path, body) {
   };
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && /sign in first/i.test(data.error || "") && location.hash !== "#/login") location.hash = "#/login";
   if (!res.ok) throw new Error(data.error || `The service answered ${res.status}`);
   return data;
 }

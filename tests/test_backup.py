@@ -301,3 +301,26 @@ def test_a_waiting_restore_is_applied_at_the_next_start(tmp_path: Path, monkeypa
     assert (tmp_path / "my_tests" / "mine.yaml").is_file()
     assert backup.pending(folders(tmp_path)) is None
     assert backup.apply_pending(folders(tmp_path)) is None  # nothing waits any more
+
+
+# ------------------------------------------------------------------ sign-in accounts stay out of backups
+
+
+def test_sign_in_accounts_are_not_in_a_backup_and_a_restore_leaves_them_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from quartermaster.service.auth import Auth
+
+    hub = make_hub(tmp_path, monkeypatch)
+    hub.auth.enable("sai", "Sai Ram", "correct-horse-battery")
+    hub.stop()
+    content = backup.create(folders(tmp_path))
+    assert not [n for n in names(content) if "users.db" in n]  # no password hashes in a zip that gets shared
+
+    backup.restore(folders(tmp_path), content)  # replaces the data folder, but not who may sign in
+    again = Auth(tmp_path / ".qm" / "users.db")
+    assert again.enabled and [u["username"] for u in again.users()] == ["sai"]
+
+    other = _zip({"data/users.db": "not a database", "data/settings.json": "{}"})  # a zip from elsewhere
+    backup.restore(folders(tmp_path), other)
+    assert [u["username"] for u in Auth(tmp_path / ".qm" / "users.db").users()] == ["sai"]

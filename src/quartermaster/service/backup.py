@@ -9,9 +9,11 @@ What goes in:
     evidence/   the evidence folder, only when asked for (screenshots and videos can be large)
 
 What never goes in: the passwords of the test users (they are removed from the copy of the pods
-database), the key that protects them, and anything Quartermaster keeps in memory only (the AI key
-and the sign-ins done by hand). So the zip is safe to keep in a shared folder. After a restore on
-another computer, type the test users' passwords again; on the same computer they are kept.
+database), the key that protects them, the sign-in accounts of Quartermaster's own users (users.db: a
+restore leaves them as they are, and a shared zip never holds anyone's password hash), and anything
+Quartermaster keeps in memory only (the AI key and the sign-ins done by hand). So the zip is safe to
+keep in a shared folder. After a restore on another computer, type the test users' passwords again
+and add the people who sign in; on the same computer both are kept.
 
 Restoring replaces what is there, so it cannot be done while Quartermaster is running (its
 databases are open). The web page therefore only stores the zip and asks for a restart, and the
@@ -39,6 +41,7 @@ MANIFEST = "backup.json"
 BACKUPS = "backups"  # inside the data folder: the safety copies. Never part of a backup.
 KEEP_COPIES = 5  # safety copies kept
 PENDING = "restore-pending.zip"  # inside the data folder: a restore waiting for the next start
+KEEP_OUT = "users.db"  # sign-in accounts: never in a backup, and a restore leaves them as they are
 GROUPS = ("tests", "data", "clients", "evidence")
 MAX_BYTES = 2 * 1024**3  # largest backup made or restored (the evidence of a big client may need a manual copy)
 _SKIP_FILES = {PENDING}
@@ -126,7 +129,7 @@ def _files(group: str, root: Path, include_evidence: bool, folders: Folders) -> 
         if not path.is_file() or path.is_symlink():
             continue
         rel = path.relative_to(root)
-        if path.name in _SKIP_FILES and group == "data" and len(rel.parts) == 1:
+        if group == "data" and len(rel.parts) == 1 and (path.name in _SKIP_FILES or path.name.startswith(KEEP_OUT)):
             continue
         if path.name.endswith(_SKIP_SUFFIXES):
             continue
@@ -149,8 +152,8 @@ def _copy_database(path: Path, scratch: Path, *, strip_passwords: bool) -> Path:
         try:
             src.backup(dst)
             if strip_passwords:
-                has = dst.execute("SELECT name FROM sqlite_master WHERE name = 'users'").fetchone()
-                if has:
+                columns = [r[1] for r in dst.execute("PRAGMA table_info(users)")]
+                if "secret" in columns:
                     dst.execute("UPDATE users SET secret = NULL")
                     dst.commit()
         finally:
@@ -281,6 +284,8 @@ def restore(folders: Folders, content: bytes) -> dict[str, Any]:
             if entry.filename == MANIFEST or entry.is_dir():
                 continue
             group, rel = _checked_name(entry.filename)
+            if group == "data" and rel.startswith(KEEP_OUT):
+                continue  # a zip from elsewhere must not replace who may sign in
             target = folders.of(group) / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             with z.open(entry) as src, target.open("wb") as dst:
@@ -295,7 +300,7 @@ def _clear(group: str, folders: Folders, *, keep_evidence: bool) -> None:
     if not root.is_dir():
         return
     for child in list(root.iterdir()):
-        if group == "data" and child.name in (BACKUPS, PENDING):
+        if group == "data" and (child.name in (BACKUPS, PENDING) or child.name.startswith(KEEP_OUT)):
             continue
         if group == "clients" and keep_evidence and child.is_dir():
             for sub in list(child.iterdir()):

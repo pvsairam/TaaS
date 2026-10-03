@@ -1,7 +1,23 @@
 // What every page needs to know, loaded once per navigation and shared.
 import {api} from "./ui.js";
 
-export const state = {status: null, tests: [], attention: null, timer: null, page: "", query: {}, open: {}};
+export const state = {status: null, tests: [], attention: null, timer: null, page: "", query: {}, open: {},
+  auth: {enabled: false, user: null, roles: []}};
+
+// Is sign-in on, and who is signed in. (Off: nobody signs in, and everything is allowed, as it always was.)
+export async function loadAuth() {
+  try { state.auth = await api("/api/auth/status"); } catch (e) { state.auth = {enabled: false, user: null, roles: []}; }
+  return state.auth;
+}
+
+// May the person at the page do this? "any" (signed in), "tester", "approver" or "admin". The service checks
+// again on every request; this only keeps buttons out of sight that would be refused.
+export function can(role) {
+  if (!state.auth?.enabled) return true;
+  const user = state.auth.user;
+  if (!user) return false;
+  return role === "any" || user.roles.includes("admin") || user.roles.includes(role);
+}
 
 export async function loadCommon() {
   const [status, tests, attention] = await Promise.all([

@@ -328,7 +328,11 @@ def _approval_section(add: Any, approval: dict[str, Any] | None, release: str) -
             f"{results.get('passed', 0)} passed, {results.get('failed', 0)} failed, "
             f"{results.get('not_run', 0)} not run of {results.get('total', 0)} tests",
         ),
-        ("Computer user", f"{last.get('computer_user', '')} (the name above was typed by the approver)"),
+        *(
+            [("Signed in as", f"{last['signed_in_as']} (a user of Quartermaster)")]
+            if last.get("signed_in_as")
+            else [("Computer user", f"{last.get('computer_user', '')} (the name above was typed by the approver)")]
+        ),
         ("Fingerprint of the results", str(results.get("fingerprint") or "")[:16]),
     ]
     if last.get("acknowledged_open_items"):

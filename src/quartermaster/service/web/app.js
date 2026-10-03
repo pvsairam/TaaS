@@ -1,7 +1,7 @@
 // Quartermaster web UI: shell and routing. Plain JavaScript modules, no build step.
 import {button, h, hideTip, icon, remember, skeleton} from "./ui.js";
 import {checkPod, environmentButton, openPalette, openRunDrawer} from "./components.js";
-import {state} from "./state.js";
+import {can, loadAuth, state} from "./state.js";
 import {overviewPage} from "./page-overview.js";
 import {runPage, runsPage} from "./page-runs.js";
 import {testPage, testsPage} from "./page-tests.js";
@@ -15,6 +15,7 @@ import {schedulesPage} from "./page-schedules.js";
 import {auditPage} from "./page-audit.js";
 import {setupPage} from "./page-setup.js";
 import {manualRunPage} from "./page-manual-run.js";
+import {accountPage, loginPage, logout, passwordPage} from "./page-login.js";
 
 const NAV = [
   {section: "Testing"},
@@ -25,9 +26,9 @@ const NAV = [
   {id: "attention", label: "Needs attention", ic: "attention"},
   {id: "schedules", label: "Schedules", ic: "clock"},
   {section: "Create"},
-  {id: "record", label: "Record a test", ic: "record"},
+  {id: "record", label: "Record a test", ic: "record", need: "tester"},
   {section: "System"},
-  {id: "settings", label: "Settings", ic: "settings"},
+  {id: "settings", label: "Settings", ic: "settings", need: "admin"},
   {id: "audit", label: "Audit log", ic: "file"},
 ];
 
@@ -63,11 +64,18 @@ function drawTheme() {
 
 function drawNav() {
   const count = state.attention?.count || 0;
-  document.getElementById("nav").replaceChildren(...NAV.map((n) => n.section
+  const user = state.auth?.enabled ? state.auth.user : null;
+  const visible = NAV.filter((n) => !n.need || can(n.need));
+  // a section whose items are all hidden is hidden too
+  const shown = visible.filter((n, i) => !n.section || (visible[i + 1] && !visible[i + 1].section));
+  const account = user ? [{section: "Account"}, {id: "account", label: user.full_name, ic: "lock"}] : [];
+  document.getElementById("new-run-btn").hidden = !can("tester");
+  document.getElementById("nav").replaceChildren(...[...shown, ...account].map((n) => n.section
     ? h("div", {class: "nav-label"}, n.section)
     : h("a", {href: "#/" + n.id, "aria-current": state.page === n.id ? "page" : null, title: n.label},
       icon(n.ic), h("span", {class: "label"}, n.label),
-      n.id === "attention" && count ? h("span", {class: "count", "aria-label": `, ${count} items`}, count) : null)));
+      n.id === "attention" && count ? h("span", {class: "count", "aria-label": `, ${count} items`}, count) : null)),
+    ...(user ? [h("a", {href: "#/login", title: "Sign out", onclick: (e) => { e.preventDefault(); logout(); }}, icon("x"), h("span", {class: "label"}, "Sign out"))] : []));
   document.getElementById("env").replaceChildren(state.status ? environmentButton() : h("div", {class: "skel", style: "height:58px"}));
 }
 
@@ -165,6 +173,11 @@ export async function route() {
   const [path, query] = location.hash.replace(/^#\/?/, "").split("?");
   const [page, ...rest] = path.split("/");
   const arg = decodeURIComponent(rest.join("/"));
+  if (state.auth?.enabled) { // sign-in is on: sign in first, and choose a new password when one is owed
+    const me = state.auth.user;
+    if (!me && page !== "login") { location.hash = "#/login"; return; }
+    if (me?.must_change && page !== "password") { location.hash = "#/password"; return; }
+  }
   const changed = state.page !== page || arg !== state.arg;
   Object.assign(state, {page, arg, query: Object.fromEntries(new URLSearchParams(query || ""))});
   drawNav();
@@ -184,6 +197,9 @@ export async function route() {
     else if (page === "schedules") await schedulesPage();
     else if (page === "audit") await auditPage();
     else if (page === "setup") await setupPage();
+    else if (page === "login") await loginPage();
+    else if (page === "password") await passwordPage(Boolean(state.auth?.user?.must_change));
+    else if (page === "account") await accountPage();
     else await overviewPage();
   } catch (e) {
     show([{label: "Problem"}], h("div", {class: "callout danger", role: "alert"}, icon("attention"),
@@ -194,4 +210,4 @@ export async function route() {
 
 initShell();
 window.addEventListener("hashchange", route);
-route();
+loadAuth().then(route);

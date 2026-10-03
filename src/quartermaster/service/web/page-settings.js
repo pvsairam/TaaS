@@ -6,6 +6,7 @@ import {connection, envName, loadCommon, schedule, state} from "./state.js";
 import {setTheme, show} from "./app.js";
 import {environmentsCard} from "./page-environments.js";
 import {notificationsTab} from "./page-notifications.js";
+import {usersTab} from "./page-users.js";
 
 export async function settingsPage() {
   await loadCommon();
@@ -38,6 +39,7 @@ export async function settingsPage() {
   if (state.page !== "settings") return;
 
   const notifications = tab === "notifications" ? await notificationsTab(settingsPage) : null;
+  const users = tab === "users" ? await usersTab(settingsPage) : null;
   if (state.page !== "settings") return;
 
   const ai = aiCard(st.ai);
@@ -94,6 +96,7 @@ export async function settingsPage() {
     evidence: h("div", {style: "max-width:720px"}, evidence),
     ai: h("div", {style: "max-width:720px"}, ai),
     notifications,
+    users,
     general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, appearance), h("div", {class: "stack"}, shortcuts)),
   }[tab];
   show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
@@ -106,7 +109,7 @@ export async function settingsPage() {
 }
 
 const TABS = [["environments", "Clients & environments"], ["evidence", "Evidence"], ["ai", "AI assistant"],
-  ["notifications", "Notifications"], ["general", "General"]];
+  ["notifications", "Notifications"], ["users", "Users & sign-in"], ["general", "General"]];
 
 // Backup and restore: one zip with the tests, run history, clients and settings (never the passwords).
 // A restore is only stored here; the next start of Quartermaster applies it, because its databases are

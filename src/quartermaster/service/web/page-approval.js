@@ -1,6 +1,7 @@
 // Approving a release: who approved it, when, and on which results (shown on the release card, kept in the
 // certification pack). There is no log-in, so the approver types a name; it is remembered on this computer.
 import {api, button, callout, drawer, field, h, icon, input, plural, remember, toast, when} from "./ui.js";
+import {can, state} from "./state.js";
 
 const counts = (s) => `${s.passed} passed, ${s.failed} failed, ${s.not_run} not run`;
 
@@ -16,16 +17,16 @@ export function approvalBlock(a, redraw) {
       last.comment ? h("div", {class: "meta"}, `"${last.comment}"`) : null,
       changed ? h("div", {class: "meta", style: "color:var(--warning)"},
         `Tests were run again since: ${plural(a.changes.tests, "test")} changed${a.changes.newly_failing ? `, ${a.changes.newly_failing} now failing` : ""}. Approve it again to cover the new results.`) : null];
-    if (changed) actions.push(button("Approve again", {size: "sm", kind: "primary", ic: "check", onClick: () => openApprove(a, redraw)}));
-    actions.push(button("Withdraw", {size: "sm", kind: "ghost", onClick: () => openWithdraw(a, redraw)}));
+    if (changed && can("approver")) actions.push(button("Approve again", {size: "sm", kind: "primary", ic: "check", onClick: () => openApprove(a, redraw)}));
+    if (can("approver")) actions.push(button("Withdraw", {size: "sm", kind: "ghost", onClick: () => openWithdraw(a, redraw)}));
   } else if (a.status === "withdrawn") {
     badge = h("span", {class: "badge tone-neutral"}, icon("minus"), "Approval withdrawn");
     text = [h("strong", {}, last.by), ` withdrew the approval ${when(last.at).toLowerCase()}: "${last.comment}"`];
-    actions.push(button("Approve again", {size: "sm", kind: "primary", ic: "check", onClick: () => openApprove(a, redraw)}));
+    if (can("approver")) actions.push(button("Approve again", {size: "sm", kind: "primary", ic: "check", onClick: () => openApprove(a, redraw)}));
   } else {
     badge = h("span", {class: "badge tone-neutral"}, icon("minus"), "Not approved");
     text = `Nobody has approved ${rel} yet. ${a.summary.total ? counts(a.summary) + "." : "There are no tests."}`;
-    actions.push(button(`Approve ${rel}…`, {size: "sm", kind: "primary", ic: "check", disabled: !a.summary.total,
+    if (can("approver")) actions.push(button(`Approve ${rel}…`, {size: "sm", kind: "primary", ic: "check", disabled: !a.summary.total,
       title: a.summary.total ? "Record that you approve this release" : "There are no tests to approve", onClick: () => openApprove(a, redraw)}));
   }
   actions.push(button("History", {size: "sm", kind: "ghost", onClick: () => openHistory(rel)}));
@@ -38,8 +39,9 @@ export function approvalBlock(a, redraw) {
 function openApprove(a, redraw) {
   const rel = a.release, s = a.summary;
   const saved = remember("approver") || {};
-  const name = input({value: saved.name || "", placeholder: "Your full name", maxlength: "80", "aria-label": "Your name"});
-  const title = input({value: saved.title || "", placeholder: "For example Test manager", maxlength: "80", "aria-label": "Your role"});
+  const me = state.auth?.enabled ? state.auth.user : null; // signed in: the approver is who is signed in
+  const name = input({value: me ? me.full_name : saved.name || "", placeholder: "Your full name", maxlength: "80", "aria-label": "Your name", readonly: me ? "readonly" : null});
+  const title = input({value: me ? me.title || saved.title || "" : saved.title || "", placeholder: "For example Test manager", maxlength: "80", "aria-label": "Your role"});
   const open = s.failed + s.not_run;
   const comment = h("textarea", {class: "input", rows: "3", maxlength: "1000", "aria-label": "Comment",
     placeholder: open ? "Why is the release approved with tests failed or not run?" : "Optional", style: "width:100%;font:inherit"});
@@ -51,7 +53,7 @@ function openApprove(a, redraw) {
     body: () => [h("div", {class: "stack"},
       callout("info", "What this does.", "It records your name, the time and the results as they are now. They go into the certification pack. Quartermaster has no log-in, so the name is the one you type here."),
       open ? callout("warning", `${s.failed} failed and ${s.not_run} have not run.`, "You can still approve, but you must say you know and write why.") : null,
-      h("div", {class: "fields"}, field("Your name", name, "", "approve-name"), field("Your role", title, "", "approve-title"),
+      h("div", {class: "fields"}, field("Your name", name, me ? "You are signed in, so this is you." : "", "approve-name"), field("Your role", title, "", "approve-title"),
         h("div", {class: "wide"}, field("Comment", comment, "", "approve-comment"))),
       open ? h("label", {class: "switch"}, sure, `I know ${s.failed} test(s) failed and ${s.not_run} have not run, and I approve ${rel} anyway`) : null,
       error)],
@@ -74,7 +76,8 @@ function openApprove(a, redraw) {
 function openWithdraw(a, redraw) {
   const rel = a.release;
   const saved = remember("approver") || {};
-  const name = input({value: saved.name || "", placeholder: "Your full name", maxlength: "80", "aria-label": "Your name"});
+  const me = state.auth?.enabled ? state.auth.user : null;
+  const name = input({value: me ? me.full_name : saved.name || "", placeholder: "Your full name", maxlength: "80", "aria-label": "Your name", readonly: me ? "readonly" : null});
   const reason = h("textarea", {class: "input", rows: "3", maxlength: "1000", "aria-label": "Why", style: "width:100%;font:inherit"});
   const error = h("div", {class: "meta", role: "alert", style: "color:var(--danger);min-height:18px"});
   drawer({

@@ -489,3 +489,8 @@ video.player { width: 100%; max-height: 520px; border-radius: var(--r-card); bac
 .review-none { display: grid; place-items: center; color: var(--text-3); font-size: 12px; }
 .guide-shot { width: 120px; height: 75px; object-fit: cover; object-position: top; border-radius: 6px; border: 1px solid var(--border); display: block; }
 @media (max-width: 640px) { .guide-step { grid-template-columns: 24px minmax(0, 1fr); } .guide-step > :last-child { grid-column: 2; align-items: flex-start !important; } }
+
+/* Before signing in (only when sign-in is on): just the sign-in card, no menu and no data. */
+body.signed-out .app, :root.rail body.signed-out .app { grid-template-columns: 1fr; }
+body.signed-out .side, body.signed-out .side-scrim, body.signed-out .menu-btn, body.signed-out .search-btn,
+body.signed-out #new-run-btn, body.signed-out .crumbs { display: none; }
