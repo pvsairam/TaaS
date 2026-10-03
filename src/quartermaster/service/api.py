@@ -33,6 +33,8 @@ computers and other web sites cannot start runs.
     GET  /api/tests                  test files in the tests folder, with their last result
     GET  /api/test?file=<path>       one test: steps in plain words, data, history, the file
     POST /api/test/accept-update     {"file", "step_index", "new"} accept a screen change
+    POST /api/test/duplicate         {"file", "id", "title", "folder"?} a copy of a test with its own id and title
+    POST /api/data/save              {"name", "title"?, "description"?, "values", "pods"} write a data set from the page
     GET  /api/runs                   run history, newest first
     POST /api/runs                   {"target": "hcm/view_worker.yaml", "options": {...}} queue a run
     GET  /api/runs/<id>              one run, its progress events and (when done) its results
@@ -100,7 +102,7 @@ from quartermaster.evidence.certification import certification_rows, summarize_r
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import audit as audit_module
-from quartermaster.service import auditexport, insights, suites, testdata
+from quartermaster.service import auditexport, insights, suites, testdata, testedit
 from quartermaster.service.aieval import AiEval
 from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, computer_user, describe
@@ -539,6 +541,10 @@ class App:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
             return _json(self.accept_update(data))
+        if method == "POST" and route == ["test", "duplicate"]:
+            return _json(self.duplicate_test(data), HTTPStatus.CREATED)
+        if method == "POST" and route == ["data", "save"]:
+            return _json(self.save_data_set(data))
         if route == ["runs"]:
             if method == "GET":
                 return _json([self._run_view(r, counts=True) for r in self.queue.store.list()])
@@ -1435,6 +1441,32 @@ class App:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         return {"updated": path.relative_to(self.tests_root).as_posix(), "backup": str(backup)}
 
+    def duplicate_test(self, data: dict[str, Any]) -> dict[str, Any]:
+        source = self._test_file(str(data.get("file") or ""))
+        try:
+            made = testedit.duplicate(
+                self.tests_root,
+                source,
+                str(data.get("id") or ""),
+                str(data.get("title") or ""),
+                str(data.get("folder") or ""),
+                self.backups,
+            )
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        rel = made.relative_to(self.tests_root).as_posix()
+        self.audit.add("Copied a test", rel, {"from": source.relative_to(self.tests_root).as_posix()})
+        return {"file": rel}
+
+    def save_data_set(self, data: dict[str, Any]) -> dict[str, Any]:
+        try:
+            path = testedit.save_set(self.tests_root, data, self.backups)
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        rel = path.relative_to(self.tests_root).as_posix()
+        self.audit.add("Saved a data set", rel, {})
+        return {"file": rel}
+
     def _test_file(self, rel: str) -> Path:
         path = (self.tests_root / rel).resolve()
         if self.tests_root not in path.parents or path.suffix.lower() not in (".yaml", ".yml"):
@@ -1698,6 +1730,22 @@ class Handles(Protocol):
     def handle(self, method: str, raw_path: str, body: bytes, cookie: str = "") -> Reply: ...
 
 
+MAX_BODY = 100 * 1024 * 1024  # the biggest request body the service reads
+
+
+def _body_length(header: str | None) -> int:
+    """The request body size, refusing bad or huge values before reading anything."""
+    try:
+        length = int(header or 0)
+    except ValueError:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "bad Content-Length") from None
+    if length < 0:
+        raise ApiError(HTTPStatus.BAD_REQUEST, "bad Content-Length")
+    if length > MAX_BODY:
+        raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request is too large")
+    return length
+
+
 def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         server_version = "Quartermaster"
@@ -1711,7 +1759,7 @@ def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> Thre
         def _serve(self, method: str) -> None:
             try:
                 self._check_origin(method)
-                length = int(self.headers.get("Content-Length") or 0)
+                length = _body_length(self.headers.get("Content-Length"))
                 reply = app.handle(
                     method, self.path, self.rfile.read(length) if length else b"", self.headers.get("Cookie") or ""
                 )
@@ -1724,6 +1772,9 @@ def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> Thre
             self.send_header("Content-Length", str(len(reply.body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
             if reply.location:
                 self.send_header("Location", reply.location)
             for cookie in [reply.set_cookie] if isinstance(reply.set_cookie, str) else reply.set_cookie or []:

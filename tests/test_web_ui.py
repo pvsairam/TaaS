@@ -536,3 +536,21 @@ def test_continue_with_google_signs_in_only_people_the_administrator_added(
     stranger.locator("#login-google").click()
     expect(stranger.locator("[role=alert]").first).to_contain_text("has not been given access", timeout=WAIT)
     stranger_window.close()
+
+
+# This one changes the shared site (a new data set, a copy of a test), so it stays last in the file.
+def test_values_are_edited_in_a_table_and_a_test_is_copied(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/data")
+    page.get_by_role("button", name="New data set").click()
+    page.get_by_label("Name of the data set").fill("acme-gl")
+    page.get_by_role("button", name="Save").click()
+    see(page, "Could not save.")  # a set with no values is refused, and the page says why
+    page.get_by_label("Name of a value").first.fill("ledger_name")
+    page.get_by_label("ledger_name on every pod").fill("US Primary Ledger")
+    page.get_by_role("button", name="Save").click()
+    see(page, "acme-gl")
+    see(page, "US Primary Ledger")
+    page.goto(f"{site.url}/#/tests/hcm%2Fuses_data.yaml")
+    page.get_by_role("button", name="Make a copy").click()
+    page.get_by_role("button", name="Make the copy").click()
+    expect(page.locator("h1")).to_have_text("A test with test data (copy)", timeout=WAIT)

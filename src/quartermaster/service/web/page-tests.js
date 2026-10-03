@@ -1,6 +1,6 @@
 // Tests: every test file, with configurable columns; one test in plain words.
 import {
-  api, button, callout, card, chips, emptyState, h, icon, input, plural, popover, remember, statusBadge, table, tabs, toast, when,
+  api, button, callout, card, chips, drawer, emptyState, field, h, icon, input, plural, popover, remember, statusBadge, table, tabs, toast, when,
 } from "./ui.js";
 import {openRunDrawer, releaseBadge} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
@@ -174,6 +174,7 @@ export async function testPage(file) {
         h("p", {class: "lead"}, [t.product, t.persona ? `runs as ${t.persona}` : "", t.priority ? `${t.priority} priority` : ""].filter(Boolean).join(" · ") || t.file),
         (t.tickets || []).length ? h("div", {class: "row", style: "gap:8px;margin-top:6px"}, h("span", {class: "meta"}, "Tickets"), ticketChips(t.tickets)) : null),
       h("div", {class: "row"},
+        t.problem ? null : button("Make a copy", {ic: "copy", onClick: () => openCopy(t), title: "Copy this test under a new id, for another client or another case"}),
         t.problem ? null : button("Export", {ic: "download", href: `/api/export?file=${encodeURIComponent(t.file)}`, title: "Download this test as a plain Playwright file that needs no Quartermaster"}),
         button("Run this test", {kind: "primary", ic: "runs", disabled: !state.status.ready || Boolean(t.problem), onClick: () => openRunDrawer(t.file)}))),
     t.problem ? h("div", {style: "margin-bottom:16px"}, callout("danger", "This file could not be read.", t.problem)) : null,
@@ -189,4 +190,29 @@ export async function testPage(file) {
     h("div", {class: "card section"},
       tabs([["steps", "Steps", t.steps_detail.length], ["data", "Test data"], ["history", "History", t.history.length], ["file", "File"]], tab, (v) => { tab = v; draw(); }),
       panel));
+}
+
+// A copy of a test with its own id and title. The values that differ by client live in the data set, not here.
+function openCopy(t) {
+  const dir = t.file.includes("/") ? t.file.slice(0, t.file.lastIndexOf("/")) : "";
+  const id = input({value: `${t.id}-copy`, autofocus: true});
+  const title = input({value: `${t.title} (copy)`});
+  const folder = input({value: dir});
+  const error = h("div", {});
+  drawer({
+    title: "Make a copy of this test",
+    sub: "Everything is copied, including the data sets it uses. Change the values in Test data.",
+    body: () => h("div", {class: "stack", style: "gap:12px"},
+      field("Id (letters, digits, dashes)", id, "Must not be used by another test."),
+      field("Title", title),
+      field("Folder", folder, "Inside the tests folder. Leave it as it is to keep the copy next to the original."),
+      error),
+    foot: (close) => h("div", {class: "row"}, button("Make the copy", {kind: "primary", onClick: async () => {
+      error.replaceChildren();
+      try {
+        const r = await api("/api/test/duplicate", {file: t.file, id: id.value, title: title.value, folder: folder.value});
+        close(); toast("Copied"); location.hash = testLink(r.file);
+      } catch (e) { error.replaceChildren(callout("danger", "Could not copy.", e.message)); }
+    }}), button("Cancel", {onClick: close})),
+  });
 }

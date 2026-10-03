@@ -2,6 +2,7 @@
 import {api, badge, button, callout, card, disclose, emptyState, h, toast} from "./ui.js";
 import {state, testLink} from "./state.js";
 import {show} from "./app.js";
+import {openSetEditor} from "./page-dataedit.js";
 
 const EXAMPLE = `dataset: hcm-basics
 title: Names on the pods
@@ -28,7 +29,7 @@ export async function dataPage() {
   const setCard = (s) => card({
     title: s.title || s.name,
     sub: s.title ? s.name : s.file,
-    actions: badge(s.used_by.length ? `used by ${s.used_by.length} ${s.used_by.length === 1 ? "test" : "tests"}` : "not used yet", s.used_by.length ? "info" : "neutral"),
+    actions: h("div", {class: "row", style: "gap:8px"}, button("Edit values", {size: "sm", ic: "note", onClick: () => openSetEditor(d, s, () => dataPage())}), badge(s.used_by.length ? `used by ${s.used_by.length} ${s.used_by.length === 1 ? "test" : "tests"}` : "not used yet", s.used_by.length ? "info" : "neutral")),
     body: h("div", {class: "stack", style: "gap:10px"},
       s.description ? h("p", {class: "hint", style: "margin:0"}, s.description) : null,
       s.gaps.length ? callout("warning", "Some pods have no value.",
@@ -43,7 +44,7 @@ export async function dataPage() {
         h("div", {class: "row", style: "gap:8px"}, s.used_by.map((t) => h("a", {href: testLink(t.file)}, t.title)))) : null,
       disclose("The file", h("div", {},
         h("div", {class: "row", style: "justify-content:space-between;margin-bottom:8px"},
-          h("span", {class: "meta"}, `${s.file}. Edit it in any text editor: every test that uses it follows.`),
+          h("span", {class: "meta"}, `${s.file}. Change it with Edit values, or in any text editor: every test that uses it follows.`),
           button("Copy", {size: "sm", ic: "copy", onClick: () => copy(s.yaml)})),
         h("pre", {class: "block", style: "max-height:360px"}, s.yaml)))),
   });
@@ -59,7 +60,8 @@ export async function dataPage() {
   show([{label: "Test data"}], h("div", {class: "stack", style: "max-width:900px"},
     h("div", {class: "page-head"}, h("div", {},
       h("h1", {}, "Test data"),
-      h("p", {class: "lead"}, "The names each pod uses, and the values a test makes fresh for every run, so a test runs on any pod and never uses the same invoice number twice."))),
+      h("p", {class: "lead"}, "The names each pod uses, and the values a test makes fresh for every run, so a test runs on any pod and never uses the same invoice number twice.")),
+      button("New data set", {kind: "primary", ic: "plus", onClick: () => openSetEditor(d, null, () => dataPage())})),
     d.missing.length ? callout("danger", "A test uses a data set that does not exist.",
       d.missing.map((m) => `'${m.name}' (used by ${m.used_by.map((t) => t.title).join(", ")})`).join("; ")) : null,
     d.problems.length ? callout("warning", "Some files in the data folder cannot be used.",
