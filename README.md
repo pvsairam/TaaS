@@ -51,6 +51,13 @@ qm validate examples/tests
 qm plan --release examples/releases/26D_sample.json --tests examples/unverified --budget 25 --explain
 ```
 
+**Quartermaster's own web pages are tested too.** `tests/test_web_ui.py` starts Quartermaster with sample data and
+opens every page in a real Chromium: each page opens without a script error or console error, and the main actions
+work (reading the lists, dismissing and accepting items in Needs attention, importing a What's New page, turning on
+sign-in, adding a user, Continue with Google against a stand-in Google). It needs the browser extra
+(`pip install -e ".[dev,browser]"` and `python -m playwright install chromium`) and is skipped without it. The sample
+data is built in `tests/ui_site.py`; to add a page, add its address to `PAGES` in the test file.
+
 ## Writing a test
 
 ```yaml
