@@ -43,8 +43,8 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 | Saved suites by tag, folder, module, product, priority or named tests, run from a page, a schedule or the command line | Yes (not tested on a real pod) | No |
 | Audit trail: every line chained by hash so a change shows, a filtered export (CSV or JSON lines) with a manifest, offline check | Yes | No (stronger: send the lines to a company log service) |
 | Single sign-on with a company provider (OpenID Connect: Okta, Entra ID, Keycloak, ...), groups to roles, enforce SSO | Yes (tested against a stand-in provider, not a real one) | No (SAML and SCIM: not built) |
-| FBDI or HDL file import steps | No | **Yes** |
-| BIP or OTBI report checks | No | **Yes** |
+| FBDI or HDL file import steps | No | Not needed: decided not to build (test scripts with evidence are how this is tested; only if a client asks) |
+| BIP or OTBI report checks | No | Not needed: decided not to build (a script that opens and runs the report, with the evidence document, covers it) |
 | Screenshot comparison before and after a release | No | **Yes** (visual tools sell this) |
 | Run the same flow as several roles | Part: personas exist, no role-regression report | Probably |
 | Mobile and cross-browser | Part: Chromium only | Maybe |
@@ -57,13 +57,14 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 Ahead: price model and ownership, open and exportable tests, explainable release ranking, careful AI use, evidence that
 auditors can read, and tests you can keep if you leave.
 
-Behind: no ready-made test library, no import or report checks, no visual comparison, no
+Behind: no ready-made screen tests, no visual comparison, no
 two-way tracker link, and nothing has been proved on many real pods. A tool with years of Oracle customers has seen
 far more strange pages than we have.
 
 ## 4. Suggested order if you want to close gaps
 
 1. Screen and create flows for the test library (Hire to Retire, Procure to Pay, Order to Cash). The read-only service checks are done.
-2. BIP or OTBI report check and FBDI or HDL import steps.
-3. Visual comparison.
-4. Two-way ticket sync, only if a client asks for it.
+2. Visual comparison.
+3. Two-way ticket sync, only if a client asks for it.
+
+Decided not to build: BIP or OTBI report checks and FBDI or HDL import steps. Tests are scripts with an evidence document, and a script can open and run a report like any other page.
