@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ import yaml
 
 from quartermaster.importers.release_sheet import ImportError_, parse_release
 from quartermaster.importers.xlsx import SpreadsheetError
+from quartermaster.runner.discovery import match_pages
 from quartermaster.service.manual import ManualScripts
 
 MAX_UPLOAD = 20 * 1024 * 1024
@@ -147,7 +149,13 @@ class Releases:
     # ------------------------------------------------------------------ plan
 
     def plan(
-        self, name: str, tests_root: Path, budget: float | None, opt_ins: set[str], manual: ManualScripts | None = None
+        self,
+        name: str,
+        tests_root: Path,
+        budget: float | None,
+        opt_ins: set[str],
+        manual: ManualScripts | None = None,
+        pod_pages: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Which tests to run for this release, why, and which features no test covers. Manual
         scenarios (imported scripts) count as coverage too, and are ranked by risk the same way."""
@@ -279,6 +287,7 @@ class Releases:
                     "opt_in": f.opt_in,
                     "action_required": f.customer_action_required,
                     "coverage": coverage,
+                    "pod_pages": match_pages(f"{f.title} {f.description}", pod_pages) if pod_pages else [],
                     "tests": [{"id": tid, "match": s} for s, tid in related[:5]],
                     "manual": [
                         {"id": mid, "title": info.get(mid, {}).get("title", mid), "match": s} for s, mid in by_hand[:5]
@@ -304,7 +313,9 @@ class Releases:
                 "at_risk": sum(i.risk >= 0.05 for i in impacts),
                 "manual_scenarios": len(manual_tests),
                 "manual_at_risk": len(manual_rows),
+                "on_pod": sum(bool(f["pod_pages"]) for f in features),
             },
+            "pod_pages": len(pod_pages or []),
         }
 
 

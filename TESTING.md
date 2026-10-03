@@ -846,6 +846,43 @@ You should see: that test runs by itself after the other tests have finished.
 7. Set it back to **One at a time** when you are done if you prefer. If two tests ever disturb each other, tell me which
    two and what they change.
 
+### 6.24 Pod discovery
+
+This one needs your real test pod and test user. It only reads, but it signs in, so use a test pod. I could not try it on a
+real pod, so please send me what you see if it does not work.
+
+1. Click **Settings**, then **Clients & environments**. Find **Pod discovery** under **In use now**.
+
+You should see: "Off", and "Nothing is read until you allow it". **Look at the pod now** is grey.
+
+2. Tick **Allow pod discovery for this pod**.
+
+You should see: "On for this pod", and the button turns blue. Nothing has been read yet.
+
+3. Click **Look at the pod now**. A browser works in the background for about a minute.
+
+You should see: the button says "Looking at the pod...", then a line like "87 pages found today 10:42 am on
+abcd-dev2...", followed by the names as small tags (for example Person Management, Locations, Absences).
+
+4. Open **Audit log**.
+
+You should see: "Switched pod discovery on", "Started pod discovery" and "Pod discovery finished" (with the number
+of pages found).
+
+5. Import a feature list for your release (the What's New page, 6.22, or the Readiness sheet), open **Release impact**,
+   and look at the **Features** tab.
+
+You should see: a filter **On your pod** and, under some features, "On your pod: Locations" (or other page names).
+Click the filter: only those features remain.
+
+6. Back in Settings, click **Remove what was found**, then open Release impact again.
+
+You should see: the filter and the lines are gone. Untick **Allow pod discovery** to switch it off.
+
+If step 3 says "the Navigator button was not found" or finds no pages, or finds menu text that is not page names,
+send me a screenshot of your pod's home page with the Navigator open, and of the card. The reading is made to cope with
+Oracle's menu without knowing its exact markup, but I have only tried it on a stand-in menu.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

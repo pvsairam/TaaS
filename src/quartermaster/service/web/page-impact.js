@@ -182,18 +182,21 @@ function testsTable(plan, picked, onChange) {
 
 function featuresTable(plan, redraw) {
   const counts = Object.fromEntries(Object.keys(COVERAGE).map((k) => [k, plan.features.filter((f) => f.coverage === k).length]));
-  const shown = plan.features.filter((f) => view.features === "all" || f.coverage === view.features);
+  const onPod = plan.features.filter((f) => (f.pod_pages || []).length).length;
+  const shown = plan.features.filter((f) => view.features === "all" || (view.features === "pod" ? (f.pod_pages || []).length : f.coverage === view.features));
   const byId = Object.fromEntries(plan.tests.map((t) => [t.id, t]));
   return h("div", {},
     h("div", {class: "toolbar", style: "padding:12px 16px 0;margin:0"},
       chips([["all", "All", plan.features.length], ["none", "No test", counts.none], ["weak", "Weak", counts.weak],
-        ...(counts.manual ? [["manual", "Manual only", counts.manual]] : []), ["covered", "Covered", counts.covered]],
+        ...(counts.manual ? [["manual", "Manual only", counts.manual]] : []), ["covered", "Covered", counts.covered],
+        ...(plan.pod_pages ? [["pod", "On your pod", onPod]] : [])],
         view.features, (v) => { view.features = v; redraw(); }, "Coverage")),
     shown.length ? table({
       caption: `Features of release ${plan.release}`,
       rows: shown,
       columns: [
-        {label: "Feature", render: (f) => [h("div", {class: "primary-cell"}, f.title), h("div", {class: "sub"}, f.id)]},
+        {label: "Feature", render: (f) => [h("div", {class: "primary-cell"}, f.title), h("div", {class: "sub"}, f.id),
+          (f.pod_pages || []).length ? h("div", {class: "sub", title: "Pages found in your pod's Navigator by pod discovery"}, `On your pod: ${f.pod_pages.join(", ")}`) : null]},
         {label: "Product", render: (f) => [h("div", {}, f.product), h("div", {class: "sub"}, f.module)]},
         {label: "Change", render: (f) => h("div", {class: "row", style: "gap:4px"}, h("span", {class: "tag"}, f.change_type),
           f.opt_in ? badge("Opt-in", "info") : null, f.action_required ? badge("Action needed", "warning") : null)},

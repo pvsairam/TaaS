@@ -355,6 +355,31 @@ How it reads, with no AI and nothing guessed:
 A saved page keeps its tables and headings, so it reads better than pasted text. The preview shows each feature's text
 so you can check it. PDFs are not read yet: copy the text out of the PDF, or use the HTML page.
 
+## Pod discovery (learn which pages your pod has)
+
+Release impact can only guess which features matter to you. Pod discovery tells it which pages your pod really
+has, so a feature that mentions a page you have is marked **On your pod**.
+
+It is **off** until you allow it, per pod, in **Settings, Clients & environments, Pod discovery**. Then
+**Look at the pod now** signs in as the test user, opens the Navigator and its folded menu groups, and writes down
+the page names. The rules:
+
+- **Read only.** It clicks the Navigator button and menu groups that are folded away, and nothing else. It never
+  saves, submits or deletes, and makes no REST calls.
+- **Test pods only.** The production guard applies, as for a run.
+- **Visible and audited.** The page names found are listed on the card; every switch on or off, look and removal is in
+  the audit log. **Remove what was found** deletes the list.
+- **Kept per pod**, in the client's data folder (and so in backups), never sent anywhere.
+- **No AI.** A feature matches a page when the page's whole name appears, word for word, in the feature's title or
+  description (Locations matches "Location Page Shows Address on Map"). Names made only of general words (Tools,
+  Reports, Setup) never match.
+
+In Release impact the feature table shows "On your pod: Locations", the filter **On your pod** lists those features,
+and the plan's summary counts them. The ranking of tests is not changed by it.
+
+Not done yet: finding which opt-in features are switched on in the pod (that needs the pod's own REST services and
+is worth trying on a real pod first). From a terminal: `qm discover --out pages.json`.
+
 ## Sign-in and roles
 
 Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in

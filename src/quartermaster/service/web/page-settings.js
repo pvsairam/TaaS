@@ -8,6 +8,7 @@ import {environmentsCard} from "./page-environments.js";
 import {notificationsTab} from "./page-notifications.js";
 import {usersTab} from "./page-users.js";
 import {autoBackupCard} from "./page-autobackup.js";
+import {discoveryCard} from "./page-discovery.js";
 
 export async function settingsPage() {
   await loadCommon();
@@ -37,6 +38,7 @@ export async function settingsPage() {
       byHandRow(st))});
   const tab = TABS.some(([id]) => id === state.query.tab) ? state.query.tab : "environments";
   const environments = tab === "environments" ? await environmentsCard(settingsPage) : null;
+  const discovery = tab === "environments" ? await discoveryCard(Boolean(st.pod_url)) : null;
   if (state.page !== "settings") return;
 
   const notifications = tab === "notifications" ? await notificationsTab(settingsPage) : null;
@@ -99,7 +101,7 @@ export async function settingsPage() {
     body: h("dl", {class: "kv"}, keys.flatMap(([k, d]) => [h("dt", {}, h("kbd", {}, k)), h("dd", {}, d)]))});
 
   const content = {
-    environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse), h("div", {class: "stack"}, environments)),
+    environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse, discovery), h("div", {class: "stack"}, environments)),
     evidence: h("div", {style: "max-width:720px"}, evidence),
     ai: h("div", {style: "max-width:720px"}, ai),
     notifications,

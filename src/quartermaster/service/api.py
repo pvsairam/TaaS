@@ -92,6 +92,7 @@ from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
 from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, describe
+from quartermaster.service.discovery import Discovery
 from quartermaster.service.environments import Environments
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
@@ -208,7 +209,10 @@ class App:
         self.queue.on_finished = self.notifier.run_finished
         self.approvals = Approvals(data_dir / "approvals.jsonl", audit=self.audit)
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
-        self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
+        self.discovery = Discovery(
+            data_dir / "discovery", cwd=cwd, audit=lambda what, subject, details: self.audit.add(what, subject, details)
+        )
+        self.queue.environ = self.recording.environ = self.signin.environ = self.discovery.environ = self.run_environ
         self.queue.defaults = lambda: {"retries": self._retries(), "parallel": self._parallel()}
 
     def _release_summary(self, release: str) -> dict[str, Any]:
@@ -255,6 +259,24 @@ class App:
             if method == "POST" and route == ["notifications", "test"]:
                 return _json(self.notifier.send_test(str(data.get("channel") or "")))
         except NotifyError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _discovery(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        """Pod discovery (Settings): off until switched on for this pod; read only; every look is audited."""
+        key = self._env_key()
+        try:
+            if method == "GET" and route == ["discovery"]:
+                return _json(self.discovery.view(key))
+            if method == "POST" and route == ["discovery"]:
+                self.discovery.set_enabled(key, bool(data.get("enabled")))
+                return _json(self.discovery.view(key))
+            if method == "POST" and route == ["discovery", "run"]:
+                return _json(self.discovery.start(key))
+            if method == "POST" and route == ["discovery", "forget"]:
+                self.discovery.forget(key)
+                return _json(self.discovery.view(key))
+        except ValueError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
@@ -398,6 +420,8 @@ class App:
                     raise ApiError(HTTPStatus.CONFLICT, str(e)) from e
             if method == "POST" and route == ["signin", "forget"]:
                 return _json(self.signin.forget(self._env_key()))
+        if route and route[0] == "discovery":
+            return self._discovery(method, route, data)
         if method == "POST" and route == ["check-pod"]:
             self.pod_check = check_pod(self.pod()["url"])
             return _json(self.pod_check)
@@ -492,7 +516,11 @@ class App:
                 opt_ins = {o for v in query.get("opt_in") or [] for o in v.split(",") if o}
                 name = str((query.get("name") or [""])[0])
                 limit = float(budget) if budget else None
-                return _json(self.releases.plan(name, self.tests_root, limit, opt_ins, self.manual))
+                return _json(
+                    self.releases.plan(
+                        name, self.tests_root, limit, opt_ins, self.manual, self.discovery.pages(self._env_key())
+                    )
+                )
             if method == "POST" and route == ["import"]:
                 return _json(self.releases.import_file(data), HTTPStatus.CREATED if data.get("save") else HTTPStatus.OK)
         except LookupError as e:

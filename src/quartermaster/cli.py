@@ -278,6 +278,47 @@ def _signin(args: argparse.Namespace) -> int:
     return 0
 
 
+def _discover(args: argparse.Namespace) -> int:
+    """Read the names of the pages in the pod's Navigator and write them to --out. Read only (runner/discovery.py)."""
+    import tempfile
+    from urllib.parse import urlsplit
+
+    from quartermaster.runner.discovery import DiscoveryError
+
+    url = os.environ.get("QM_FUSION_URL")
+    if not url:
+        print("error: set QM_FUSION_URL to the non-prod pod URL", file=sys.stderr)
+        return 2
+    env = Environment(name="pod", url=url, kind=EnvironmentKind(args.kind))
+    try:
+        assert_safe_target(env, confirmed_hosts())
+        with tempfile.TemporaryDirectory(prefix="qm-discover-") as scratch:
+            driver = driver_factory(argparse.Namespace(headed=False, video="off", no_highlight=True), Path(scratch))
+            try:
+                driver.open(env, "")
+                pages = driver.navigator_pages()  # type: ignore[attr-defined]
+            finally:
+                driver.close()
+    except (UnsafeEnvironmentError, MissingCredentialsError, DiscoveryError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(
+            {
+                "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "pod_host": urlsplit(url).hostname,
+                "pages": pages,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"Found {len(pages)} page(s) in the Navigator.")
+    return 0
+
+
 def _record(args: argparse.Namespace) -> int:
     from quartermaster.recorder.recorder import Recorder, events_to_test, to_yaml
     from quartermaster.runner.playwright_driver import PlaywrightDriver
@@ -813,6 +854,11 @@ def main(argv: list[str] | None = None) -> int:
     si.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     si.add_argument("--timeout", type=float, default=600, help="seconds to wait for the sign-in")
     si.set_defaults(func=_signin)
+
+    dv = sub.add_parser("discover", help="read the names of the pages in the pod's Navigator (read only)")
+    dv.add_argument("--out", required=True, help="JSON file to write the page names to")
+    dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
+    dv.set_defaults(func=_discover)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")
     sv.add_argument(

@@ -191,6 +191,20 @@ def test_automatic_backups_can_be_made_and_their_settings_are_checked(site: Site
     )
 
 
+def test_pod_discovery_is_off_until_it_is_allowed_and_can_be_switched_off_again(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/settings?tab=environments")
+    card = page.locator("section", has_text="Pod discovery")
+    expect(card).to_contain_text("Nothing is read until you allow it", timeout=WAIT)
+    expect(card.get_by_role("button", name="Look at the pod now")).to_be_disabled()
+    page.get_by_label("Allow pod discovery for this pod").check()
+    expect(page.locator("section", has_text="Pod discovery")).to_contain_text("On for this pod", timeout=WAIT)
+    expect(page.get_by_role("button", name="Look at the pod now")).to_be_enabled()
+    page.get_by_label("Allow pod discovery for this pod").uncheck()
+    expect(page.locator("section", has_text="Pod discovery")).to_contain_text(
+        "Nothing is read until you allow it", timeout=WAIT
+    )
+
+
 # ------------------------------------------------------------------ Release impact: What's New
 
 

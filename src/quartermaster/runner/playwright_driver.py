@@ -216,6 +216,23 @@ class PlaywrightDriver:
             raise TimeoutError(f"nobody finished signing in within {int(timeout_s / 60)} minutes")
         return encode_session(self._context.cookies(), urlparse(self._url).hostname or "")
 
+    def navigator_pages(self) -> list[str]:
+        """The names of the pages in the pod's Navigator, for pod discovery. Read only: it opens the Navigator and
+        its folded groups, and nothing else (see runner/discovery.py)."""
+        from quartermaster.runner.discovery import scan_navigator
+
+        def open_navigator() -> bool:
+            for strategy, value in (
+                (LocatorStrategy.ROLE, "link:Navigator"),
+                (LocatorStrategy.CSS, "a[title='Navigator']"),
+            ):
+                if self.count(strategy, value):
+                    self.click(strategy, value)
+                    return True
+            return False
+
+        return scan_navigator(self.page, open_navigator)
+
     def _track_requests(self, page: Any) -> None:
         self._inflight = set()
         # Handlers must be plain functions: Playwright sets an attribute on each one, which
