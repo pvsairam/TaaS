@@ -544,7 +544,9 @@ def test_values_are_edited_in_a_table_and_a_test_is_copied(site: Site, page: Pag
     page.get_by_role("button", name="New data set").click()
     page.get_by_label("Name of the data set").fill("acme-gl")
     page.get_by_role("button", name="Save").click()
-    see(page, "Could not save.")  # a set with no values is refused, and the page says why
+    expect(page.get_by_text("Could not save.")).to_be_visible(
+        timeout=WAIT
+    )  # (in the side panel, not in main) a set with no values is refused, and the page says why
     page.get_by_label("Name of a value").first.fill("ledger_name")
     page.get_by_label("ledger_name on every pod").fill("US Primary Ledger")
     page.get_by_role("button", name="Save").click()
