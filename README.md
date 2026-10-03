@@ -233,7 +233,7 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 
 | Page | Who it is for | What you do there |
 |---|---|---|
-| **Overview** | Managers first, everyone | Pass rate, test coverage, what needs attention and runs this week. Release readiness for the pod's Oracle release (passed on it, failed on it, passed only on an earlier release, never passed), a comparison of releases once tests have run on two, recent activity and coverage by module. **Certification pack** downloads a zip for a release: a Word summary to sign (every test's result on that release, what failed, what has not run yet) with each test's evidence document. |
+| **Overview** | Managers first, everyone | Pass rate, test coverage, what needs attention and runs this week. Release readiness for the pod's Oracle release (passed on it, failed on it, passed only on an earlier release, never passed), a comparison of releases once tests have run on two, recent activity and coverage by module. **Approval** records who approved the release and on which results. **Certification pack** downloads a zip for a release: a Word summary (with the approval in it, still with a sign-off table for paper) (every test's result on that release, what failed, what has not run yet) with each test's evidence document. |
 | **Runs** | Testers | Every run with its result, module, release, environment, start, duration, who ran it and tests passed; search and filter. A run shows live progress in words ("Executing step 3 of 10…"), then each test's steps with screenshots, expected and observed values, video, documents and details. Technical detail stays folded away until asked for. |
 | **Tests** | Functional team, testers | Every test with its module and last result; search, filter by module or result, and choose extra columns (process, job role, owner, release validated, environment, last run, duration, tags, updated). A test's own page reads its steps in plain words with the real test data. |
 | **Release impact** | Release managers, test leads | Import an Oracle update's feature list (the Readiness feature-listing spreadsheet, any .xlsx or .csv with a Feature column, or a release .json/.yaml). See which tests the update puts at risk and why, which features no test covers yet, and a suggested run under an optional time limit (critical tests always included). Tick opt-ins you have switched on, choose tests, and run just those. |
@@ -265,6 +265,25 @@ lists are kept in `.qm/releases`, and imported manual scripts in `.qm/manual` (t
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
+
+## Approving a release
+
+The certification pack used to end with a blank table to sign on paper. Now a person approves the release
+in Quartermaster: on **Overview**, in the release's card, **Approval**, click **Approve 26C…**, type your
+name and role, and a comment. Quartermaster records your name, the time and the results as they are at that
+moment (passed, failed, not run, and a fingerprint of exactly which runs those are). The certification pack
+then has an **Approval** section with all of it, and an `approvals.json` with the whole history.
+
+- If tests failed or have not run, you must tick that you know, and write why you approve anyway (at least
+  10 letters). The pack says the release was approved with open items.
+- If tests are run again afterwards, the card says **Approved, results changed** and how many tests changed
+  (and how many now fail). Approve again to cover the new results.
+- **Withdraw** takes an approval back (a name and a reason are needed). Nothing is deleted: records are only
+  ever added to `approvals.jsonl`, and **History** lists them. Every approval and withdrawal is also in the
+  audit log.
+- Each release, and each client, has its own approvals.
+- Quartermaster has no log-in of its own yet, so the name is the one the approver types, next to the user
+  signed in to the computer. The pack says so. A real sign-in with roles (who may approve) comes later.
 
 ## Notifications (tell people when a run fails)
 

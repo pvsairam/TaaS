@@ -610,6 +610,40 @@ contain the pod's own text. **Recent messages** lists it, and the **Audit log** 
 6. Delete the schedule when you are done (open it, **Delete**), and switch notifications off if you only
    wanted to try them.
 
+### 6.18 Approving a release
+
+Do this after some tests have run with the Oracle release set in Settings (6.1).
+
+1. Click **Overview**. In the release card (for example "26C release readiness") there is a line
+   **APPROVAL** with **Not approved** and a button **Approve 26C…**.
+2. Click **Approve 26C…**. A panel opens with the numbers (passed, failed, not run). Click **Approve 26C**
+   without typing anything.
+
+You should see: a red message "type your name". Nothing is recorded.
+
+3. Type your name and your role (for example Test manager). If any test failed or has not run, the panel
+   says so and shows a box. Click **Approve 26C** without ticking it.
+
+You should see: a message that you must tick the box. Tick it and write a short comment (try 3 letters
+first: it asks for at least 10), then click **Approve 26C**.
+
+You should see: the panel closes and the card says **Approved**, with your name, the time, the numbers and
+your comment. Click **History**: the record is there, marked "Approved knowing tests had failed or not run".
+
+4. Click **Certification pack** and open the Word document in the zip. After the Summary there is an
+   **Approval** section: your name, role, time, comment, the numbers when you approved, and "Approved with
+   open items". The zip also holds `approvals.json`.
+5. Run any test again (from **Tests**), then look at the card.
+
+You should see: **Approved, results changed**, with how many tests changed. There is an **Approve again**
+button. (If the test was run on the same release.)
+
+6. Click **Withdraw**, type your name and a reason, and click **Withdraw the approval**.
+
+You should see: the card says **Approval withdrawn** with your reason, and **Approve again**. **History**
+now lists the approval and the withdrawal. The **Audit log** page has both too. Download the pack again: its
+Approval section says "Approval withdrawn".
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

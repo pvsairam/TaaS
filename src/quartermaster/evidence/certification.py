@@ -11,7 +11,9 @@ release is listed as such, so the pack shows the gaps as well as the passes.
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import re
 import zipfile
 from datetime import datetime
@@ -71,6 +73,28 @@ def certification_rows(
     return rows
 
 
+def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Where a release stands, in numbers, and a fingerprint of exactly which results these are (the run
+    behind each test's result). The fingerprint tells whether tests were run again after an approval."""
+    by_test: dict[str, str] = {}
+    passed = failed = 0
+    for row in rows:
+        r = row["result"]
+        by_test[row["test_id"]] = f"{r.get('run_id') or '-'}:{r['status']}" if r else "-:not-run"
+        if r:
+            passed += r["status"] in PASSING
+            failed += r["status"] not in PASSING
+    fingerprint = hashlib.sha256("\n".join(f"{k}|{v}" for k, v in sorted(by_test.items())).encode()).hexdigest()
+    return {
+        "total": len(rows),
+        "passed": passed,
+        "failed": failed,
+        "not_run": len(rows) - passed - failed,
+        "fingerprint": fingerprint,
+        "by_test": by_test,
+    }
+
+
 def write_certification_pack(
     tests: list[dict[str, Any]],
     results: list[dict[str, Any]],
@@ -78,8 +102,11 @@ def write_certification_pack(
     evidence_root: Path,
     *,
     prepared_by: str = "",
+    approval: dict[str, Any] | None = None,
+    approval_history: list[dict[str, Any]] | None = None,
 ) -> tuple[str, bytes]:
-    """The zip's file name and its bytes."""
+    """The zip's file name and its bytes. `approval` is where the release's approval stands (see
+    service.approvals); its history goes into the pack as approvals.json."""
     rows = certification_rows(tests, results, release)
     safe = _safe(release) or "release"
     buf = io.BytesIO()
@@ -97,13 +124,21 @@ def write_certification_pack(
             row["pack_file"] = name
             z.write(doc, name)
         summary = Path(evidence_root) / "_certification" / f"Certification {safe}.docx"
-        write_certification_document(rows, release, evidence_root, summary, prepared_by=prepared_by)
+        write_certification_document(rows, release, evidence_root, summary, prepared_by=prepared_by, approval=approval)
         z.write(summary, summary.name)
+        if approval_history:
+            z.writestr("approvals.json", json.dumps(approval_history, indent=2))
     return f"certification_{safe}.zip", buf.getvalue()
 
 
 def write_certification_document(
-    rows: list[dict[str, Any]], release: str, evidence_root: Path, out: Path, *, prepared_by: str = ""
+    rows: list[dict[str, Any]],
+    release: str,
+    evidence_root: Path,
+    out: Path,
+    *,
+    prepared_by: str = "",
+    approval: dict[str, Any] | None = None,
 ) -> Path:
     doc = _Doc(evidence_root)  # failure pictures are relative to the evidence root
     run = [row for row in rows if row["result"]]
@@ -162,6 +197,8 @@ def write_certification_document(
             status_row=("Result", status),
         )
     )
+
+    _approval_section(add, approval, release)
 
     modules: dict[str, list[int]] = {}
     for row in rows:
@@ -257,6 +294,63 @@ def write_certification_document(
         created=now,
         footer_left=f"Release certification {release}",
     )
+
+
+def _approval_section(add: Any, approval: dict[str, Any] | None, release: str) -> None:
+    """Who approved the release, when, and on which results (or that nobody has)."""
+    add(_p([_r("Approval")], style="Heading1"))
+    state = (approval or {}).get("status", "not_approved")
+    last = (approval or {}).get("last") or {}
+    if state == "not_approved":
+        add(
+            _p(
+                [
+                    _r(
+                        f"Release {release} has not been approved in Quartermaster yet. Approve it on the Overview "
+                        "page and download this pack again to have the approval in it."
+                    )
+                ],
+                after=160,
+            )
+        )
+        return
+    results = last.get("results") or {}
+    changes = (approval or {}).get("changes") or {}
+    shown = {"approved": "Approved", "withdrawn": "Approval withdrawn"}[state]
+    rows: list[tuple[str, Any]] = [
+        ("Status", shown + (" (results changed since)" if changes.get("changed") else "")),
+        ("By" if state == "approved" else "Withdrawn by", last.get("by", "")),
+        *([("Role", last["title"])] if last.get("title") else []),
+        ("When", _when(last.get("at"))),
+        ("Comment" if state == "approved" else "Reason", last.get("comment") or "None given"),
+        (
+            "Results when it was done",
+            f"{results.get('passed', 0)} passed, {results.get('failed', 0)} failed, "
+            f"{results.get('not_run', 0)} not run of {results.get('total', 0)} tests",
+        ),
+        ("Computer user", f"{last.get('computer_user', '')} (the name above was typed by the approver)"),
+        ("Fingerprint of the results", str(results.get("fingerprint") or "")[:16]),
+    ]
+    if last.get("acknowledged_open_items"):
+        rows.append(("Approved with open items", "Yes: the approver confirmed tests failed or had not run"))
+    add(
+        _kv_table(
+            rows, status_row=("Status", "passed" if state == "approved" and not changes.get("changed") else "failed")
+        )
+    )
+    if changes.get("changed"):
+        add(
+            _p(
+                [
+                    _r(
+                        f"Tests were run again after this approval ({changes.get('tests')} changed, "
+                        f"{changes.get('newly_failing')} now failing), so the results in this document are not "
+                        "the ones that were approved. Approve the release again."
+                    )
+                ],
+                after=160,
+            )
+        )
 
 
 def _safe(text: str) -> str:

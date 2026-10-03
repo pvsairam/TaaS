@@ -3,6 +3,7 @@ import {
   STATUS, api, badge, button, callout, card, clock, disclose, drawer, emptyState, h, hideTip, icon, modal, plural, popover,
   remember, s, segmented, shortDate, showTip, statusNode, tabs, toast, token, when,
 } from "./ui.js";
+import {approvalBlock} from "./page-approval.js";
 import {connection, envName, runLink, runName, state, testLink, testName} from "./state.js";
 
 // ------------------------------------------------------------------ badges
@@ -391,7 +392,7 @@ export function stackedBar(parts, label) {
 }
 
 // Where each test stands for the environment's Oracle release.
-export function releaseReadiness(r, onSetRelease) {
+export function releaseReadiness(r, onSetRelease, approval, redraw) {
   if (!r.release) {
     const inp = h("input", {class: "input", placeholder: "e.g. 26C", style: "max-width:140px", "aria-label": "Oracle release"});
     return card({title: "Release readiness", sub: "Which tests are validated on the Oracle release this pod runs",
@@ -411,6 +412,7 @@ export function releaseReadiness(r, onSetRelease) {
     actions: [certificationButton(r.release), button("Run the rest", {size: "sm", ic: "runs", onClick: () => openRunDrawer(".")})],
     body: h("div", {class: "stack", style: "gap:14px"},
       stackedBar(parts, parts.map((p) => `${p.label}: ${p.n}`).join(", ")),
+      approvalBlock(approval, redraw),
       h("div", {class: "grid g-2", style: "gap:8px 16px"}, parts.map((p) => h("div", {class: "row", style: "flex-wrap:nowrap"},
         h("span", {class: `badge tone-${p.tone}`}, icon(p.ic), h("span", {class: "num"}, p.n)), h("span", {class: "meta", style: "color:var(--text-2)"}, p.label)))),
       r.modules && r.modules.length > 1 ? h("div", {class: "stack", style: "gap:8px"}, h("div", {class: "caption"}, "BY MODULE"),

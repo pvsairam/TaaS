@@ -93,7 +93,7 @@ export async function overviewPage() {
         button("Run all tests", {kind: "primary", ic: "runs", disabled: !st.ready, onClick: () => openRunDrawer(".")}))),
     firstRun ? h("div", {style: "margin-bottom:16px"}, firstRun) : null,
     metrics,
-    h("div", {class: "grid g-main section"}, releaseReadiness(dash.readiness, setRelease), envCard),
+    h("div", {class: "grid g-main section"}, releaseReadiness(dash.readiness, setRelease, dash.approval, overviewPage), envCard),
     releaseComparison(dash.releases) ? h("div", {class: "section"}, releaseComparison(dash.releases)) : null,
     stabilityCard ? h("div", {class: "section"}, stabilityCard) : null,
     h("div", {class: "grid g-main section"}, recentActivity(dash.activity), moduleCoverage(dash.modules)));

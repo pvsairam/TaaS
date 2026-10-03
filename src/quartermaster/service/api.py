@@ -84,10 +84,11 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.ai import providers as ai_providers
-from quartermaster.evidence.certification import write_certification_pack
+from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
+from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, describe
 from quartermaster.service.environments import Environments
 from quartermaster.service.heal import accept_update
@@ -200,9 +201,38 @@ class App:
             audit=self.audit,
         )
         self.queue.on_finished = self.notifier.run_finished
+        self.approvals = Approvals(data_dir / "approvals.jsonl", audit=self.audit)
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
         self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
         self.queue.defaults = lambda: {"retries": self._retries()}
+
+    def _release_summary(self, release: str) -> dict[str, Any]:
+        """Where the tests stand on a release now (what an approval is given on)."""
+        results = insights.test_results(self.queue.store.list(limit=500))
+        return summarize_rows(certification_rows(self.tests(), results, release))
+
+    def _approvals(self, method: str, query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
+        try:
+            if method == "GET":
+                release = str((query.get("release") or [""])[0]).strip() or self.settings.get()["release"]
+                if not release:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "set the Oracle release in Settings first")
+                summary = self._release_summary(release)
+                return _json(
+                    {"state": self.approvals.state(release, summary), "history": self.approvals.history(release)}
+                )
+            release = str(data.get("release") or self.settings.get()["release"])
+            summary = self._release_summary(release)
+            action = str(data.get("action") or "")
+            if action == "approve":
+                self.approvals.approve(release, summary, data)
+            elif action == "withdraw":
+                self.approvals.withdraw(release, summary, data)
+            else:
+                raise ApprovalError("choose approve or withdraw")
+            return _json(self.approvals.state(release, summary))
+        except ApprovalError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
 
     def _notifications(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
         try:
@@ -314,6 +344,8 @@ class App:
             return Reply(HTTPStatus.OK, self.audit.as_csv().encode("utf-8-sig"), "text/csv; charset=utf-8", name)
         if method == "GET" and route == ["tests"]:
             return _json(self.tests())
+        if route == ["approvals"]:
+            return self._approvals(method, query, data)
         if route[:1] == ["notifications"]:
             return self._notifications(method, route, data)
         if route == ["settings"]:
@@ -344,13 +376,23 @@ class App:
             return _json(self.pod_check)
         if method == "GET" and route == ["dashboard"]:
             release = self.settings.get()["release"]
-            return _json(insights.dashboard(self.tests(), self.queue.store.list(limit=500), release))
+            data = insights.dashboard(self.tests(), self.queue.store.list(limit=500), release)
+            if release:
+                data["approval"] = self.approvals.state(release, self._release_summary(release))
+            return _json(data)
         if method == "GET" and route == ["certification"]:
             release = str((query.get("release") or [""])[0]).strip() or self.settings.get()["release"]
             if not release:
                 raise ApiError(HTTPStatus.BAD_REQUEST, "set the Oracle release in Settings first")
             results = insights.test_results(self.queue.store.list(limit=500))
-            name, body = write_certification_pack(self.tests(), results, release, self.evidence_root)
+            name, body = write_certification_pack(
+                self.tests(),
+                results,
+                release,
+                self.evidence_root,
+                approval=self.approvals.state(release, self._release_summary(release)),
+                approval_history=self.approvals.history(release),
+            )
             return Reply(HTTPStatus.OK, body, "application/zip", name)
         if method == "GET" and route == ["attention"]:
             return _json(self.attention())
