@@ -333,6 +333,40 @@ single sign-on, sign in once, save the browser state with `context.storage_state
 that file. Exporting into a folder that already has the files is refused unless you say to replace them (`--force`), so your
 edits are not lost by accident.
 
+## Suites (a name for a group of tests)
+
+Tests belong to your client, not to a release or a project, so you do not copy them. A **suite** is a saved rule that picks
+tests out of them, such as "the smoke tests" or "everything in Payables that is critical". Because it is a rule, a new test
+that fits it joins by itself, and the same suite on Monday and on Friday may have different tests.
+
+A suite is one YAML file in the `_suites` folder inside your tests folder (or made with **Suites, New suite**, which
+writes the same file and lists the tests the rule finds as you choose):
+
+```yaml
+suite: payables-critical
+title: Payables, the ones that matter
+description: What we run first after every update.
+include:                          # a test is in if it fits ANY of these groups
+  - tags: [smoke]
+  - products: [Payables]          # inside a group, EVERY line must fit
+    priorities: [critical, high]
+  - tests: [hcm.view-worker]      # or name tests one by one
+exclude:                          # ...unless it fits ANY of these
+  - tags: [flaky]
+```
+
+- A line is `tags`, `folders` (a folder of the tests folder, with what is inside it), `modules`, `products`, `priorities`
+  or `tests` (ids). It fits when the test has **any** of its values. Capital letters do not matter.
+- **Run it** from Suites (Run), from the New run drawer (**A suite**), from a schedule (**What to test**, a schedule runs
+  the tests the suite has when it fires), or in a terminal with `qm run my_tests --suite payables-critical`.
+  `qm suites my_tests --list` shows each suite and its tests. A run is labelled "Suite: title".
+- A suite with no test right now cannot be run, and says so. A group that matches nothing, or an id no test has, is
+  shown as a warning on the suite.
+- Suites are plain files, so they are in backups and can be kept in git. The `_suites` folder is not for tests: test lists,
+  runs and impact analysis skip it. Testers can make, change and delete suites; the audit log records it.
+- The page edits suites written the way it writes them (groups of lines, leaving out by tag or by named test). A suite that
+  uses other leave-out rules still works and runs, but is changed in a text editor: the page says so.
+
 ## Shared steps
 
 Steps you use in many tests (open a page, create a record) can be written once and shared. Put a YAML file in

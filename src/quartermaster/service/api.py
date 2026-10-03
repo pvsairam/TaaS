@@ -23,6 +23,8 @@ computers and other web sites cannot start runs.
     GET  /api/certification?release=26A  the release's certification pack (.zip): a Word summary to
                                      sign and each test's latest evidence document on that release
     GET  /api/attention              what needs a person, by kind
+    GET  /api/suites                 saved suites and the tests each has now (POST: save, /delete, /preview a rule)
+    POST /api/runs                   also {"suite": "smoke"}: run the tests a saved suite has right now
     GET  /api/data                   test data: the data sets, who uses them, pods with no value, generated values
     GET  /api/tests                  test files in the tests folder, with their last result
     GET  /api/test?file=<path>       one test: steps in plain words, data, history, the file
@@ -88,10 +90,11 @@ import yaml
 from quartermaster.ai import providers as ai_providers
 from quartermaster.dsl.data import DataError, merge_sets
 from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, files_of_tests, read_groups
+from quartermaster.dsl.suites import SuiteError
 from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
-from quartermaster.service import insights, testdata
+from quartermaster.service import insights, suites, testdata
 from quartermaster.service.aieval import AiEval
 from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, describe
@@ -514,6 +517,8 @@ class App:
             return _json(self.library())
         if method == "GET" and route == ["data"]:
             return _json(self.test_data())
+        if route[:1] == ["suites"]:
+            return self._suites(method, route[1:], data)
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -523,12 +528,19 @@ class App:
                 return _json([self._run_view(r, counts=True) for r in self.queue.store.list()])
             if method == "POST":
                 options = dict(data.get("options") or {})
+                target = str(data.get("target") or "")
+                if data.get("suite"):  # run a saved suite: the tests it has right now
+                    try:
+                        title, options["only"] = suites.tests_of(self.tests_root, str(data["suite"]), self.tests())
+                    except SuiteError as e:
+                        raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+                    target, options["label"] = ".", f"Suite: {title}"[:80]
                 if self._user and not str(options.get("tester") or "").strip():
                     options["tester"] = self._user["full_name"]  # "Run by" is the signed-in person
                 if not str(options.get("release") or "").strip():
                     options["release"] = self.settings.get()["release"]  # the environment's release by default
                 try:
-                    queued = self.queue.submit(str(data.get("target") or ""), options)
+                    queued = self.queue.submit(target, options)
                 except ValueError as e:
                     raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
                 return _json(self._run_view(queued), HTTPStatus.CREATED)
@@ -649,7 +661,7 @@ class App:
             if method == "GET" and not route:
                 return _json({"schedules": self.schedules.listing()})
             if method == "POST" and not route:
-                return _json(self.schedules.save(data, self.queue._inside_tests), HTTPStatus.CREATED)
+                return _json(self.schedules.save(data, self.queue._inside_tests, self._check_suite), HTTPStatus.CREATED)
             if method == "POST" and route == ["delete"]:
                 self.schedules.delete(str(data.get("id") or ""))
                 return _json({"deleted": data.get("id")})
@@ -670,6 +682,11 @@ class App:
             "release": self.settings.get().get("release", ""),
             "tester": "Scheduled run",
         }
+        if schedule.get("suite"):  # the tests the suite has now, not the ones it had when the schedule was made
+            try:
+                _, options["only"] = suites.tests_of(self.tests_root, str(schedule["suite"]), self.tests())
+            except SuiteError as e:
+                raise ValueError(str(e)) from e
         run = self.queue.submit(str(schedule.get("target") or "."), options)
         self.audit.add(
             "Started a scheduled run", str(schedule.get("name") or ""), {"run": run.get("id")}, who="Schedule"
@@ -1101,6 +1118,35 @@ class App:
         )
         self.audit.add("Exported tests as Playwright", rel or "all tests", {"tests": str(len(tests))})
         return Reply(HTTPStatus.OK, buf.getvalue(), "application/zip", name)
+
+    def _suites(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        """Saved suites: list, save, delete and preview."""
+        try:
+            if method == "GET" and not route:
+                return _json(suites.listing(self.tests_root, self.tests()))
+            if method == "POST" and route == ["preview"]:
+                return _json(suites.preview(data, self.tests()))
+            if method == "POST" and not route:
+                saved = suites.save(self.tests_root, data, self.tests())
+                self.audit.add(
+                    "Changed a suite" if data.get("name") else "Made a suite",
+                    saved["title"],
+                    {"tests": str(saved["tests"])},
+                )
+                return _json(saved, HTTPStatus.CREATED)
+            if method == "POST" and route == ["delete"]:
+                name = str(data.get("name") or "")
+                suites.delete(self.tests_root, name)
+                self.audit.add("Deleted a suite", name, {})
+                return _json({"deleted": name})
+        except LookupError as e:
+            raise ApiError(HTTPStatus.NOT_FOUND, str(e).strip("'\"")) from e
+        except ValueError as e:  # SuiteError is a ValueError
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _check_suite(self, name: str) -> None:
+        suites.tests_of(self.tests_root, name, self.tests())
 
     def test_data(self) -> dict[str, Any]:
         """The data sets, who uses them, the pods that lack a value, and the values tests make fresh."""

@@ -17,6 +17,7 @@ from typing import Any
 from quartermaster.domain.models import Environment, EnvironmentKind, RunResult, ScreenshotMode, StepStatus, TestCase
 from quartermaster.dsl.library import files_of_tests
 from quartermaster.dsl.loader import SpecError, load_release, load_test, load_tests
+from quartermaster.dsl.suites import SUITES_DIR, SuiteError, read_suites, resolve
 from quartermaster.evidence.document import write_evidence_document
 from quartermaster.evidence.run_record import build_record, new_run_id, run_folder, write_record
 from quartermaster.evidence.suite import build_suite_record, suite_folder, write_suite_document, write_suite_record
@@ -74,6 +75,58 @@ def _plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _suite_facts(target: Path, tests: list[TestCase], files: list[Path]) -> list[dict[str, Any]]:
+    """What a suite looks at in each test, from the loaded tests (folders are counted from the tests folder)."""
+    root = target if target.is_dir() else target.parent
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "tags": t.tags,
+            "module": t.module,
+            "product": t.product,
+            "priority": t.priority.value,
+            "folder": f.relative_to(root).parent.as_posix().removeprefix("."),
+        }
+        for t, f in zip(tests, files, strict=True)
+    ]
+
+
+def _suite_ids(target: Path, tests: list[TestCase], files: list[Path], name: str) -> list[str]:
+    root = target if target.is_dir() else target.parent
+    directory = root / SUITES_DIR
+    found, _ = read_suites(directory if directory.is_dir() else None)
+    if name not in found:
+        raise SuiteError(f"no suite called '{name}' (there is: {', '.join(sorted(found)) or 'none yet'})")
+    got = resolve(found[name][1], _suite_facts(target, tests, files))
+    if not got.ids:
+        raise SuiteError(f"the suite '{name}' has no tests right now")
+    return got.ids
+
+
+def _suites(args: argparse.Namespace) -> int:
+    target = Path(args.tests)
+    tests = load_tests(target)
+    files = files_of_tests(target)
+    directory = target / SUITES_DIR
+    found, problems = read_suites(directory if directory.is_dir() else None)
+    if not found and not problems:
+        print(f"No saved suites yet. Put a YAML file in {directory} (or use Suites in the web pages).")
+        return 0
+    facts = _suite_facts(target, tests, files)
+    for name, (_, raw) in sorted(found.items()):
+        got = resolve(raw, facts)
+        print(f"{name:<24} {len(got.ids):>3} tests  {raw.get('title', '')}")
+        for w in got.warnings:
+            print(f"    warning: {w}")
+        if args.list:
+            for i in got.ids:
+                print(f"    {i}")
+    for path, why in problems:
+        print(f"cannot use {path.name}: {why}", file=sys.stderr)
+    return 1 if problems else 0
+
+
 def _run(args: argparse.Namespace) -> int:
     url = os.environ.get("QM_FUSION_URL")
     if not url:
@@ -86,6 +139,15 @@ def _run(args: argparse.Namespace) -> int:
         files: list[Path] = files_of_tests(target)  # same order load_tests uses
     else:
         tests, files = [load_test(target)], [target]
+    if args.suite:
+        if args.only:
+            print("error: use --suite or --only, not both", file=sys.stderr)
+            return 2
+        try:
+            args.only = ",".join(_suite_ids(target, tests, files, args.suite))
+        except SuiteError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
     if args.only:
         wanted = [t for t in args.only.split(",") if t.strip()]
         unknown = sorted(set(wanted) - {t.id for t in tests})
@@ -877,6 +939,9 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--tester", help="name shown as 'Executed by' (default: your login name)")
     rn.add_argument("--report", help="write JSON results for all runs to this file")
     rn.add_argument("--only", help="comma-separated test ids: run just these from the folder")
+    rn.add_argument(
+        "--suite", help="the name of a saved suite (a file in the _suites folder): run the tests it has now"
+    )
     rn.add_argument("--events", help="append progress events to this file as JSON lines (used by the web service)")
     rn.add_argument(
         "--retries",
@@ -945,6 +1010,11 @@ def main(argv: list[str] | None = None) -> int:
     dv.add_argument("--out", required=True, help="JSON file to write the page names to")
     dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     dv.set_defaults(func=_discover)
+
+    su = sub.add_parser("suites", help="list the saved suites in a tests folder and how many tests each has now")
+    su.add_argument("tests", nargs="?", default="tests", help="the tests folder (default: tests)")
+    su.add_argument("--list", action="store_true", help="also list the test ids of each suite")
+    su.set_defaults(func=_suites)
 
     ex = sub.add_parser(
         "export", help="write tests as plain Playwright (Python, pytest) files, no Quartermaster needed"

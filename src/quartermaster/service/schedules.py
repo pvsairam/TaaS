@@ -49,13 +49,22 @@ class Schedules:
         now = now or datetime.now()
         return [{**s, "next_run": _iso(next_slot(s, now)), "when": describe(s)} for s in self._load()]
 
-    def save(self, data: dict[str, Any], check_target: Callable[[str], Any]) -> dict[str, Any]:
-        """Create a schedule, or change the one with this id."""
+    def save(
+        self,
+        data: dict[str, Any],
+        check_target: Callable[[str], Any],
+        check_suite: Callable[[str], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a schedule, or change the one with this id. It runs a folder or test file (`target`) or, when
+        `suite` names a saved suite, the tests that suite has at the time it runs."""
         name = " ".join(str(data.get("name") or "").split())[:80]
         if not name:
             raise ValueError("give the schedule a name")
-        target = str(data.get("target") or ".").strip() or "."
+        suite = str(data.get("suite") or "").strip()
+        target = "." if suite else str(data.get("target") or ".").strip() or "."
         check_target(target)  # inside the tests folder, and there
+        if suite and check_suite is not None:
+            check_suite(suite)  # a suite of that name exists
         days = sorted({int(d) for d in data.get("days") or [] if str(d).isdigit() and 0 <= int(d) <= 6})
         if not days:
             raise ValueError("choose at least one day")
@@ -72,6 +81,7 @@ class Schedules:
                 "id": old["id"] if old else uuid.uuid4().hex[:10],
                 "name": name,
                 "target": target,
+                "suite": suite,
                 "days": days,
                 "time": time,
                 "enabled": bool(data.get("enabled", True)),

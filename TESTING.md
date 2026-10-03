@@ -1112,6 +1112,57 @@ You should see: `with fusion.setup(1, 'The pod has a location to work with'):` b
 
 7. Delete the demo files from `my_tests` when you are done.
 
+### 6.31 Suites
+
+Read only, safe on your pod (same as the demos in 6.14).
+
+1. Copy the demos again, with the suites folder:
+
+   ```powershell
+   Copy-Item examples\demos\* my_tests\ -Recurse
+   ```
+
+   Press F5 in Quartermaster. Click **Suites** in the menu.
+
+You should see: one card **Demos that pass**, "5 tests", "Includes tests: tagged demo", "Except tests: named demo.retry or
+demo.suggest or demo.test-data-gap or demo.setup-gap". Open "The 5 tests it has now": each title is a link to the test.
+
+2. Click **Run** on the card. In the New run drawer, **A suite** is chosen and says "Demos that pass · 5 tests". Click **Start run**.
+
+You should see: a run with 5 tests that all pass. In **Runs** it is labelled **Suite: Demos that pass**.
+
+3. Click **New suite**. Name it `Locations`. Click a product, folder or tag chip (for example the tag `demo`), and watch
+**What it has now** list the tests as you choose. Click **Save**.
+
+You should see: a new card with the tests it has now and a **Change** button. Click **Change**, pick one more chip, and save:
+the count changes.
+
+4. Open `my_tests\_suites\` in File Explorer: your new suite is a small text file. Open it in Notepad.
+
+You should see: the same rule you chose, in plain words. Change `tags: [demo]` to `tags: [nothing]`, save, and press F5 on
+**Suites**: the card shows a yellow note "Group 1 matches no test." and **0 tests**, and **Run** is greyed out.
+
+5. Click **Schedules**, **New schedule**. In **What to test** choose **Suite: Demos that pass (5 tests now)**. Set a day and a time a
+   few minutes ahead, leave Quartermaster running, and save.
+
+You should see: the schedule listed with **Suite: Demos that pass**. When the time comes it runs the 5 tests (Runs shows
+**Scheduled: your name**). **Run now** on the schedule does the same at once.
+
+6. In a terminal in the Quartermaster folder:
+
+   ```
+   qm suites my_tests --list
+   qm run my_tests --suite demos-that-pass
+   ```
+
+You should see: the first lists each suite with how many tests it has and their ids. The second runs only those 5 tests
+(it needs the pod set in the terminal as in Part 5).
+
+7. Click **Delete** on the suite you made, and confirm.
+
+You should see: it is gone and its file is removed. The tests themselves are untouched. Delete the demo files from
+`my_tests` when you are done (including the `_suites` folder).
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

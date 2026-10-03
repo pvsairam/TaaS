@@ -3,13 +3,15 @@ import {api, badge, button, callout, card, drawer, emptyState, field, h, input, 
 import {loadCommon, runLink, schedule, state} from "./state.js";
 import {show} from "./app.js";
 
+let suites = [];  // the saved suites, for the schedule form
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export async function schedulesPage() {
-  const [, data] = await Promise.all([loadCommon(), api("/api/schedules")]);
+  const [, data, found] = await Promise.all([loadCommon(), api("/api/schedules"), api("/api/suites").catch(() => ({suites: []}))]);
   if (state.page !== "schedules") return;
   const list = data.schedules;
-  const what = (s) => s.target === "." ? "All tests" : s.target.endsWith(".yaml") || s.target.endsWith(".yml")
+  suites = found.suites;
+  const what = (s) => s.suite ? `Suite: ${suites.find((x) => x.name === s.suite)?.title || s.suite}` : s.target === "." ? "All tests" : s.target.endsWith(".yaml") || s.target.endsWith(".yml")
     ? (state.tests.find((t) => t.file === s.target)?.title || s.target) : `Folder ${s.target}`;
   const body = list.length ? table({
     caption: "Scheduled runs",
@@ -56,9 +58,10 @@ function openSchedule(s) {
   const name = input({value: s?.name || "", placeholder: "e.g. Nightly regression", maxlength: "80"});
   const target = h("select", {class: "input", "aria-label": "What to test"},
     h("option", {value: "."}, `All tests (${plural(runnable.length, "test")})`),
+    suites.map((x) => h("option", {value: `suite:${x.name}`}, `Suite: ${x.title} (${plural(x.tests.length, "test")} now)`)),
     folders.map((f) => h("option", {value: f}, `Folder ${f} (${plural(runnable.filter((t) => t.folder === f).length, "test")})`)),
     runnable.map((t) => h("option", {value: t.file}, `Test: ${t.title || t.file}`)));
-  target.value = s?.target || ".";
+  target.value = s?.suite ? `suite:${s.suite}` : s?.target || ".";
   const days = new Set(s?.days || [0, 1, 2, 3, 4]);
   const dayBoxes = h("div", {class: "row", style: "gap:6px", role: "group", "aria-label": "Days"}, DAYS.map((d, i) => {
     const box = h("input", {type: "checkbox", checked: days.has(i), onchange: (e) => { e.target.checked ? days.add(i) : days.delete(i); }});
@@ -88,7 +91,7 @@ function openSchedule(s) {
       button("Save", {kind: "primary", ic: "check", onClick: async (e) => {
         e.currentTarget.disabled = true;
         try {
-          const saved2 = await api("/api/schedules", {id: s?.id, name: name.value.trim(), target: target.value, days: [...days].sort(),
+          const saved2 = await api("/api/schedules", {id: s?.id, name: name.value.trim(), ...(target.value.startsWith("suite:") ? {suite: target.value.slice(6)} : {target: target.value}), days: [...days].sort(),
             time: time.value, enabled: enabled.checked, options: {screenshots: saved.screenshots || "every-step", video: saved.video || "off",
               highlight: saved.highlight !== false}});
           close();

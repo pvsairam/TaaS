@@ -1,6 +1,6 @@
 # Demo tests
 
-Nine small tests to try the newer features on your own pod. They only read from the pod (they never
+Nine small tests and a suite to try the newer features on your own pod. They only read from the pod (they never
 save, submit or delete), and they are kept out of `examples/tests` so "Run all tests" and new clients do
 not pick them up.
 
@@ -9,7 +9,7 @@ To use them, copy them into your tests folder, then open **Tests** (press F5 if 
     Windows PowerShell:   Copy-Item examples\demos\* my_tests\ -Recurse
     Mac or Linux:         cp -r examples/demos/* my_tests/
 
-(`-Recurse` / `-r` also copies the `_library` and `_data` folders the shared-steps and test-data demos need.)
+(`-Recurse` / `-r` also copies the `_library`, `_data` and `_suites` folders the shared-steps, test-data and suite demos need.)
 
 Delete them from `my_tests` when you are done. Steps for each are in TESTING.md (6.14 and 6.16).
 
@@ -23,3 +23,4 @@ Delete them from `my_tests` when you are done. Steps for each are in TESTING.md 
 | `data_gap_demo.yaml` | A gap in the test data | It stops at step 1 with "No test data for location_limit" (unless your pod is a STAGE pod) |
 | `setup_demo.yaml` | Setup steps | It passes. The run page says "The pod was ready" and lists the setup before the steps |
 | `setup_gap_demo.yaml` | A setup that is not met | It stops at step 1 with "Setup not met" (the steps never run). Change `locationsV9` to `locationsV2` and it passes |
+| `_suites/demos-that-pass.yaml` | A saved suite | Suites lists **Demos that pass** with 5 tests. Run it from there: all 5 pass |

@@ -109,6 +109,11 @@ def build_site(tmp: Path) -> Site:
         "library: open-locations\ntitle: Open the Locations page\nparams:\n  page_name: Locations\nsteps:\n"
         "  - action: navigate\n    intent: Open ${page_name}\n    value: Workforce Structures > ${page_name}\n"
     )
+    (tests / "_suites").mkdir()
+    (tests / "_suites" / "hcm-tests.yaml").write_text(
+        "suite: hcm-tests\ntitle: Everything in HCM\ndescription: The HCM folder.\n"
+        "include:\n  - folders: [hcm]\nexclude:\n  - tags: [skip-me]\n"
+    )
     (tests / "_data").mkdir()
     (tests / "_data" / "pod-names.yaml").write_text(
         "dataset: pod-names\ntitle: Names on the pods\nvalues:\n  business_unit: US1 Business Unit\n"

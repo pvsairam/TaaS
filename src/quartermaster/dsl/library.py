@@ -25,7 +25,7 @@ evidence, healing) sees ordinary steps, so shared steps behave exactly like step
 - `${param}` in a group is replaced by what the test passed in `with` (or the group's default).
 - Any other `${name}` in a group is test data: the test using the group must have that name in its `data`.
 - A group cannot use another group (no loops, nothing hidden).
-- The `_library` folder (and the `_data` folder of data sets) is not a place for tests: test discovery skips it.
+- The `_library` folder (like `_data` and `_suites`) is not a place for tests: test discovery skips it.
 
 Each expanded step remembers its group (`shared`), and `expand` also returns where every step physically lives
 (its file and its number there), so a suggested fix to a shared step is written to the shared file.
@@ -41,6 +41,7 @@ from typing import Any, cast
 import yaml
 
 from quartermaster.dsl.data import DATA_DIR
+from quartermaster.dsl.suites import SUITES_DIR
 
 LIBRARY_DIR = "_library"
 _NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -52,8 +53,8 @@ class LibraryError(ValueError):
 
 
 def files_of_tests(root: Path) -> list[Path]:
-    """Every test file under `root`, in a fixed order, without the shared groups and the data sets."""
-    skipped = {LIBRARY_DIR, DATA_DIR}
+    """Every test file under `root`, in a fixed order, without the shared groups, the data sets and the saved suites."""
+    skipped = {LIBRARY_DIR, DATA_DIR, SUITES_DIR}
     return sorted(p for p in root.rglob("*.y*ml") if not skipped & set(p.relative_to(root).parts[:-1]))
 
 

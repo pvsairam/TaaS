@@ -75,6 +75,7 @@ PAGES = [
     ("#/", "Overview"),
     ("#/runs", "Runs"),
     ("#/tests", "Tests"),
+    ("#/suites", "Suites"),
     ("#/library", "Shared steps"),
     ("#/data", "Test data"),
     ("#/impact", "Release impact"),
@@ -170,6 +171,36 @@ def test_a_test_with_setup_shows_it_and_its_run_says_the_pod_was_ready(site: Sit
     page.locator("main").get_by_text("Title of hcm.view-worker").first.click()
     see(page, "The pod was ready.")
     see(page, "The accounting period is open")
+
+
+def test_suites_are_listed_made_in_the_page_and_offered_when_starting_a_run(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/suites")
+    see(page, "Everything in HCM")
+    see(page, "in the folder hcm")
+    see(page, "tagged skip-me")
+    page.get_by_role("button", name="New suite").click()
+    drawer = page.locator(".drawer")
+    drawer.get_by_label("Name").fill("HR tests")
+    drawer.get_by_role("button", name="HR", exact=True).click()
+    expect(drawer).to_contain_text("fit now", timeout=WAIT)  # the tests the rule finds are listed as it is chosen
+    drawer.get_by_role("button", name="Save").click()
+    see(page, "HR tests")
+    see(page, "in the product HR")
+    page.locator("main").get_by_role("button", name="Run", exact=True).last.click()
+    run = page.locator(".drawer")
+    expect(run).to_contain_text("A suite", timeout=WAIT)
+    expect(run.get_by_label("Suite")).to_contain_text("HR tests")
+
+
+def test_a_schedule_can_run_a_suite(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/schedules")
+    page.get_by_role("button", name="New schedule").click()
+    drawer = page.locator(".drawer")
+    drawer.get_by_label("Name", exact=True).fill("Nightly HCM")
+    drawer.get_by_label("What to test").select_option(label="Suite: Everything in HCM (6 tests now)")
+    drawer.get_by_role("button", name="Save").click()
+    see(page, "Nightly HCM")
+    see(page, "Suite: Everything in HCM")
 
 
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:

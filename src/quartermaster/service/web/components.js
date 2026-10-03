@@ -91,13 +91,18 @@ export async function checkPod({quiet = false} = {}) {
 // ------------------------------------------------------------------ new run
 
 // The one place a run is started: all tests, a folder or one test, with its evidence options.
-export function openRunDrawer(preset) {
+export async function openRunDrawer(preset) {
   const st = state.status;
   if (!st) return;
+  let suites = [];
+  try { suites = (await api("/api/suites")).suites.filter((x) => x.tests.length); } catch { /* the run drawer works without suites */ }
   const opt = {...st.default_options, ...(remember("options") || {}), evidence_doc: true};
   const runnable = state.tests.filter((t) => !t.problem);
   const folders = [...new Set(runnable.map((t) => t.folder).filter(Boolean))].sort();
-  let scope = preset ? (/\.ya?ml$/.test(preset) ? "one" : preset === "." ? "all" : "folder") : "all";
+  let scope = preset ? (preset.startsWith("suite:") ? "suite" : /\.ya?ml$/.test(preset) ? "one" : preset === "." ? "all" : "folder") : "all";
+  const suiteSel = h("select", {class: "input", "aria-label": "Suite"}, suites.map((x) =>
+    h("option", {value: x.name}, `${x.title} · ${plural(x.tests.length, "test")}`)));
+  if (scope === "suite") suiteSel.value = preset.slice(6);
   const folderSel = h("select", {class: "input", "aria-label": "Folder"}, folders.map((f) =>
     h("option", {value: f}, `${f} · ${plural(runnable.filter((t) => t.folder === f).length, "test")}`)));
   const testSel = h("select", {class: "input", "aria-label": "Test"}, runnable.map((t) => h("option", {value: t.file}, t.title || t.file)));
@@ -106,12 +111,14 @@ export function openRunDrawer(preset) {
   const pick = h("div", {});
   const count = h("span", {class: "meta"});
   const redraw = () => {
-    pick.replaceChildren(scope === "folder" ? folderSel : scope === "one" ? testSel :
+    pick.replaceChildren(scope === "folder" ? folderSel : scope === "one" ? testSel : scope === "suite" ? suiteSel :
       h("div", {class: "hint"}, `Every test in ${st.tests_folder}`));
-    const n = scope === "all" ? runnable.length : scope === "folder" ? runnable.filter((t) => t.folder === folderSel.value).length : 1;
+    const n = scope === "all" ? runnable.length : scope === "folder" ? runnable.filter((t) => t.folder === folderSel.value).length
+      : scope === "suite" ? (suites.find((x) => x.name === suiteSel.value)?.tests.length || 0) : 1;
     count.textContent = `${plural(n, "test")} will run`;
   };
   folderSel.onchange = redraw;
+  suiteSel.onchange = redraw;
   redraw();
   const release = h("input", {class: "input", value: opt.release || st.release || "", placeholder: "e.g. 26C", "aria-describedby": "rel-hint"});
   const tester = h("input", {class: "input", value: opt.tester || "", placeholder: "Shown as Run by"});
@@ -124,7 +131,7 @@ export function openRunDrawer(preset) {
     body: (close) => [
       st.ready ? null : callout("danger", "The pod or its sign-in is not set up.", h("a", {href: "#/settings", onclick: close}, "Open Settings")),
       h("div", {}, h("div", {class: "label"}, "What to test"),
-        segmented([["all", "All tests"], ["folder", "A folder"], ["one", "One test"]], scope, (v) => { scope = v; redraw(); }, "What to test"),
+        segmented([["all", "All tests"], ["folder", "A folder"], ["one", "One test"], ...(suites.length ? [["suite", "A suite"]] : [])], scope, (v) => { scope = v; redraw(); }, "What to test"),
         h("div", {style: "margin-top:8px"}, pick)),
       h("div", {}, h("div", {class: "label"}, "Screenshots"),
         segmented([["every-step", "Every step"], ["on-failure", "Only failures"], ["off", "None"]], opt.screenshots, (v) => { opt.screenshots = v; }, "Screenshots"),
@@ -147,7 +154,7 @@ export function openRunDrawer(preset) {
         remember("options", {...options, release: ""});
         e.currentTarget.disabled = true;
         try {
-          const run = await api("/api/runs", {target, options});
+          const run = await api("/api/runs", scope === "suite" ? {suite: suiteSel.value, options} : {target, options});
           close();
           location.hash = runLink(run.id);
         } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
