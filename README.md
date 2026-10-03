@@ -298,6 +298,34 @@ and the service checks every request again, so a hidden button cannot be got rou
 - Quartermaster still answers only on the computer it runs on (127.0.0.1). Sign-in matters when several people
   use that computer (a shared or remote desktop). Reaching it from other computers is a separate step.
 
+### Sign in with Google (personal Gmail is enough)
+
+Instead of passwords, people can press **Continue with Google**. You need no company, no Google Workspace and
+no paid account. Google only proves who the person is; what they may do still comes from the roles you give
+them, and a Google account you have not added is refused, however real it is. Gmail dots and `+tags` count as
+one address (`jane.doe+qm@gmail.com` is `janedoe@gmail.com`).
+
+Set it up once, on this computer (it works at `http://localhost:8765`, no HTTPS needed here):
+
+1. Open https://console.cloud.google.com, sign in with your Gmail, create a project (any name, for example `quartermaster`).
+2. **APIs & Services, OAuth consent screen** (shown as **Google Auth Platform** in newer consoles): choose **External**,
+   give an app name and your e-mail, save. Leave it in **Testing**, and under **Test users** add your own Gmail and
+   anyone else who will sign in (Testing allows up to 100 people and needs no Google review).
+3. **Credentials, Create credentials, OAuth client ID**, type **Web application**. Under **Authorized redirect URIs** paste
+   the address Quartermaster shows in **Settings, Users & sign-in, Sign in with Google** (on this computer:
+   `http://localhost:8765/api/auth/google/callback`). Create, then copy the **Client ID** and **Client secret**.
+4. In Quartermaster paste both into that card, tick **Turn on Continue with Google**, **Save**. The secret is typed
+   only there; it is stored encrypted and never shown again.
+5. Add people with **Add a user**: type their Gmail address (and tick **Google only** if they should have no
+   password). Existing users: **Change**, then fill in the e-mail address.
+
+Open Quartermaster at `localhost`, not `127.0.0.1`, when signing in with Google (Google does not accept a bare IP
+address). On a server, use its https address in **Public address** and as the redirect URI.
+
+Good to know: the sign-in uses the standard authorization-code flow with PKCE, a one-time `state`, a `nonce` and a
+browser-bound cookie; the identity token is checked (issuer, audience, expiry, nonce, verified e-mail). The administrator
+who turned sign-in on keeps the password too, so Google being unreachable never locks you out.
+
 ## Approving a release
 
 The certification pack used to end with a blank table to sign on paper. Now a person approves the release

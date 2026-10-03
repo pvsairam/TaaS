@@ -126,7 +126,8 @@ class Reply:
     body: bytes
     content_type: str = "application/json"
     download_name: str | None = None
-    set_cookie: str | None = None  # a whole Set-Cookie value (sign-in and sign-out)
+    set_cookie: str | list[str] | None = None  # whole Set-Cookie values (sign-in and sign-out)
+    location: str | None = None  # where to send the browser (with a 302)
 
 
 def _json(data: Any, status: HTTPStatus = HTTPStatus.OK) -> Reply:
@@ -1328,8 +1329,10 @@ def make_server(app: Handles, host: str = "127.0.0.1", port: int = 8765) -> Thre
             self.send_header("Content-Length", str(len(reply.body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            if reply.set_cookie:
-                self.send_header("Set-Cookie", reply.set_cookie)
+            if reply.location:
+                self.send_header("Location", reply.location)
+            for cookie in [reply.set_cookie] if isinstance(reply.set_cookie, str) else reply.set_cookie or []:
+                self.send_header("Set-Cookie", cookie)
             if reply.download_name:
                 self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(reply.download_name)}")
             self.end_headers()

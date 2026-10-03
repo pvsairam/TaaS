@@ -689,6 +689,38 @@ You should see: signing in, adding the user, changing the roles, the approval, e
 11. To turn it off: **Settings, Users & sign-in**, type your password, **Turn off sign-in**. Quartermaster is
     open again, as before. If you ever cannot sign in: in a terminal on this computer run `qm users disable-signin`.
 
+### 6.20 Sign in with Google
+
+Needs sign-in on (6.19) and a Gmail address. Follow the five Google steps in the README, section "Sign in with
+Google". Open Quartermaster at **http://localhost:8765** (not 127.0.0.1).
+
+1. **Settings, Users & sign-in**: under **Sign in with Google** the exact redirect address is shown. Paste the Client ID
+   and the Client secret, tick **Turn on Continue with Google**, click **Save**.
+
+You should see: "Saved." and the card says "On". The secret box now says "Saved".
+
+2. **Add a user**: name `Me on Gmail`, your own Gmail address, tick **Google only**, keep Tester. Click **Add the user**.
+
+You should see: "can now sign in with Google" and no temporary password. The row has a **Google only** badge.
+
+3. In a private window open http://localhost:8765.
+
+You should see: a **Continue with Google** button above the user name and password.
+
+4. Click it, choose your Gmail (Google may say "unverified app": Advanced, continue, since it is your own app).
+
+You should see: you land in Quartermaster signed in as that user.
+
+5. Sign out, click **Continue with Google** with a different Gmail that is not on the list.
+
+You should see: the sign-in page with "... has not been given access to Quartermaster. Ask an administrator to add that address."
+
+6. As the administrator, **Audit log**.
+
+You should see: "Signed in with Google" and "Google sign-in refused", each with the address. No secrets.
+
+7. To turn it off: untick **Turn on Continue with Google**, Save. The button disappears.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

@@ -15,6 +15,13 @@ export async function loginPage() {
   const name = input({autocomplete: "username", "aria-label": "User name", placeholder: "Your user name", autofocus: true});
   const pass = input({type: "password", autocomplete: "current-password", "aria-label": "Password", placeholder: "Your password"});
   const error = h("div", {class: "meta", role: "alert", style: "color:var(--danger);min-height:18px"});
+  const sent = new URLSearchParams((location.hash.split("?")[1] || "")).get("error");
+  if (sent) error.textContent = sent.slice(0, 300); // a plain sentence from the service when Google sign-in did not work
+  const google = state.auth?.google
+    ? h("div", {class: "stack"},
+        button("Continue with Google", {kind: "primary", href: "/api/auth/google/start", attrs: {id: "login-google"}}),
+        h("div", {class: "hint", style: "text-align:center"}, "or use a user name and password"))
+    : null;
   const go = async () => {
     error.textContent = "";
     try {
@@ -28,7 +35,7 @@ export async function loginPage() {
   pass.onkeydown = name.onkeydown = (e) => { if (e.key === "Enter") go(); };
   show([{label: "Sign in"}], h("div", {style: "max-width:380px;margin:60px auto"},
     card({title: "Sign in to Quartermaster", sub: "Oracle Fusion release testing",
-      body: h("div", {class: "stack"}, field("User name", name, "", "login-name"), field("Password", pass, "", "login-pass"), error,
+      body: h("div", {class: "stack"}, google, field("User name", name, "", "login-name"), field("Password", pass, "", "login-pass"), error,
         button("Sign in", {kind: "primary", onClick: go}),
         h("p", {class: "hint", style: "margin:0"}, "No account yet, or forgotten your password? Ask a Quartermaster administrator."))})));
   name.focus();

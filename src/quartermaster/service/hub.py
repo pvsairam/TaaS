@@ -23,13 +23,14 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from quartermaster.service import backup
 from quartermaster.service.api import ApiError, App, Reply
 from quartermaster.service.audit import AuditLog
 from quartermaster.service.auth import COOKIE, ROLES, Auth, AuthError
 from quartermaster.service.environments import Environments
+from quartermaster.service.google import BINDER_COOKIE, GoogleError, GoogleSignIn
 from quartermaster.service.settings import Settings
 
 
@@ -37,7 +38,7 @@ def _me(user: dict[str, Any] | None) -> dict[str, Any] | None:
     """The signed-in user as the page may see them."""
     if user is None:
         return None
-    return {k: user[k] for k in ("id", "username", "full_name", "title", "roles", "must_change")}
+    return {k: user[k] for k in ("id", "username", "full_name", "title", "roles", "must_change", "email")}
 
 
 def _reply(data: Any) -> Reply:
@@ -52,6 +53,7 @@ class Hub:
         evidence_root: Path,
         data_dir: Path,
         seed_tests: Path | None = None,
+        google: GoogleSignIn | None = None,
         **app_options: Any,
     ):
         self.tests_root = tests_root
@@ -69,6 +71,7 @@ class Hub:
             record=lambda what, subject, details, who: self.audit.add(what, subject, details, who=who),
         )
         self.address = ""  # where this service answers (set by qm serve), for the links in notifications
+        self.google = google or GoogleSignIn(self.auth)  # "Continue with Google" (tests give it a stand-in Google)
         self._keys: set[str] = set()  # AI keys pasted in Settings, shared by all clients, in memory only
         self._apps: dict[str, App] = {}
         self._lock = threading.RLock()
@@ -138,7 +141,9 @@ class Hub:
         route = [p for p in path.split("/") if p][1:] if path.startswith("/api") else []
         try:
             if route[:1] in (["auth"], ["users"]):
-                return self._accounts(method, route, body, self._token(cookie))
+                return self._accounts(
+                    method, route, body, self._token(cookie), parse_qs(urlsplit(raw_path).query), cookie
+                )
             user = None
             # the web page itself stays open (it shows the sign-in); data and files need a signed-in user
             if self.auth.enabled and path.startswith(("/api/", "/files/")):
@@ -158,12 +163,20 @@ class Hub:
     # ------------------------------------------------------------------ sign-in, users
 
     @staticmethod
-    def _token(cookie: str) -> str:
+    def _token(cookie: str, name: str = COOKIE) -> str:
         try:
             jar: SimpleCookie = SimpleCookie(cookie)
         except Exception:  # a cookie header that is not one
             return ""
-        return jar[COOKIE].value if COOKIE in jar else ""
+        return jar[name].value if name in jar else ""
+
+    def _back_to_login(self, message: str) -> Reply:
+        """Send the browser to the sign-in page with a message (a sign-in with Google ends in a redirect, not JSON)."""
+        gone = f"{BINDER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=0"
+        return Reply(HTTPStatus.FOUND, b"", "text/plain", set_cookie=gone, location=f"/#/login?error={quote(message)}")
+
+    def _google_redirect_uri(self) -> str:
+        return self.google.redirect_uri(self.address)
 
     def _session_cookie(self, token: str) -> str:
         return (
@@ -172,7 +185,9 @@ class Hub:
             else (f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
         )
 
-    def _accounts(self, method: str, route: list[str], body: bytes, token: str) -> Reply:
+    def _accounts(
+        self, method: str, route: list[str], body: bytes, token: str, query: dict[str, list[str]], cookie: str
+    ) -> Reply:
         """Sign in, sign out, change a password, and the users (administrators only)."""
         auth = self.auth
         try:
@@ -185,7 +200,30 @@ class Hub:
         user = auth.user_for(token) if auth.enabled else None
 
         if method == "GET" and key == "auth/status":
-            return _reply({"enabled": auth.enabled, "user": _me(user), "roles": list(ROLES)})
+            google = auth.enabled and auth.google_config() is not None
+            return _reply({"enabled": auth.enabled, "user": _me(user), "roles": list(ROLES), "google": google})
+        if method == "GET" and key == "auth/google/start":
+            if not auth.enabled:
+                return self._back_to_login("Sign-in is not turned on.")
+            try:
+                go, binder = self.google.start(self.address)
+            except GoogleError as e:
+                return self._back_to_login(str(e))
+            mine = f"{BINDER_COOKIE}={binder}; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=600"
+            return Reply(HTTPStatus.FOUND, b"", "text/plain", set_cookie=mine, location=go)
+        if method == "GET" and key == "auth/google/callback":
+            if not auth.enabled:
+                return self._back_to_login("Sign-in is not turned on.")
+            try:
+                new, _ = self.google.callback(
+                    {k: v[0] for k, v in query.items() if v}, self._token(cookie, BINDER_COOKIE)
+                )
+            except GoogleError as e:
+                return self._back_to_login(str(e))
+            gone = f"{BINDER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=0"
+            return Reply(
+                HTTPStatus.FOUND, b"", "text/plain", set_cookie=[self._session_cookie(new), gone], location="/#/"
+            )
         if method == "POST" and key == "auth/login":
             if not auth.enabled:
                 raise ApiError(HTTPStatus.BAD_REQUEST, "sign-in is not turned on")
@@ -212,6 +250,10 @@ class Hub:
             auth.change_password(user, str(data.get("current") or ""), str(data.get("new") or ""))
             return _reply({"user": _me(auth.user_for(token))})
         auth.authorize(user, method, route)
+        if key == "auth/google":  # the Google client ID and secret (administrators)
+            if method == "POST":
+                auth.google_update(user, data)
+            return _reply({**auth.google_view(), "redirect_uri": self._google_redirect_uri()})
         if method == "POST" and key == "auth/disable":
             if "admin" not in user["roles"]:
                 raise AuthError(HTTPStatus.FORBIDDEN, "this needs an administrator")

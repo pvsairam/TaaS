@@ -23,6 +23,10 @@ How it is kept safe:
     - the last active administrator can never be removed, disabled or demoted;
     - anyone with the files on the computer can always get back in: `qm users` in a terminal.
 
+A person can also sign in with Google (service/google.py): an administrator adds their Google e-mail address
+to their account. Google only says who the person is; the roles are still given here, and a Google account
+that is not on the list gets nothing.
+
 The users are kept in `users.db` in the data folder, shared by all clients.
 """
 
@@ -41,6 +45,8 @@ from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+
+from quartermaster.service import vault
 
 ROLES = ("admin", "tester", "approver")
 IDLE_S = 8 * 3600  # a session ends after this long without a request
@@ -68,6 +74,13 @@ CREATE TABLE IF NOT EXISTS users (
   must_change INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, last_login TEXT);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
+# Added later: databases made before get these columns when opened.
+_COLUMNS = {
+    "email": "TEXT",  # the Google address, as typed (lower case)
+    "email_key": "TEXT",  # the same, in the form Google's address is compared in (see email_key)
+    "password_login": "INTEGER NOT NULL DEFAULT 1",  # 0: signs in with Google only
+}
+_EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 
 
 class AuthError(Exception):
@@ -142,6 +155,8 @@ def required_role(method: str, route: list[str]) -> str:
     """The role a request needs: "any" (signed in), "tester", "approver" or "admin". What is not listed
     needs an administrator, so a route added later is closed until someone decides."""
     head = route[0] if route else ""
+    if route == ["auth", "google"]:
+        return "admin"  # the Google client ID and secret
     if method == "GET":
         return "admin" if head in ("users", "backup", "notifications") else "any"
     if head == "approvals":
@@ -178,9 +193,12 @@ class Auth:
         *,
         now: Callable[[], float] = time.time,
         record: Callable[[str, str, dict[str, Any], str], None] | None = None,
+        key_file: Path | None = None,
     ):
-        """`record(what, subject, details, who)` is told about sign-ins and changes (the audit log)."""
+        """`record(what, subject, details, who)` is told about sign-ins and changes (the audit log).
+        `key_file`: where the key that protects the Google client secret is kept (tests use their own)."""
         self.path = path
+        self._key_file = key_file
         self._now = now
         self._record = record
         self._lock = threading.RLock()
@@ -191,6 +209,13 @@ class Auth:
         self._db.row_factory = sqlite3.Row
         with self._db:
             self._db.executescript(_SCHEMA)
+            have = {r["name"] for r in self._db.execute("PRAGMA table_info(users)")}
+            for col, decl in _COLUMNS.items():
+                if col not in have:
+                    self._db.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")  # noqa: S608
+            self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email_key) WHERE email_key IS NOT NULL"
+            )
 
     # ------------------------------------------------------------------ on or off
 
@@ -254,7 +279,7 @@ class Auth:
             row = self._db.execute("SELECT * FROM users WHERE username = ?", (key,)).fetchone()
         # an unknown name costs the same time as a wrong password, and says the same
         ok = check_password(str(password or ""), row["pw"] if row else hash_password("not a real password"))
-        if not (row and ok and row["active"]):
+        if not (row and ok and row["active"] and row["password_login"]):
             self._fail(key)
             self._tell("Sign-in failed", key, {}, key or "unknown")
             raise AuthError(HTTPStatus.UNAUTHORIZED, "wrong user name or password")
@@ -319,20 +344,38 @@ class Auth:
         return [_public(_user_row(r)) for r in rows]
 
     def create(self, admin: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
-        """A new user with a temporary password. Returns the user and the password, shown once."""
+        """A new user. By default with a temporary password (returned once, to be handed over); with
+        `google_only` (needs a Google e-mail) without any password: they sign in with Google."""
         with self._lock:
             roles = _roles(data.get("roles"))
-            password = temporary_password()
+            email, key = _email(data.get("email"))
+            google_only = bool(data.get("google_only"))
+            if google_only and not email:
+                raise _bad("type the person's Google e-mail address, or give them a password instead")
+            username = str(data.get("username") or "").strip() or self._username_from(key)
+            password = temporary_password()  # for a Google-only user it is never shown: nobody can use it
             user = self._insert(
-                str(data.get("username") or ""),
+                username,
                 str(data.get("full_name") or ""),
                 str(data.get("title") or ""),
                 roles,
                 password,
-                must_change=True,
+                must_change=not google_only,
+                email=email,
+                email_key=key,
+                password_login=not google_only,
             )
-            self._tell("Added a user", user["username"], {"roles": ", ".join(roles) or "viewer"}, admin["full_name"])
-        return {"user": _public(user), "password": password}
+            self._tell(
+                "Added a user",
+                user["username"],
+                {
+                    "roles": ", ".join(roles) or "viewer",
+                    "google": email or "no",
+                    "password": "no" if google_only else "yes",
+                },
+                admin["full_name"],
+            )
+        return {"user": _public(user), "password": None if google_only else password}
 
     def update(self, admin: dict[str, Any], user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -350,6 +393,20 @@ class Auth:
             if "active" in data:
                 active = bool(data["active"])
                 changes["active"] = int(active)
+            email = user["email"]
+            if "email" in data:
+                email, key = _email(data["email"])
+                other = self._find_email(key) if key else None
+                if other and other["id"] != user_id:
+                    raise _bad(f"that e-mail address already belongs to {other['username']}")
+                changes["email"], changes["email_key"] = email or None, key or None
+            if "google_only" in data:
+                if data["google_only"]:
+                    if not email:
+                        raise _bad("add the person's Google e-mail address first")
+                    changes["password_login"] = 0
+                elif user["google_only"]:
+                    raise _bad("use Reset password to give this person a password again")
             if self._is_last_admin(user) and ("admin" not in roles or not active):
                 raise _bad("this is the last active administrator: make another one first")
             if changes:
@@ -372,6 +429,8 @@ class Auth:
             user = self._need_user(user_id)
             password = temporary_password()
             self._set_password(user_id, password, must_change=True)
+            with self._db:
+                self._db.execute("UPDATE users SET password_login = 1 WHERE id = ?", (user_id,))
             self._end_sessions(user_id)
             self._tell("Reset a password", user["username"], {}, admin["full_name"])
         return {"user": _public(self._user(user_id)), "password": password}
@@ -429,7 +488,17 @@ class Auth:
     # ------------------------------------------------------------------ inside
 
     def _insert(
-        self, username: str, full_name: str, title: str, roles: list[str], password: str, *, must_change: bool
+        self,
+        username: str,
+        full_name: str,
+        title: str,
+        roles: list[str],
+        password: str,
+        *,
+        must_change: bool,
+        email: str = "",
+        email_key: str = "",
+        password_login: bool = True,
     ) -> dict[str, Any]:
         name = " ".join(str(username).lower().split())
         if not _USERNAME.match(name):
@@ -438,14 +507,17 @@ class Auth:
             )
         if self._find(name):
             raise _bad(f"there is already a user named {name}")
+        other = self._find_email(email_key) if email_key else None
+        if other:
+            raise _bad(f"that e-mail address already belongs to {other['username']}")
         full = _full_name(full_name)
-        if not must_change:  # a password somebody chose; a temporary one is ours
+        if not must_change and password_login:  # a password somebody chose; a temporary one is ours
             check_new_password(password, name)
         uid = secrets.token_hex(6)
         with self._db:
             self._db.execute(
-                "INSERT INTO users (id, username, full_name, title, roles, pw, active, must_change, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                "INSERT INTO users (id, username, full_name, title, roles, pw, active, must_change, created_at,"
+                " email, email_key, password_login) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
                 (
                     uid,
                     name,
@@ -455,9 +527,120 @@ class Auth:
                     hash_password(password),
                     int(must_change),
                     self._stamp(),
+                    email or None,
+                    email_key or None,
+                    int(password_login),
                 ),
             )
         return self._user(uid)
+
+    def _username_from(self, email_key: str) -> str:
+        """A user name for someone added by e-mail address alone: the part before the @, made to fit."""
+        base = re.sub(r"[^a-z0-9._-]+", ".", email_key.split("@")[0]).strip(".-_")[:28] or "user"
+        if not base[0].isalnum():
+            base = "u" + base
+        name, n = base, 1
+        while self._find(name) or not _USERNAME.match(name):
+            n += 1
+            name = f"{base}{n}"
+        return name
+
+    def _find_email(self, key: str) -> dict[str, Any] | None:
+        row = self._db.execute("SELECT * FROM users WHERE email_key = ?", (key,)).fetchone()
+        return _user_row(row) if row else None
+
+    # ------------------------------------------------------------------ signing in with Google
+
+    def google_view(self) -> dict[str, Any]:
+        """The Google settings for the page: never the client secret, only whether it is set."""
+        with self._lock:
+            got = self._state("google_")
+        return {
+            "enabled": got.get("google_enabled") == "1",
+            "client_id": got.get("google_client_id", ""),
+            "secret_set": bool(got.get("google_secret")),
+            "public_url": got.get("google_public_url", ""),
+        }
+
+    def google_config(self) -> dict[str, str] | None:
+        """What a sign-in with Google needs, with the secret revealed; None when it is off or incomplete."""
+        with self._lock:
+            got = self._state("google_")
+        secret = ""
+        if got.get("google_secret"):
+            try:
+                secret = vault.reveal(base64.b64decode(got["google_secret"]), self._key_file)
+            except (vault.VaultError, ValueError):
+                secret = ""
+        if got.get("google_enabled") != "1" or not got.get("google_client_id") or not secret:
+            return None
+        return {
+            "client_id": got["google_client_id"],
+            "client_secret": secret,
+            "public_url": got.get("google_public_url", ""),
+        }
+
+    def google_update(self, admin: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        """Change the Google settings. A secret left out (or None) is kept; "" removes it."""
+        unknown = set(data) - {"enabled", "client_id", "client_secret", "public_url"}
+        if unknown:
+            raise _bad(f"unknown settings: {', '.join(sorted(unknown))}")
+        with self._lock:
+            got = self._state("google_")
+            new: dict[str, str] = {}
+            if "client_id" in data:
+                cid = " ".join(str(data["client_id"] or "").split())
+                if cid and not re.match(r"^[A-Za-z0-9._-]{10,200}$", cid):
+                    raise _bad("that does not look like a Google client ID (it ends in .apps.googleusercontent.com)")
+                new["google_client_id"] = cid
+            if data.get("client_secret") is not None:
+                secret = str(data["client_secret"]).strip()
+                if secret and not re.match(r"^[\x21-\x7e]{8,200}$", secret):
+                    raise _bad("that does not look like a Google client secret")
+                new["google_secret"] = (
+                    base64.b64encode(vault.protect(secret, self._key_file)).decode("ascii") if secret else ""
+                )
+            if "public_url" in data:
+                url = str(data["public_url"] or "").strip().rstrip("/")
+                if url and not _public_url_ok(url):
+                    raise _bad(
+                        "the address must start with https:// (or http://localhost:8765 on this computer), "
+                        "with no path, for example https://qm.example.com"
+                    )
+                new["google_public_url"] = url
+            merged = {**got, **new}
+            if data.get("enabled"):
+                if not (merged.get("google_client_id") and merged.get("google_secret")):
+                    raise _bad("fill in the client ID and the client secret first")
+                new["google_enabled"] = "1"
+            elif "enabled" in data:
+                new["google_enabled"] = "0"
+            with self._db:
+                for k, v in new.items():
+                    self._db.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (k, v))
+            self._tell(
+                "Changed the Google sign-in settings", "Users", {"changed": ", ".join(sorted(data))}, admin["full_name"]
+            )
+        return self.google_view()
+
+    def login_google(self, email: str) -> tuple[str, dict[str, Any]]:
+        """Sign in the person whose Google account has this (verified) e-mail address. Only someone an administrator
+        has added can: anyone else is refused, however real their Google account is."""
+        with self._lock:
+            _, key = _email(email)
+            user = self._find_email(key) if key else None
+            if user is None or not user["active"]:
+                self._tell("Google sign-in refused", key or "unknown", {"reason": "not on the list"}, key or "unknown")
+                raise AuthError(HTTPStatus.FORBIDDEN, "not on the list")
+            with self._db:
+                self._db.execute("UPDATE users SET last_login = ? WHERE id = ?", (self._stamp(), user["id"]))
+            user = self._user(user["id"])
+            self._tell("Signed in with Google", user["username"], {}, user["full_name"])
+            return self._open_session(user), user
+
+    def _state(self, prefix: str) -> dict[str, str]:
+        rows = self._db.execute("SELECT key, value FROM state WHERE key LIKE ?", (prefix + "%",)).fetchall()
+        return {r["key"]: r["value"] for r in rows}
 
     def _set_password(self, user_id: str, password: str, *, must_change: bool) -> None:
         with self._db:
@@ -529,6 +712,8 @@ def _user_row(row: sqlite3.Row) -> dict[str, Any]:
         "pw": row["pw"],
         "active": bool(row["active"]),
         "must_change": bool(row["must_change"]),
+        "email": row["email"] or "",
+        "google_only": not bool(row["password_login"]),
         "created_at": row["created_at"],
         "last_login": row["last_login"],
     }
@@ -537,6 +722,39 @@ def _user_row(row: sqlite3.Row) -> dict[str, Any]:
 def _public(user: dict[str, Any]) -> dict[str, Any]:
     """A user as the page may see them: never the password hash."""
     return {k: v for k, v in user.items() if k != "pw"}
+
+
+def email_key(address: str) -> str:
+    """The form an e-mail address is compared in. Gmail ignores dots and anything after a plus in the part before the @,
+    so jane.doe+qm@gmail.com and janedoe@gmail.com are one inbox. Other domains are compared as they are."""
+    local, _, domain = address.strip().lower().rpartition("@")
+    if domain in ("gmail.com", "googlemail.com"):
+        return f"{local.split('+')[0].replace('.', '')}@gmail.com"
+    return f"{local}@{domain}"
+
+
+def _email(value: Any) -> tuple[str, str]:
+    """(the address as typed in lower case, how it is compared); both empty when none was given."""
+    text = " ".join(str(value or "").split()).lower()
+    if not text:
+        return "", ""
+    if len(text) > 254 or not _EMAIL.match(text):
+        raise _bad(f"not an e-mail address: {text[:60]}")
+    return text, email_key(text)
+
+
+def _public_url_ok(url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    p = urlsplit(url)
+    local = p.hostname in ("localhost", "127.0.0.1")
+    return (
+        bool(p.hostname)
+        and not p.path.strip("/")
+        and not p.query
+        and not p.fragment
+        and (p.scheme == "https" or (p.scheme == "http" and local))
+    )
 
 
 def _roles(value: Any) -> list[str]:
