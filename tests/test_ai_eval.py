@@ -200,7 +200,9 @@ def test_the_service_runs_the_check_keeps_the_scores_and_audits_it(tmp_path: Pat
     assert [a[0] for a in audit] == ["Started the AI quality check", "Finished the AI quality check"]
     assert audit[-1][2]["score"] == "100%"
     ev.start(AIConfig("openai", "model-b", "https://api.example.com/v1", "SOME_KEY"), ask=oracle(wrong=True))
-    two = wait_for(lambda: (v := ev.view())["last"]["label"].endswith("model-b") and not v["running"] and v)
+    two = wait_for(
+        lambda: (v := ev.view())["last"] and v["last"]["label"].endswith("model-b") and not v["running"] and v
+    )
     assert [h["label"].split(", ")[-1] for h in two["history"]] == ["model-b", "model-a"]
     assert two["last"]["verdict"] == "weak"
 
