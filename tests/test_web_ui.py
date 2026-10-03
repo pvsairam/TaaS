@@ -347,6 +347,11 @@ def test_automatic_backups_can_be_made_and_their_settings_are_checked(site: Site
     card = page.locator("section", has_text="Automatic backups")
     expect(card).to_contain_text("once a day after 02:00", timeout=WAIT)
     card.get_by_role("button", name="Back up now").click()
+    # The page redraws itself when the backup is done; the clicked button stays disabled until then. Typing before the
+    # redraw would lose the message below, so wait for the fresh card with an enabled button.
+    expect(
+        page.locator("section", has_text="Automatic backups").get_by_role("button", name="Back up now")
+    ).to_be_enabled(timeout=WAIT)
     expect(page.locator("section", has_text="Automatic backups")).to_contain_text(
         re.compile(r"Saved copies \(\d+\)"), timeout=WAIT
     )
