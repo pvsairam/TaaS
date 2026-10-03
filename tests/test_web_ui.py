@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -116,6 +117,22 @@ def test_the_tests_page_lists_the_tests_and_a_test_shows_its_steps(site: Site, p
     page.goto(f"{site.url}/#/tests/hcm%2Fshared_user.yaml")
     see(page, "Open Locations")
     expect(page.locator("main")).to_contain_text("shared: open-locations")
+
+
+def test_tests_can_be_exported_as_plain_playwright_files(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/tests")
+    link = page.get_by_role("link", name="Export", exact=True)
+    expect(link).to_be_visible(timeout=WAIT)
+    with page.expect_download() as everything:
+        link.click()
+    assert everything.value.suggested_filename.endswith("-playwright.zip")
+    page.goto(f"{site.url}/#/tests/hcm%2Fshared_user.yaml")
+    with page.expect_download() as one:
+        page.get_by_role("link", name="Export", exact=True).click()
+    assert one.value.suggested_filename == "hcm.shared-user-playwright.zip"
+    with zipfile.ZipFile(one.value.path()) as z:
+        assert {"test_hcm_shared_user.py", "fusion_runtime.py", "conftest.py"} <= set(z.namelist())
+        assert "fusion.navigate('Workforce Structures > Locations')" in z.read("test_hcm_shared_user.py").decode()
 
 
 def test_the_shared_steps_page_shows_the_group_and_who_uses_it(site: Site, page: Page) -> None:

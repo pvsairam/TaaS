@@ -292,6 +292,43 @@ changes until you choose it.
 - If the pod looks like production, or the password is missing, the run stops at once and nothing is written.
 - Watching the browser ("Show the browser while it runs") with several tests opens several windows; it works best with one.
 
+## Export your tests as plain Playwright (no lock-in)
+
+Your tests are YAML files, but they do not have to stay in Quartermaster. **Tests, Export** (all tests) or **Export** on a
+test's page downloads a zip, and `qm export my_tests --out exported` writes the same files to a folder. Each test becomes a
+normal Playwright for Python test (run by pytest) that needs **only Playwright and pytest**: you can read it, change it, keep it in
+your own repository and run it in your own CI.
+
+```
+exported/
+  test_hcm_create_location.py   one file per test
+  fusion_runtime.py             the small library the tests call (plain code, no Quartermaster)
+  conftest.py  pytest.ini  requirements.txt  README.md  .gitignore
+```
+
+```bash
+cd exported
+pip install -r requirements.txt && python -m playwright install chromium
+export QM_FUSION_URL=https://abcd-dev2.fa.us6.oraclecloud.com QM_FUSION_USER=... QM_FUSION_PASSWORD=...
+pytest -v            # pytest -k create_location, pytest -m smoke, pytest -n 4 (with pytest-xdist)
+```
+
+A test file reads like the steps you know: the data at the top, then `with fusion.step(3, "Click Add Location"):`
+blocks, each a call such as `fusion.click([("role", "button:Add Location"), ("css", "#add")])`. The cleanup is in `finally:`.
+Shared steps are written out in full inside each test. What the export keeps:
+
+- the **same finding rule**: every item has a list of ways, and the first way that finds exactly one element is used;
+- the Navigator, Redwood date boxes, type-ahead lists, REST steps with the browser's session (and values kept for later
+  steps), waiting for a scheduled process, personas, and the refusal to run on a pod that looks like production;
+- `${name}` data, `${RUN_ID}` and `${env:SECRET}` (a secret stays a reference to an environment variable: no password
+  is ever written into an exported file); a failing step names itself and saves a screenshot in `evidence/`.
+
+What it does not have: Quartermaster's retries, its suggested fixes for renamed items (when Oracle renames something,
+edit the list of ways in the test), the Word evidence documents, schedules, release impact and approvals. For a pod behind
+single sign-on, sign in once, save the browser state with `context.storage_state(path=...)`, and set `QM_STORAGE_STATE` to
+that file. Exporting into a folder that already has the files is refused unless you say to replace them (`--force`), so your
+edits are not lost by accident.
+
 ## Shared steps
 
 Steps you use in many tests (open a page, create a record) can be written once and shared. Put a YAML file in

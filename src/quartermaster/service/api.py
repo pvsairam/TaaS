@@ -500,6 +500,8 @@ class App:
                 tickets=self.tickets.links(),
             )
             return Reply(HTTPStatus.OK, body, "application/zip", name)
+        if method == "GET" and route == ["export"]:
+            return self.export_tests(str((query.get("file") or [""])[0]))
         if method == "GET" and route == ["attention"]:
             return _json(self.attention())
         if method == "POST" and route == ["attention", "dismiss"]:
@@ -1060,6 +1062,42 @@ class App:
             out.append(item)
         return out
 
+    def export_tests(self, rel: str) -> Reply:
+        """A zip of the tests (one, or all that can be read) as plain Playwright for Python files (see export/)."""
+        import io
+        import tempfile
+        import zipfile
+
+        from quartermaster.dsl.loader import SpecError, load_test
+        from quartermaster.export.playwright_py import ExportError, export
+
+        files = [self._test_file(rel)] if rel else files_of_tests(self.tests_root)
+        tests: list[tuple[Any, str]] = []
+        for f in files:
+            try:
+                tests.append((load_test(f), f.relative_to(self.tests_root).as_posix()))
+            except (SpecError, OSError, ValueError):
+                if rel:
+                    raise ApiError(
+                        HTTPStatus.BAD_REQUEST, "this test file cannot be read, so it cannot be exported"
+                    ) from None
+        with tempfile.TemporaryDirectory(prefix="qm-export-") as scratch:
+            try:
+                written = export(tests, Path(scratch) / "tests")
+            except ExportError as e:
+                raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for path in written:
+                    z.write(path, path.name)
+        name = (
+            f"{_slug_name(tests[0][0].id)}-playwright.zip"
+            if rel
+            else f"quartermaster-tests-playwright-{datetime.now():%Y%m%d}.zip"
+        )
+        self.audit.add("Exported tests as Playwright", rel or "all tests", {"tests": str(len(tests))})
+        return Reply(HTTPStatus.OK, buf.getvalue(), "application/zip", name)
+
     def library(self) -> dict[str, Any]:
         """The shared step groups, which tests use each, and the files that could not be used."""
         directory = self.tests_root / LIBRARY_DIR
@@ -1426,6 +1464,10 @@ def _tail(log: Path, n: int = 40) -> str:
 
 
 # ---------------------------------------------------------------------- HTTP
+
+
+def _slug_name(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_") or "test"
 
 
 def _uses(spec: Any) -> list[str]:

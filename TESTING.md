@@ -972,6 +972,51 @@ You should see: "Started the AI quality check" and "Finished the AI quality chec
 If every question says "Could not ask", the key or the model name is wrong: use **Test the AI** and fix it first. If a model scores
 Weak, tell me which model and send a screenshot of **Every question**, so I can see whether the questions or the model are at fault.
 
+### 6.28 Exporting tests as plain Playwright
+
+You can look at the files without running anything. To run them you need Python and your test pod (same login as for Quartermaster).
+
+1. Click **Tests**. Click **Export** at the top. A zip downloads (`quartermaster-tests-playwright-<date>.zip`). Unzip it into a new
+   folder, for example `exported`.
+
+You should see: one `test_....py` file per test that can be read, and `fusion_runtime.py`, `conftest.py`, `pytest.ini`,
+`requirements.txt`, `README.md`.
+
+2. Open one `test_....py` in Notepad.
+
+You should see: the test's title and id at the top, a `DATA = {...}` block, then `with fusion.step(1, "..."):` blocks, one per step, each with a short
+call. Passwords do not appear anywhere. A test with cleanup has a `finally:` part at the end.
+
+3. Open a test's page and click **Export** there.
+
+You should see: a smaller zip with just that test (`<test id>-playwright.zip`).
+
+4. Run them. In PowerShell, in the `exported` folder (use a new virtual environment if you like):
+
+   ```powershell
+   pip install -r requirements.txt
+   python -m playwright install chromium
+   $env:QM_FUSION_URL = "https://your-test-pod..."
+   $env:QM_FUSION_USER = "your.test.user"
+   $env:QM_FUSION_PASSWORD = "..."
+   pytest -v -k login
+   ```
+
+   (Use a test whose name matches `-k`. The smoke login test, if you export `examples\smoke`, is `-k smoke_login`. To export just that
+   folder: `qm export examples\smoke --out exported_smoke`.)
+
+You should see: `1 passed`. With `$env:QM_HEADED = "1"` first, you also see the browser sign in.
+
+5. Break it on purpose: in the test file change the name in an `assert_text` or the link name in a `click` to something that does not exist, and run it again.
+
+You should see: a failure that says `step 2 (...)`, the list of ways it tried (`role='link:...' matched 0`), and a screenshot in the `evidence` folder.
+
+6. Run `qm export my_tests --out exported` again.
+
+You should see: an error that the folder already has the files, so nothing is replaced. Add `--force` only if you want to replace them.
+
+If a test behaves differently in the export than in Quartermaster, send me the test, the step number and what the pod showed.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

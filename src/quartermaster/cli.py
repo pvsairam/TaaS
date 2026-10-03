@@ -319,6 +319,46 @@ def _discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export(args: argparse.Namespace) -> int:
+    """Write tests as plain Playwright for Python files that need nothing from Quartermaster (export/)."""
+    from quartermaster.export.playwright_py import ExportError, export
+
+    target = Path(args.tests)
+    try:
+        if target.is_dir():
+            tests: list[TestCase] = load_tests(target)
+            files = files_of_tests(target)
+        else:
+            tests, files = [load_test(target)], [target]
+    except SpecError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if args.only:
+        wanted = [t for t in args.only.split(",") if t.strip()]
+        unknown = sorted(set(wanted) - {t.id for t in tests})
+        if unknown:
+            print(f"error: no test with id {', '.join(unknown)} in {target}", file=sys.stderr)
+            return 2
+        pairs = [(t, f) for t, f in zip(tests, files, strict=True) if t.id in wanted]
+        tests, files = [t for t, _ in pairs], [f for _, f in pairs]
+    base = target if target.is_dir() else target.parent
+    pairs2 = [
+        (t, f.relative_to(base).as_posix() if base in f.parents else f.name) for t, f in zip(tests, files, strict=True)
+    ]
+    try:
+        written = export(pairs2, Path(args.out), overwrite=args.force)
+    except ExportError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    count = sum(1 for p in written if p.name.startswith("test_"))
+    print(f"Wrote {count} test(s) and the files they need to {args.out}")
+    print(
+        f"Run them: cd {args.out} && pip install -r requirements.txt && python -m playwright install chromium "
+        "&& pytest -v"
+    )
+    return 0
+
+
 def _eval_ai(args: argparse.Namespace) -> int:
     """Ask the AI the golden questions (ai/evals/suggest.py) and print how it did. Exit 1 when it falls short."""
     from quartermaster.ai.evals import suggest as evals
@@ -905,6 +945,17 @@ def main(argv: list[str] | None = None) -> int:
     dv.add_argument("--out", required=True, help="JSON file to write the page names to")
     dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     dv.set_defaults(func=_discover)
+
+    ex = sub.add_parser(
+        "export", help="write tests as plain Playwright (Python, pytest) files, no Quartermaster needed"
+    )
+    ex.add_argument("tests", help="a test file, or a folder of tests")
+    ex.add_argument("--out", required=True, help="folder to write to (must be empty, or new)")
+    ex.add_argument("--only", help="comma-separated test ids: export just these")
+    ex.add_argument(
+        "--force", action="store_true", help="replace files already in --out (your own edits there are lost)"
+    )
+    ex.set_defaults(func=_export)
 
     ev = sub.add_parser(
         "eval-ai", help="check how good the AI is at suggesting a missing item (sends only made-up screens)"
