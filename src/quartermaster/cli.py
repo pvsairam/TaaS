@@ -319,6 +319,14 @@ def _discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _nightly_summary(args: argparse.Namespace) -> int:
+    """Print the Markdown summary of a nightly run from the report `qm run --report` wrote (see nightly.py)."""
+    from quartermaster.nightly import read_report, summarize
+
+    print(summarize(read_report(args.report), details=args.details, release=args.release or ""), end="")
+    return 0
+
+
 def _record(args: argparse.Namespace) -> int:
     from quartermaster.recorder.recorder import Recorder, events_to_test, to_yaml
     from quartermaster.runner.playwright_driver import PlaywrightDriver
@@ -859,6 +867,14 @@ def main(argv: list[str] | None = None) -> int:
     dv.add_argument("--out", required=True, help="JSON file to write the page names to")
     dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     dv.set_defaults(func=_discover)
+
+    ns = sub.add_parser("nightly-summary", help="the summary page of a nightly run (used by GitHub Actions)")
+    ns.add_argument("report", help="the JSON file written by qm run --report")
+    ns.add_argument(
+        "--details", action="store_true", help="include what the pod showed (errors); off keeps it out of logs"
+    )
+    ns.add_argument("--release", default="", help="Oracle release, shown in the title")
+    ns.set_defaults(func=_nightly_summary)
 
     sv = sub.add_parser("serve", help="start the web UI on this computer")
     sv.add_argument(

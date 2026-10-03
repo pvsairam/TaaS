@@ -402,6 +402,48 @@ Only `http` and `https` addresses are ever made into links. The links are kept p
 administrator changes the tracker's address. Not done: creating the ticket in the tracker for you, and closing the link
 when the ticket closes (both need the tracker's login).
 
+## Nightly run against your pod (GitHub Actions)
+
+Quartermaster's own **Schedules** run your tests while Quartermaster is running on your computer or server. This is the other
+kind: GitHub itself runs a folder of tests against your real test pod every night, even when your computer is off, and shows
+the result on the **Actions** page of the repository (GitHub e-mails you when a run fails). It catches both "Oracle changed
+something" and "a change to Quartermaster broke something that only the real pod shows".
+
+It is **off until you turn it on**, and it needs a pod that GitHub's computers can reach:
+
+1. In the repository on GitHub: **Settings, Secrets and variables, Actions, Secrets**. Add three repository secrets, typed
+   there and nowhere else: `QM_FUSION_URL` (the pod address), `QM_FUSION_USER` and `QM_FUSION_PASSWORD` (a test user).
+   Never put them in a file, an issue or a chat.
+2. Try it by hand first: **Actions, Nightly pod run, Run workflow**. It runs the folder `examples/smoke`, which only signs in.
+   Open the run: the summary at the top lists the tests and where one failed.
+3. To run every night (02:17 UTC), add the **variable** (Variables tab, not Secrets) `QM_NIGHTLY` with the value `on`.
+
+Other variables, all optional:
+
+| Variable | Meaning |
+|---|---|
+| `QM_NIGHTLY_TESTS` | A folder of tests inside this repository (default `examples/smoke`). Your own `my_tests` folder is not in the repository: copy the tests you want run nightly into a folder such as `nightly/` and commit it. |
+| `QM_NIGHTLY_RELEASE` | The Oracle release on the pod, for example `26D`, shown on the summary and in the evidence. |
+| `QM_NIGHTLY_PARALLEL` | Tests at the same time, 1 to 4 (default 1). |
+| `QM_NIGHTLY_DETAILS` | `on` puts what the pod showed (error text) on the summary and in the log. |
+| `QM_NIGHTLY_EVIDENCE` | `on` keeps screenshots of failures and the Word documents as a download of the run for 30 days. |
+
+Read this before turning the last two on:
+
+- **Anyone who can see the repository can read its logs, and a public repository's are public.** So by default the log and the
+  summary hold only test names and the step where a test failed (the step's own wording), never what the pod showed, and no
+  screenshots are kept. Turn `QM_NIGHTLY_DETAILS` and `QM_NIGHTLY_EVIDENCE` on only in a **private** repository.
+- **The pod must be a test pod**: Quartermaster's guard against production addresses applies here as everywhere. Use a test
+  user that only the tests use.
+- **Oracle pods often only accept known addresses.** GitHub's computers have addresses that change, so a pod behind an
+  IP allow-list will refuse them and the run says it did not finish. Ask your Oracle administrator, or use Schedules on a computer
+  that can reach the pod instead.
+- The secrets are given only to the two steps that sign in, are never printed, and a repository's secrets are not given to
+  runs started from a copy (fork) of it.
+- A scheduled workflow in a public repository is switched off by GitHub after 60 days without a push; push anything or press
+  Enable on the Actions page.
+- A run that finds a failure ends red, which is how GitHub knows to tell you. A failed **cleanup** is on the summary too.
+
 ## Sign-in and roles
 
 Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in

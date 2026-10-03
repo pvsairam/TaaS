@@ -1,0 +1,111 @@
+# Nightly run of Quartermaster's tests against your real Oracle Fusion test pod.
+#
+# It does nothing until you turn it on: set the repository VARIABLE QM_NIGHTLY to "on" and add the three SECRETS below
+# (Settings, Secrets and variables, Actions). See README, "Nightly run against your pod". It can also be started by
+# hand (Actions, Nightly pod run, Run workflow), which works without the QM_NIGHTLY switch so you can try it first.
+#
+# Secrets (the pod must be a test pod; the production guard of Quartermaster still applies):
+#   QM_FUSION_URL       the pod address, for example https://abcd-dev2.fa.us6.oraclecloud.com
+#   QM_FUSION_USER      the test user
+#   QM_FUSION_PASSWORD  its password
+# Variables (all optional):
+#   QM_NIGHTLY            "on" to run every night
+#   QM_NIGHTLY_TESTS      folder of tests in this repository to run (default examples/smoke: it only signs in)
+#   QM_NIGHTLY_RELEASE    the Oracle release on the pod, for example 26D
+#   QM_NIGHTLY_PARALLEL   tests at the same time, 1 to 4 (default 1)
+#   QM_NIGHTLY_DETAILS    "on" to put what the pod showed (error text) on the summary page
+#   QM_NIGHTLY_EVIDENCE   "on" to keep screenshots and Word documents as a download of the run (see the warning below)
+#
+# Anyone who can see this repository can read its logs, and in a public repository so can everyone. By default the log and
+# the summary hold only test names and the step where a test failed, never what the pod showed, and no screenshots are
+# kept. Turn QM_NIGHTLY_EVIDENCE on only in a private repository.
+name: Nightly pod run
+
+on:
+  schedule:
+    - cron: "17 2 * * *" # every night at 02:17 UTC
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "Folder of tests to run (default: the QM_NIGHTLY_TESTS variable, else examples/smoke)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-pod
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # a schedule runs only when switched on; a run started by hand always runs
+    if: github.event_name == 'workflow_dispatch' || vars.QM_NIGHTLY == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TESTS: ${{ github.event.inputs.tests || vars.QM_NIGHTLY_TESTS || 'examples/smoke' }}
+      RELEASE: ${{ vars.QM_NIGHTLY_RELEASE }}
+      PARALLEL: ${{ vars.QM_NIGHTLY_PARALLEL || '1' }}
+      DETAILS: ${{ vars.QM_NIGHTLY_DETAILS }}
+      EVIDENCE: ${{ vars.QM_NIGHTLY_EVIDENCE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the secrets are set
+        env:
+          QM_FUSION_URL: ${{ secrets.QM_FUSION_URL }}
+          QM_FUSION_USER: ${{ secrets.QM_FUSION_USER }}
+          QM_FUSION_PASSWORD: ${{ secrets.QM_FUSION_PASSWORD }}
+        run: |
+          missing=""
+          for name in QM_FUSION_URL QM_FUSION_USER QM_FUSION_PASSWORD; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets first:$missing (Settings, Secrets and variables, Actions)"
+            exit 1
+          fi
+      - run: pip install -e ".[browser]"
+      - run: python -m playwright install --with-deps chromium
+      - name: Run the tests against the pod
+        id: qm
+        env:
+          QM_FUSION_URL: ${{ secrets.QM_FUSION_URL }}
+          QM_FUSION_USER: ${{ secrets.QM_FUSION_USER }}
+          QM_FUSION_PASSWORD: ${{ secrets.QM_FUSION_PASSWORD }}
+        run: |
+          set +e
+          if [ "$EVIDENCE" = "on" ]; then shots="on-failure"; doc="--evidence-doc"; else shots="off"; doc=""; fi
+          args=(run "$TESTS" --evidence evidence --screenshots "$shots" --retries 1 --parallel "$PARALLEL"
+                --tester "Nightly run (GitHub)" --report report.json $doc)
+          if [ -n "$RELEASE" ]; then args+=(--release "$RELEASE"); fi
+          # what the pod showed stays out of the log: the output goes to a file, and only the summary below is shown
+          python -m quartermaster.cli "${args[@]}" > run.log 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          # Quartermaster's own error lines (a pod that looks like production, a missing secret) never hold pod text
+          grep '^error:' run.log || true
+          if [ "$DETAILS" = "on" ]; then cat run.log; fi
+      - name: Summary
+        if: always()
+        run: |
+          flags=()
+          if [ "$DETAILS" = "on" ]; then flags+=(--details); fi
+          if [ -n "$RELEASE" ]; then flags+=(--release "$RELEASE"); fi
+          python -m quartermaster.cli nightly-summary report.json "${flags[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the evidence (only when switched on)
+        if: always() && env.EVIDENCE == 'on'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Fail the run when a test failed
+        if: steps.qm.outputs.code != '0'
+        run: |
+          echo "::error::Tests failed or the run did not finish (see the summary at the top of this run)."
+          exit 1

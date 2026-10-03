@@ -918,6 +918,30 @@ You should see: a row **Tickets** with `PROJ-123 (https://...)` under that test.
 
 You should see: the link gone, and "Linked a ticket" and "Removed a ticket link" in the log.
 
+### 6.26 Nightly run against the pod (GitHub)
+
+Needs your repository on GitHub, a test pod that GitHub's computers can reach, and a test user. Type the secrets only in
+GitHub's page, never into a chat or a file.
+
+1. On GitHub open the repository, **Settings, Secrets and variables, Actions, Secrets, New repository secret**. Add
+   `QM_FUSION_URL`, `QM_FUSION_USER` and `QM_FUSION_PASSWORD`.
+2. Click **Actions**, then **Nightly pod run** on the left, **Run workflow**, **Run workflow** again.
+
+You should see: a run starts. If a secret is missing, it ends red at the first step with "Add these repository secrets first: ...".
+
+3. When it ends, open it.
+
+You should see: a summary at the top, "1 of 1 tests passed", with the test "Sign in and reach the Fusion home page". The
+log does not show what the pod displayed.
+
+4. If it says "The run did not finish", open the job's log. A pod that only accepts known addresses refuses GitHub: say so to your
+   Oracle administrator, or skip this and use Schedules on your computer.
+5. To see the nightly switch: before adding the variable `QM_NIGHTLY`, the schedule does nothing. Add it (Variables tab, value `on`),
+   and the next night a run appears at about 02:17 UTC (04:17 in Germany in summer, 22:17 in New York the evening before).
+6. Optional: set the variable `QM_NIGHTLY_TESTS` to `examples/tests` (if your pod has the Create Location data) or to a folder of your
+   own tests that you committed, run it by hand again, and look at the summary. Only in a private repository, add
+   `QM_NIGHTLY_DETAILS` = `on` and run again: now the failed step shows what the pod displayed.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.
