@@ -35,6 +35,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import sqlite3
@@ -79,6 +80,7 @@ _COLUMNS = {
     "email": "TEXT",  # the Google address, as typed (lower case)
     "email_key": "TEXT",  # the same, in the form Google's address is compared in (see email_key)
     "password_login": "INTEGER NOT NULL DEFAULT 1",  # 0: signs in with Google only
+    "origin": "TEXT",  # "sso": made by a first single sign-on, and roles follow the company's groups
 }
 _EMAIL = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 
@@ -155,8 +157,8 @@ def required_role(method: str, route: list[str]) -> str:
     """The role a request needs: "any" (signed in), "tester", "approver" or "admin". What is not listed
     needs an administrator, so a route added later is closed until someone decides."""
     head = route[0] if route else ""
-    if route == ["auth", "google"]:
-        return "admin"  # the Google client ID and secret
+    if route in (["auth", "google"], ["auth", "sso"], ["auth", "sso", "check"]):
+        return "admin"  # the Google or company client ID and secret
     if route == ["tickets", "settings"]:
         return "admin"  # where the tracker is
     if route[:2] == ["audit", "export"]:
@@ -290,6 +292,16 @@ class Auth:
             self._tell("Sign-in failed", key, {}, key or "unknown")
             raise AuthError(HTTPStatus.UNAUTHORIZED, "wrong user name or password")
         with self._lock:
+            if self._sso_enforced() and "admin" not in _user_row(row)["roles"]:
+                self._tell(
+                    "Password sign-in refused",
+                    row["username"],
+                    {"reason": "single sign-on is required"},
+                    row["username"],
+                )
+                raise AuthError(
+                    HTTPStatus.FORBIDDEN, "your company requires single sign-on: use the single sign-on button instead"
+                )
             self._failures.pop(key, None)
             with self._db:
                 self._db.execute("UPDATE users SET last_login = ? WHERE id = ?", (self._stamp(), row["id"]))
@@ -505,6 +517,7 @@ class Auth:
         email: str = "",
         email_key: str = "",
         password_login: bool = True,
+        origin: str = "",
     ) -> dict[str, Any]:
         name = " ".join(str(username).lower().split())
         if not _USERNAME.match(name):
@@ -538,6 +551,8 @@ class Auth:
                     int(password_login),
                 ),
             )
+            if origin:
+                self._db.execute("UPDATE users SET origin = ? WHERE id = ?", (origin, uid))
         return self._user(uid)
 
     def _username_from(self, email_key: str) -> str:
@@ -644,6 +659,235 @@ class Auth:
             self._tell("Signed in with Google", user["username"], {}, user["full_name"])
             return self._open_session(user), user
 
+    # ------------------------------------------------------------------ single sign-on with a company provider
+
+    SSO_PROVISION = ("listed", "auto")
+
+    def sso_view(self) -> dict[str, Any]:
+        """The single sign-on settings for the page: never the client secret, only whether it is set."""
+        with self._lock:
+            got = self._state("sso_")
+        return {
+            "enabled": got.get("sso_enabled") == "1",
+            "issuer": got.get("sso_issuer", ""),
+            "client_id": got.get("sso_client_id", ""),
+            "secret_set": bool(got.get("sso_secret")),
+            "public_url": got.get("sso_public_url", ""),
+            "label": got.get("sso_label") or "single sign-on",
+            "scopes": got.get("sso_scopes") or "openid email profile",
+            "groups_claim": got.get("sso_groups_claim") or "groups",
+            "domains": [d for d in got.get("sso_domains", "").split(",") if d],
+            "provision": got.get("sso_provision") or "listed",
+            "default_role": got.get("sso_default_role", ""),
+            "role_map": _json_dict(got.get("sso_role_map")),
+            "require_group": got.get("sso_require_group") == "1",
+            "enforce": got.get("sso_enforce") == "1",
+        }
+
+    def sso_config(self) -> dict[str, Any] | None:
+        """What a single sign-on needs, with the secret revealed; None when it is off or incomplete."""
+        view = self.sso_view()
+        with self._lock:
+            got = self._state("sso_")
+        secret = ""
+        if got.get("sso_secret"):
+            try:
+                secret = vault.reveal(base64.b64decode(got["sso_secret"]), self._key_file)
+            except (vault.VaultError, ValueError):
+                return None  # a secret that cannot be read (saved by another computer): off, not half working
+        if not (view["enabled"] and view["issuer"] and view["client_id"]):
+            return None
+        return {**view, "client_secret": secret}
+
+    def sso_label(self) -> str | None:
+        """The button's words when single sign-on is on, else None."""
+        return self.sso_view()["label"] if self.sso_config() is not None else None
+
+    def _sso_enforced(self) -> bool:
+        return self.sso_config() is not None and self.sso_view()["enforce"]
+
+    def sso_update(self, admin: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        """Change the single sign-on settings. A secret left out (or None) is kept; "" removes it."""
+        known = {
+            "enabled", "issuer", "client_id", "client_secret", "public_url", "label", "scopes", "groups_claim",
+            "domains", "provision", "default_role", "role_map", "require_group", "enforce",
+        }  # fmt: skip
+        unknown = set(data) - known
+        if unknown:
+            raise _bad(f"unknown settings: {', '.join(sorted(unknown))}")
+        with self._lock:
+            got = self._state("sso_")
+            new: dict[str, str] = {}
+            if "issuer" in data:
+                issuer = str(data["issuer"] or "").strip().rstrip("/")
+                if issuer and not _issuer_ok(issuer):
+                    raise _bad(
+                        "the provider address must start with https:// and have no ? or #, for example "
+                        "https://login.microsoftonline.com/<tenant>/v2.0 or https://acme.okta.com"
+                    )
+                new["sso_issuer"] = issuer
+            if "client_id" in data:
+                cid = " ".join(str(data["client_id"] or "").split())
+                if cid and not re.match(r"^[\x21-\x7e]{3,200}$", cid):
+                    raise _bad("that does not look like a client ID")
+                new["sso_client_id"] = cid
+            if data.get("client_secret") is not None:
+                secret = str(data["client_secret"]).strip()
+                if secret and not re.match(r"^[\x21-\x7e]{6,400}$", secret):
+                    raise _bad("that does not look like a client secret")
+                new["sso_secret"] = (
+                    base64.b64encode(vault.protect(secret, self._key_file)).decode("ascii") if secret else ""
+                )
+            if "public_url" in data:
+                url = str(data["public_url"] or "").strip().rstrip("/")
+                if url and not _public_url_ok(url):
+                    raise _bad(
+                        "the address must start with https:// (or http://localhost:8765 on this computer), "
+                        "with no path, for example https://qm.example.com"
+                    )
+                new["sso_public_url"] = url
+            if "label" in data:
+                label = " ".join(str(data["label"] or "").split())[:30]
+                new["sso_label"] = label
+            if "scopes" in data:
+                scopes = " ".join(str(data["scopes"] or "").split())
+                if scopes and (
+                    not re.match(r"^[A-Za-z0-9:._/-]+( [A-Za-z0-9:._/-]+)*$", scopes) or "openid" not in scopes.split()
+                ):
+                    raise _bad("the scopes are words separated by spaces and must include openid")
+                new["sso_scopes"] = scopes
+            if "groups_claim" in data:
+                claim = str(data["groups_claim"] or "").strip()
+                if claim and not re.match(r"^[A-Za-z0-9:._/-]{1,60}$", claim):
+                    raise _bad("that does not look like a claim name (it is usually groups or roles)")
+                new["sso_groups_claim"] = claim
+            if "domains" in data:
+                raw = data["domains"]
+                items = raw if isinstance(raw, list) else str(raw or "").replace(";", ",").replace(" ", ",").split(",")
+                domains = []
+                for d in items:
+                    d = str(d).strip().lower().lstrip("@")
+                    if not d:
+                        continue
+                    if not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", d):
+                        raise _bad(f"not an e-mail domain: {d[:60]}")
+                    domains.append(d)
+                new["sso_domains"] = ",".join(dict.fromkeys(domains))
+            if "provision" in data:
+                if data["provision"] not in self.SSO_PROVISION:
+                    raise _bad("people are either only the ones you list, or made at their first sign-in")
+                new["sso_provision"] = str(data["provision"])
+            if "default_role" in data:
+                role = str(data["default_role"] or "")
+                if role not in ("", "tester", "approver"):
+                    raise _bad(
+                        "new people can get no role (viewer), tester or approver; administrators come from a group"
+                    )
+                new["sso_default_role"] = role
+            if "role_map" in data:
+                new["sso_role_map"] = json.dumps(_role_map(data["role_map"]))
+            for flag, key in (("require_group", "sso_require_group"), ("enforce", "sso_enforce")):
+                if flag in data:
+                    new[key] = "1" if data[flag] else "0"
+            merged = {**got, **new}
+            if data.get("enabled"):
+                if not (merged.get("sso_issuer") and merged.get("sso_client_id")):
+                    raise _bad("fill in the provider address and the client ID first")
+                new["sso_enabled"] = "1"
+            elif "enabled" in data:
+                new["sso_enabled"] = "0"
+            with self._db:
+                for k, v in new.items():
+                    self._db.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (k, v))
+            self._tell(
+                "Changed the single sign-on settings", "Users", {"changed": ", ".join(sorted(data))}, admin["full_name"]
+            )
+        return self.sso_view()
+
+    def login_sso(self, who: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """Sign in the person the company's provider has vouched for: {email, name, groups}. Whether they are let in,
+        and with which roles, follows the single sign-on settings: the e-mail domains allowed, the groups that give
+        roles, whether a first sign-in makes a user. The provider says who; Quartermaster says what they may do."""
+        cfg = self.sso_config()
+        if cfg is None:
+            raise AuthError(HTTPStatus.FORBIDDEN, "single sign-on is not turned on")
+        with self._lock:
+            _, key = _email(who.get("email"))
+            refuse = self._sso_refuse(key or "unknown")
+            domain = key.rpartition("@")[2]
+            if cfg["domains"] and domain not in cfg["domains"]:
+                refuse("the e-mail domain is not allowed", f"{key} is not at an e-mail domain that may sign in here.")
+            groups = {str(g).casefold() for g in who.get("groups") or []}
+            mapped: list[str] = []
+            for group, roles in cfg["role_map"].items():
+                if group.casefold() in groups:
+                    mapped += [r for r in roles if r not in mapped]
+            mapped = [r for r in ROLES if r in mapped]
+            if cfg["require_group"] and not mapped:
+                refuse(
+                    "not in a group that gives access", f"{key} is not in a group that gives access to Quartermaster."
+                )
+            user = self._find_email(key)
+            if user is not None and not user["active"]:
+                refuse("the user is switched off", f"{key} cannot sign in: an administrator switched this user off.")
+            if user is None:
+                if cfg["provision"] != "auto":
+                    refuse(
+                        "not on the list",
+                        f"{key} has not been given access to Quartermaster. Ask an administrator to add that address.",
+                    )
+                roles = mapped or ([cfg["default_role"]] if cfg["default_role"] else [])
+                user = self._insert(
+                    self._username_from(key),
+                    str(who.get("name") or "").strip() or key.split("@")[0],
+                    "",
+                    roles,
+                    temporary_password(),  # nobody knows it: this person signs in with single sign-on only
+                    must_change=False,
+                    email=key,
+                    email_key=key,
+                    password_login=False,
+                    origin="sso",
+                )
+                self._tell(
+                    "Created a user from single sign-on",
+                    user["username"],
+                    {"roles": ", ".join(roles) or "viewer"},
+                    user["full_name"],
+                )
+            elif cfg["role_map"] and mapped and sorted(mapped) != sorted(user["roles"]):
+                roles = mapped
+                if self._is_last_admin(user) and "admin" not in roles:
+                    roles = sorted(
+                        {*roles, "admin"}, key=ROLES.index
+                    )  # the provider never locks out the last administrator
+                    self._tell(
+                        "Kept the last administrator",
+                        user["username"],
+                        {"group roles": ", ".join(mapped)},
+                        user["full_name"],
+                    )
+                with self._db:
+                    self._db.execute("UPDATE users SET roles = ? WHERE id = ?", (",".join(roles), user["id"]))
+                self._tell(
+                    "Changed roles from single sign-on",
+                    user["username"],
+                    {"from": ", ".join(user["roles"]) or "viewer", "to": ", ".join(roles) or "viewer"},
+                    user["full_name"],
+                )
+            with self._db:
+                self._db.execute("UPDATE users SET last_login = ? WHERE id = ?", (self._stamp(), user["id"]))
+            user = self._user(user["id"])
+            self._tell("Signed in with single sign-on", user["username"], {}, user["full_name"])
+            return self._open_session(user), user
+
+    def _sso_refuse(self, who: str) -> Callable[[str, str], None]:
+        def refuse(reason: str, message: str) -> None:
+            self._tell("Single sign-on refused", who, {"reason": reason}, who)
+            raise AuthError(HTTPStatus.FORBIDDEN, message)
+
+        return refuse
+
     def _state(self, prefix: str) -> dict[str, str]:
         rows = self._db.execute("SELECT key, value FROM state WHERE key LIKE ?", (prefix + "%",)).fetchall()
         return {r["key"]: r["value"] for r in rows}
@@ -720,6 +964,7 @@ def _user_row(row: sqlite3.Row) -> dict[str, Any]:
         "must_change": bool(row["must_change"]),
         "email": row["email"] or "",
         "google_only": not bool(row["password_login"]),
+        "origin": row["origin"] or "",
         "created_at": row["created_at"],
         "last_login": row["last_login"],
     }
@@ -769,6 +1014,44 @@ def _roles(value: Any) -> list[str]:
     if bad:
         raise _bad(f"unknown role: {bad[0]}")
     return [r for r in ROLES if r in roles]
+
+
+def _issuer_ok(url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    p = urlsplit(url)
+    local = p.hostname in ("localhost", "127.0.0.1")
+    return (
+        bool(p.hostname) and not p.query and not p.fragment and (p.scheme == "https" or (p.scheme == "http" and local))
+    )
+
+
+def _json_dict(text: str | None) -> dict[str, list[str]]:
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        return {}
+    return (
+        {str(k): [str(r) for r in v] for k, v in data.items() if isinstance(v, list)} if isinstance(data, dict) else {}
+    )
+
+
+def _role_map(value: Any) -> dict[str, list[str]]:
+    """{provider group: [roles]} from what the page sends ({group: role or [roles]}), checked."""
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise _bad("the groups are a list of a group name and a role")
+    if len(value) > 50:
+        raise _bad("at most 50 groups")
+    out: dict[str, list[str]] = {}
+    for group, roles in value.items():
+        name = " ".join(str(group).split())
+        if not name or len(name) > 200:
+            raise _bad("a group name is 1 to 200 characters")
+        listed = roles if isinstance(roles, list) else [roles]
+        out[name] = _roles([r for r in listed if r])
+    return {g: r for g, r in out.items() if r}
 
 
 def _full_name(value: Any) -> str:

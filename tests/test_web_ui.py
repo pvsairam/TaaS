@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("playwright")
+import oidc_stub  # noqa: E402
 from conftest import EXAMPLES  # noqa: E402
 from playwright.sync_api import Browser, Page, expect, sync_playwright  # noqa: E402
 from ui_site import CLIENT, SECRET, Site, build_site, serve  # noqa: E402
@@ -223,6 +224,55 @@ def test_the_audit_log_says_it_is_whole_and_exports_a_checkable_zip(site: Site, 
             and manifest["log"]["chain"] == "intact"
         )
         assert "Opened the sample site" in z.read("audit.jsonl").decode()
+
+
+def test_company_single_sign_on_is_set_up_in_the_pages_and_a_person_signs_in_with_it(
+    secure: Site, page: Page, browser: Browser
+) -> None:
+    page.on("dialog", lambda d: d.accept())
+    page.goto(f"{secure.url}/#/settings?tab=users")
+    page.fill("#on-name", "Sai Ram")
+    page.fill("#on-user", "sai")
+    page.fill("#on-pw", "correct-horse-battery")
+    page.fill("#on-again", "correct-horse-battery")
+    page.get_by_role("button", name="Turn on sign-in").click()
+    expect(page.locator("#nav")).to_contain_text("Sign out", timeout=WAIT)
+    page.goto(f"{secure.url}/#/settings?tab=users")
+    card = page.locator("section", has=page.get_by_text("Single sign-on (company)", exact=True))
+    expect(card).to_be_visible(timeout=WAIT)
+    page.fill("#sso-issuer", oidc_stub.ISSUER)
+    page.fill("#sso-id", oidc_stub.CLIENT_ID)
+    page.fill("#sso-secret", oidc_stub.SECRET)
+    page.fill("#sso-label", "Acme login")
+    card.get_by_role("button", name="Add a group").click()
+    card.get_by_label("Group", exact=True).fill("qm-testers")  # the role beside it is Tester
+    card.get_by_label("Who gets in").select_option("auto")
+    card.get_by_label("Turn on single sign-on").check()
+    card.get_by_role("button", name="Check the provider").click()
+    expect(card).to_contain_text("The provider answers. 1 signing key found", timeout=WAIT)
+    card.get_by_role("button", name="Save", exact=True).click()
+    expect(page.locator("main")).to_contain_text("On: people can use Sign in with Acme login", timeout=WAIT)
+    expect(page.locator("main")).not_to_contain_text(oidc_stub.SECRET)  # the secret is never shown again
+
+    # Pat, in their own window, from the company's provider: made at the first sign-in, a tester through the group
+    secure.idp.identity.update(email="pat@acme.com", name="Pat Tester", groups=["qm-testers"])
+    pat_window = browser.new_context()
+    pat = pat_window.new_page()
+    pat.set_default_timeout(WAIT)
+    pat.goto(f"{secure.url}/")
+    expect(pat.locator("#login-sso")).to_have_text("Sign in with Acme login")
+    pat.locator("#login-sso").click()
+    expect(pat.locator("main h1").first).to_have_text("Overview", timeout=WAIT)
+    me = pat.evaluate(
+        "fetch('/api/auth/status').then(r => r.json()).then(s => s.user.username + ' ' + s.user.roles.join(','))"
+    )
+    assert me == "pat tester"
+    pat_window.close()
+
+    page.reload()
+    expect(page.locator("main")).to_contain_text("2 people can sign in", timeout=WAIT)
+    expect(page.locator("main")).to_contain_text("Pat Tester")
+    expect(page.locator("main")).to_contain_text("Single sign-on")  # the badge on Pat's line
 
 
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:

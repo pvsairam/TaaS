@@ -42,6 +42,7 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 | Setup steps that check or make data first (for example "the period is open"); a setup that is not met is told apart from a broken release | Yes (not tested on a real pod) | No |
 | Saved suites by tag, folder, module, product, priority or named tests, run from a page, a schedule or the command line | Yes (not tested on a real pod) | No |
 | Audit trail: every line chained by hash so a change shows, a filtered export (CSV or JSON lines) with a manifest, offline check | Yes | No (stronger: send the lines to a company log service) |
+| Single sign-on with a company provider (OpenID Connect: Okta, Entra ID, Keycloak, ...), groups to roles, enforce SSO | Yes (tested against a stand-in provider, not a real one) | No (SAML and SCIM: not built) |
 | FBDI or HDL file import steps | No | **Yes** |
 | BIP or OTBI report checks | No | **Yes** |
 | Screenshot comparison before and after a release | No | **Yes** (visual tools sell this) |

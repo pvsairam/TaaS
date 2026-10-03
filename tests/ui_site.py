@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import oidc_stub
 from test_google import jwt
 from test_service_api import add_suite_tests, finished_suite_run
 from test_service_queue import fake_command
@@ -23,6 +24,7 @@ from test_service_queue import fake_command
 from quartermaster.service.api import App, make_server, port_of
 from quartermaster.service.google import GoogleSignIn
 from quartermaster.service.hub import Hub
+from quartermaster.service.sso import SsoSignIn
 
 CLIENT = "1234567890-abcdefghijklmnop.apps.googleusercontent.com"
 SECRET = "GOCSPX-stand-in-client-secret"
@@ -75,6 +77,7 @@ class Site:
     url: str  # http://localhost:<port>
     hub: Hub
     google: StandInGoogle
+    idp: oidc_stub.Provider  # a company's single sign-on provider
     tmp: Path
     saved_env: dict[str, str | None]
 
@@ -102,6 +105,8 @@ def build_site(tmp: Path) -> Site:
     hub.google = GoogleSignIn(
         hub.auth, auth_url=google.auth_url, token_url="http://unused.test/token", post=google.token
     )
+    idp = oidc_stub.Provider(http=True)
+    hub.sso = SsoSignIn(hub.auth, get=idp.get, post=idp.post)
     app = hub.app
     add_suite_tests(app)
     app.audit.add("Opened the sample site", "Sample", {"for": "the browser tests"}, who="Test Person")
@@ -151,7 +156,7 @@ def build_site(tmp: Path) -> Site:
     ]
     record_file.parent.mkdir(parents=True, exist_ok=True)
     record_file.write_text(json.dumps(record), encoding="utf-8")
-    return Site("", hub, google, tmp, saved)
+    return Site("", hub, google, idp, tmp, saved)
 
 
 @contextmanager
@@ -168,6 +173,7 @@ def serve(site: Site) -> Iterator[Site]:
         server.shutdown()
         site.hub.stop()
         site.google.stop()
+        site.idp.stop()
         for key, value in site.saved_env.items():
             if value is None:
                 os.environ.pop(key, None)

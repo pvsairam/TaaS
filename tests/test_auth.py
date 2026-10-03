@@ -400,6 +400,7 @@ def test_nothing_changes_until_sign_in_is_turned_on(tmp_path: Path, monkeypatch:
             "user": None,
             "roles": ["admin", "tester", "approver"],
             "google": False,
+            "sso": None,
         }
         assert isinstance(c.go("GET", "/api/status"), dict) and c.go("GET", "/api/users")["enabled"] is False
         assert c.asks("POST", "/api/auth/login", {"username": "a", "password": "b"})[1] == "sign-in is not turned on"

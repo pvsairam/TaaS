@@ -33,6 +33,8 @@ from quartermaster.service.autobackup import AutoBackup, AutoBackupError
 from quartermaster.service.environments import Environments
 from quartermaster.service.google import BINDER_COOKIE, GoogleError, GoogleSignIn
 from quartermaster.service.settings import Settings
+from quartermaster.service.sso import BINDER_COOKIE as SSO_COOKIE
+from quartermaster.service.sso import SsoError, SsoSignIn
 
 
 def _me(user: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -55,6 +57,7 @@ class Hub:
         data_dir: Path,
         seed_tests: Path | None = None,
         google: GoogleSignIn | None = None,
+        sso: SsoSignIn | None = None,
         **app_options: Any,
     ):
         self.tests_root = tests_root
@@ -77,6 +80,7 @@ class Hub:
         )
         self.address = ""  # where this service answers (set by qm serve), for the links in notifications
         self.google = google or GoogleSignIn(self.auth)  # "Continue with Google" (tests give it a stand-in Google)
+        self.sso = sso or SsoSignIn(self.auth)  # the company's single sign-on (tests give it a stand-in provider)
         self._keys: set[str] = set()  # AI keys pasted in Settings, shared by all clients, in memory only
         self._apps: dict[str, App] = {}
         self._lock = threading.RLock()
@@ -175,9 +179,9 @@ class Hub:
             return ""
         return jar[name].value if name in jar else ""
 
-    def _back_to_login(self, message: str) -> Reply:
+    def _back_to_login(self, message: str, cookie: str = BINDER_COOKIE, path: str = "/api/auth/google") -> Reply:
         """Send the browser to the sign-in page with a message (a sign-in with Google ends in a redirect, not JSON)."""
-        gone = f"{BINDER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=0"
+        gone = f"{cookie}=; HttpOnly; SameSite=Lax; Path={path}; Max-Age=0"
         return Reply(HTTPStatus.FOUND, b"", "text/plain", set_cookie=gone, location=f"/#/login?error={quote(message)}")
 
     def _google_redirect_uri(self) -> str:
@@ -206,7 +210,30 @@ class Hub:
 
         if method == "GET" and key == "auth/status":
             google = auth.enabled and auth.google_config() is not None
-            return _reply({"enabled": auth.enabled, "user": _me(user), "roles": list(ROLES), "google": google})
+            sso = auth.sso_label() if auth.enabled else None
+            return _reply(
+                {"enabled": auth.enabled, "user": _me(user), "roles": list(ROLES), "google": google, "sso": sso}
+            )
+        if method == "GET" and key == "auth/sso/start":
+            if not auth.enabled:
+                return self._back_to_login("Sign-in is not turned on.", SSO_COOKIE, "/api/auth/sso")
+            try:
+                go, binder = self.sso.start(self.address)
+            except SsoError as e:
+                return self._back_to_login(str(e), SSO_COOKIE, "/api/auth/sso")
+            mine = f"{SSO_COOKIE}={binder}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=600"
+            return Reply(HTTPStatus.FOUND, b"", "text/plain", set_cookie=mine, location=go)
+        if method == "GET" and key == "auth/sso/callback":
+            if not auth.enabled:
+                return self._back_to_login("Sign-in is not turned on.", SSO_COOKIE, "/api/auth/sso")
+            try:
+                new, _ = self.sso.callback({k: v[0] for k, v in query.items() if v}, self._token(cookie, SSO_COOKIE))
+            except SsoError as e:
+                return self._back_to_login(str(e), SSO_COOKIE, "/api/auth/sso")
+            gone = f"{SSO_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=0"
+            return Reply(
+                HTTPStatus.FOUND, b"", "text/plain", set_cookie=[self._session_cookie(new), gone], location="/#/"
+            )
         if method == "GET" and key == "auth/google/start":
             if not auth.enabled:
                 return self._back_to_login("Sign-in is not turned on.")
@@ -259,6 +286,17 @@ class Hub:
             if method == "POST":
                 auth.google_update(user, data)
             return _reply({**auth.google_view(), "redirect_uri": self._google_redirect_uri()})
+        if key == "auth/sso":  # the company provider's settings (administrators)
+            if method == "POST":
+                auth.sso_update(user, data)
+            return _reply({**auth.sso_view(), "redirect_uri": self.sso.redirect_uri(self.address)})
+        if method == "POST" and key == "auth/sso/check":  # does the provider answer? (administrators)
+            try:
+                found = self.sso.check(str(data.get("issuer") or auth.sso_view()["issuer"]))
+            except SsoError as e:
+                return _reply({"ok": False, "message": str(e)})
+            self.audit.add("Checked the single sign-on provider", "Users", {}, who=user["full_name"])
+            return _reply(found)
         if method == "POST" and key == "auth/disable":
             if "admin" not in user["roles"]:
                 raise AuthError(HTTPStatus.FORBIDDEN, "this needs an administrator")

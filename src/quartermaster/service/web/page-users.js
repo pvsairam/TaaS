@@ -15,7 +15,9 @@ export async function usersTab(redraw) {
   if (!d.enabled) return turnOnCard();
   const me = state.auth?.user;
   const g = await api("/api/auth/google");
-  const googleOn = g.enabled;
+  const sso = await api("/api/auth/sso");
+  const googleOn = g.enabled || sso.enabled;  // a person added by e-mail address may sign in without a password
+  const how = [g.enabled ? "Google" : "", sso.enabled ? sso.label : ""].filter(Boolean).join(" or ");
   const roleChecks = (have) => ROLE_INFO.map(([id, label, help]) => {
     const box = h("input", {type: "checkbox", checked: have.includes(id), "data-role": id});
     return h("div", {}, h("label", {class: "switch"}, box, label), h("div", {class: "hint"}, help));
@@ -30,11 +32,11 @@ export async function usersTab(redraw) {
     const only = h("input", {type: "checkbox", checked: googleOn, disabled: !googleOn});
     const checks = h("div", {class: "stack", style: "gap:10px"}, roleChecks(["tester"]));
     const error = h("div", {class: "meta", role: "alert", style: "color:var(--danger);min-height:18px"});
-    drawer({title: "Add a user", sub: googleOn ? "With a Google address they can sign in with Google. Otherwise they get a temporary password" : "They get a temporary password to change at their first sign-in",
+    drawer({title: "Add a user", sub: googleOn ? `With an e-mail address they can sign in with ${how}. Otherwise they get a temporary password` : "They get a temporary password to change at their first sign-in",
       body: () => [h("div", {class: "stack"}, field("Full name", name, "", "u-name"), field("User name", user, "Letters, digits, dots and dashes.", "u-user"),
         field("Job title (optional)", title, "Shown next to their name when they approve a release.", "u-title"),
         field("Google e-mail address (optional)", mail, "The Gmail address they sign in with. Only addresses you add here can sign in.", "u-mail"),
-        googleOn ? h("div", {}, h("label", {class: "switch"}, only, "Google only, no password"), h("div", {class: "hint"}, "They sign in with the Continue with Google button and have no password to lose.")) : null,
+        googleOn ? h("div", {}, h("label", {class: "switch"}, only, `No password: only ${how}`), h("div", {class: "hint"}, `They sign in with the ${how} button and have no password to lose.`)) : null,
         h("div", {}, h("div", {class: "label"}, "Roles"), checks, h("div", {class: "hint"}, "With no role a person can only look.")), error)],
       foot: (close) => [h("span", {class: "grow"}), button("Cancel", {onClick: close}),
         button("Add the user", {kind: "primary", onClick: async (e) => {
@@ -89,7 +91,7 @@ export async function usersTab(redraw) {
   const rows = d.users.map((u) => h("div", {class: "row", style: "flex-wrap:nowrap;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"},
     h("div", {class: "grow", style: "min-width:0"},
       h("div", {class: "row", style: "gap:8px"}, h("strong", {}, u.full_name), u.id === me?.id ? badge("you", "info") : null,
-        u.email ? badge(u.google_only ? "Google only" : "Google", "info") : null, !u.active ? badge("cannot sign in", "neutral") : null, u.must_change ? badge("must choose a password", "warning") : null),
+        u.origin === "sso" ? badge("Single sign-on", "info") : u.email ? badge(u.google_only ? "Google only" : "Google", "info") : null, !u.active ? badge("cannot sign in", "neutral") : null, u.must_change ? badge("must choose a password", "warning") : null),
       h("div", {class: "meta"}, `${u.username}${u.email ? ` · ${u.email}` : ""}${u.title ? ` · ${u.title}` : ""} · ${rolesText(u.roles)} · ${u.last_login ? `last signed in ${when(u.last_login).toLowerCase()}` : "never signed in"}`)),
     button("Change", {size: "sm", onClick: () => edit(u)})));
 
@@ -104,6 +106,7 @@ export async function usersTab(redraw) {
     card({title: "Users", sub: `${d.users.length} ${d.users.length === 1 ? "person" : "people"} can sign in`,
       actions: button("Add a user", {kind: "primary", size: "sm", ic: "plus", onClick: addUser}),
       body: h("div", {}, rows)}),
+    ssoCard(sso, redraw),
     googleCard(g, redraw),
     card({title: "What each role allows", body: h("div", {class: "stack", style: "gap:8px"},
       ROLE_INFO.map(([, label, help]) => h("div", {}, h("strong", {}, label), h("div", {class: "meta"}, help))),
@@ -181,5 +184,83 @@ function googleCard(g, redraw) {
           toast("Saved.");
           redraw();
         } catch (err) { error.textContent = err.message; btn.disabled = false; }
+      }})))});
+}
+
+// Single sign-on with the company's provider (Okta, Microsoft Entra ID, Keycloak and the like). The secret is never shown again.
+function ssoCard(c, redraw) {
+  const field2 = (label, control, hint, id) => field(label, control, hint, id);
+  const issuer = input({value: c.issuer, maxlength: "300", placeholder: "https://acme.okta.com or https://login.microsoftonline.com/<tenant>/v2.0", autocomplete: "off", "aria-label": "Provider address"});
+  const id = input({value: c.client_id, maxlength: "200", autocomplete: "off", "aria-label": "SSO client ID"});
+  const secret = input({type: "password", maxlength: "400", autocomplete: "new-password", "aria-label": "SSO client secret",
+    placeholder: c.secret_set ? "Saved. Type a new one to replace it" : "The client secret"});
+  const label = input({value: c.label === "single sign-on" ? "" : c.label, maxlength: "30", placeholder: "For example Acme login", "aria-label": "Button text"});
+  const url = input({value: c.public_url, maxlength: "200", placeholder: "http://localhost:8765", autocomplete: "off", "aria-label": "SSO public address"});
+  const domains = input({value: c.domains.join(", "), maxlength: "300", placeholder: "acme.com (empty: any)", autocomplete: "off", "aria-label": "Allowed e-mail domains"});
+  const claim = input({value: c.groups_claim, maxlength: "60", autocomplete: "off", "aria-label": "Groups claim"});
+  const scopes = input({value: c.scopes, maxlength: "200", autocomplete: "off", "aria-label": "Scopes"});
+  const pick = (opts, value, aria) => { const el = h("select", {class: "input", "aria-label": aria}, opts.map(([v, t]) => h("option", {value: v}, t))); el.value = value; return el; };
+  const provision = pick([["listed", "Only people I add under Users"], ["auto", "Make a person at their first sign-in"]], c.provision, "Who gets in");
+  const defaultRole = pick([["", "Viewer (no role)"], ["tester", "Tester"], ["approver", "Approver"]], c.default_role, "Role for new people");
+  const on = h("input", {type: "checkbox", checked: c.enabled});
+  const needGroup = h("input", {type: "checkbox", checked: c.require_group});
+  const enforce = h("input", {type: "checkbox", checked: c.enforce});
+  const rows = [];
+  const map = h("div", {class: "stack", style: "gap:6px"});
+  const addRow = (group = "", role = "tester") => {
+    const row = {group: input({value: group, maxlength: "200", placeholder: "Group name at the provider", "aria-label": "Group"}), role: pick([["admin", "Administrator"], ["tester", "Tester"], ["approver", "Approver"]], role, "Role of the group")};
+    rows.push(row);
+    draw();
+  };
+  const draw = () => map.replaceChildren(...rows.map((r, i) => h("div", {class: "row", style: "gap:8px;flex-wrap:nowrap"}, r.group, r.role,
+    button("", {ic: "x", kind: "ghost", size: "sm", title: "Remove this group", onClick: () => { rows.splice(i, 1); draw(); }}))));
+  for (const [group, roles] of Object.entries(c.role_map)) for (const role of roles) addRow(group, role);
+  draw();
+  const error = h("div", {class: "meta", role: "alert", style: "color:var(--danger);min-height:18px"});
+  const result = h("div", {class: "meta", "aria-live": "polite"});
+  const redirect = h("div", {style: "font:600 13px ui-monospace,Consolas,monospace;padding:8px 10px;border:1px solid var(--border);border-radius:8px;user-select:all;word-break:break-all"}, c.redirect_uri);
+  const roleMap = () => { const out = {}; for (const r of rows) if (r.group.value.trim()) (out[r.group.value.trim()] ||= []).push(r.role.value); return out; };
+  return card({title: "Single sign-on (company)", sub: c.enabled ? `On: people can use Sign in with ${c.label}` : "Off",
+    body: h("div", {class: "stack"},
+      h("p", {class: "hint", style: "margin:0"}, "Sign in with the company's own login (OpenID Connect: Okta, Microsoft Entra ID, Keycloak, Auth0, Google Workspace). The provider says who a person is; what they may do comes from the groups you map to roles below, or from the roles you give them under Users. Steps are in the README, section Single sign-on."),
+      field2("Provider address", issuer, "The issuer: Quartermaster reads the rest from its .well-known/openid-configuration.", "sso-issuer"),
+      h("div", {class: "fields"}, field2("Client ID", id, "From the app you registered at the provider.", "sso-id"),
+        field2("Client secret", secret, "Typed here only. Stored encrypted, never shown again. Leave empty for a public client (PKCE only).", "sso-secret")),
+      h("div", {}, h("div", {class: "label"}, "Register this exact address at the provider as the redirect (sign-in) URI"), redirect),
+      field2("Button text", label, "Shown as Sign in with ...; empty: single sign-on.", "sso-label"),
+      field2("Public address (optional)", url, "Empty on your own computer. On a server, its https address, for example https://qm.example.com.", "sso-url"),
+      h("div", {}, h("div", {class: "label"}, "Who gets in"),
+        h("div", {class: "stack", style: "gap:8px"}, provision, h("div", {class: "meta"}, "Role for a new person with no group below:"), defaultRole,
+          field2("E-mail domains allowed", domains, "Separate with commas. Empty: any address the provider vouches for.", "sso-domains"))),
+      h("div", {}, h("div", {class: "label"}, "Groups to roles"),
+        h("p", {class: "hint", style: "margin:0 0 6px"}, "At every sign-in a person's roles follow the groups the provider sends. The last administrator is never taken away."),
+        map, button("Add a group", {size: "sm", ic: "plus", onClick: () => addRow()}),
+        h("div", {class: "fields", style: "margin-top:8px"}, field2("Groups claim", claim, "Usually groups; roles at some providers.", "sso-claim"), field2("Scopes", scopes, "Must include openid. Add groups if the provider needs it.", "sso-scopes"))),
+      h("label", {class: "switch"}, needGroup, "Only people in one of these groups may sign in"),
+      h("div", {}, h("label", {class: "switch"}, enforce, "Require single sign-on: only administrators may still use a password"),
+        h("div", {class: "hint"}, "Administrators keep their password as the way back in if the provider is down.")),
+      h("div", {}, h("label", {class: "switch"}, on, "Turn on single sign-on")),
+      error, result,
+      h("div", {class: "row"}, button("Save", {kind: "primary", onClick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true; error.textContent = "";
+        try {
+          const body = {issuer: issuer.value, client_id: id.value, public_url: url.value, enabled: on.checked, label: label.value, scopes: scopes.value,
+            groups_claim: claim.value, domains: domains.value, provision: provision.value, default_role: defaultRole.value, role_map: roleMap(),
+            require_group: needGroup.checked, enforce: enforce.checked};
+          if (secret.value) body.client_secret = secret.value;
+          await api("/api/auth/sso", body);
+          await loadAuth();
+          toast("Saved.");
+          redraw();
+        } catch (err) { error.textContent = err.message; btn.disabled = false; }
+      }}), button("Check the provider", {onClick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true; result.textContent = "Asking the provider...";
+        try {
+          const r = await api("/api/auth/sso/check", {issuer: issuer.value});
+          result.textContent = r.ok ? `The provider answers. ${r.keys} signing ${r.keys === 1 ? "key" : "keys"} found${r.signature_checked ? ", so the signature of every sign-in is checked." : ", but none Quartermaster can check: the rest of each answer is still checked."}` : r.message;
+        } catch (err) { result.textContent = err.message; }
+        btn.disabled = false;
       }})))});
 }

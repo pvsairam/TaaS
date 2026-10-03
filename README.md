@@ -690,6 +690,45 @@ Good to know: the sign-in uses the standard authorization-code flow with PKCE, a
 browser-bound cookie; the identity token is checked (issuer, audience, expiry, nonce, verified e-mail). The administrator
 who turned sign-in on keeps the password too, so Google being unreachable never locks you out.
 
+### Single sign-on (the company's own login)
+
+For a team inside a company, people should sign in with the login they already have (and its password rules and
+multi-factor), not with a password only Quartermaster knows. Quartermaster speaks **OpenID Connect**, which Okta, Microsoft
+Entra ID (Azure AD), Keycloak, Auth0, Ping, Google Workspace and most others offer. SAML-only providers are not supported.
+It is **Settings, Users & sign-in, Single sign-on (company)**, and sign-in must be on first.
+
+1. At the provider, register an application for Quartermaster: type **web application**, flow **authorization code**.
+   Paste the **redirect (sign-in) address** the card shows (it ends in `/api/auth/sso/callback`). Copy its **client ID** and
+   **client secret**. Menu names change, so follow the provider's own steps for "OIDC web app":
+   - **Okta:** Applications, Create App Integration, OIDC, Web Application. Provider address: `https://<your-org>.okta.com`
+     (or `.../oauth2/default`). For groups, add a *Groups claim* (name `groups`) to the ID token.
+   - **Microsoft Entra ID:** App registrations, New registration, redirect type Web. Provider address:
+     `https://login.microsoftonline.com/<tenant-id>/v2.0`. For groups, Token configuration, Add groups claim. Entra sends group
+     **object IDs**, so map those IDs, not the names.
+   - **Keycloak:** a client with *Client authentication* on. Provider address: `https://<host>/realms/<realm>`. Add a *Group
+     Membership* mapper (claim name `groups`) to the client.
+2. In Quartermaster type the **provider address** (the issuer), the **client ID** and the **client secret** (typed here only,
+   stored encrypted, never shown again), and press **Check the provider**. It reads the provider's address book and says how many
+   signing keys it found. Turn on **single sign-on** and Save. A button **Sign in with your company's name** appears on the
+   sign-in page.
+3. Decide **who gets in**:
+   - **Only people I add under Users** (the default): add them with their e-mail address, with or without a password. Anyone else the
+     provider vouches for is refused.
+   - **Make a person at their first sign-in**: the user is made from what the provider says (name, e-mail) with the roles below.
+   - **E-mail domains allowed** (for example `acme.com`) refuses any other address, whatever the provider says.
+4. **Groups to roles.** Add a row per provider group and the role it gives (Administrator, Tester, Approver; several rows
+   for one group are fine). At **every** sign-in a person's roles follow their groups, so removing someone from a group at the company
+   removes the role here at their next sign-in. A person with no mapped group keeps what they had (or gets the role for new people).
+   **Only people in one of these groups may sign in** turns the groups into a gate. The last administrator is never taken away
+   by a group change.
+5. **Require single sign-on** makes password sign-in refuse everyone but administrators, who keep a password as the way back in
+   when the provider is down.
+
+How it is checked: the sign-in uses the authorization code flow with PKCE; the one-time state and a cookie tie it to the browser; the identity token
+comes straight from the provider's token address over https and must be for this issuer and client, unexpired, have the right
+nonce and, for RS256 (nearly every provider), a signature that checks against the provider's published keys. A token that is not
+signed is refused. Every sign-in, refusal and role change is in the audit log; it never holds the token or the provider's group names. Not included: SAML, SCIM provisioning (users are made at sign-in, not ahead of time), and signing out at the provider.
+
 ## Approving a release
 
 The certification pack used to end with a blank table to sign on paper. Now a person approves the release

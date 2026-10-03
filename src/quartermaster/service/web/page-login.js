@@ -17,10 +17,13 @@ export async function loginPage() {
   const error = h("div", {class: "meta", role: "alert", style: "color:var(--danger);min-height:18px"});
   const sent = new URLSearchParams((location.hash.split("?")[1] || "")).get("error");
   if (sent) error.textContent = sent.slice(0, 300); // a plain sentence from the service when Google sign-in did not work
-  const google = state.auth?.google
-    ? h("div", {class: "stack"},
-        button("Continue with Google", {kind: "primary", href: "/api/auth/google/start", attrs: {id: "login-google"}}),
-        h("div", {class: "hint", style: "text-align:center"}, "or use a user name and password"))
+  const label = state.auth?.sso;
+  const others = [
+    label ? button(`Sign in with ${label}`, {kind: "primary", href: "/api/auth/sso/start", attrs: {id: "login-sso"}}) : null,
+    state.auth?.google ? button("Continue with Google", {kind: label ? "" : "primary", href: "/api/auth/google/start", attrs: {id: "login-google"}}) : null,
+  ].filter(Boolean);
+  const google = others.length
+    ? h("div", {class: "stack"}, ...others, h("div", {class: "hint", style: "text-align:center"}, "or use a user name and password"))
     : null;
   const go = async () => {
     error.textContent = "";

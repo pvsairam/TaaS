@@ -1207,6 +1207,63 @@ You should see: `qm audit verify` still says OK (a chain cannot see the end cut 
 
 Make a copy of `.qm\audit.jsonl` before step 5, and put it back when you are done.
 
+### 6.33 Single sign-on (company)
+
+You need a company provider to try this for real (OpenID Connect): your company's Okta, Microsoft Entra ID or Keycloak, or a
+free developer account at Okta or Auth0, or Keycloak on your own computer. Register an app as described in the README (section
+Single sign-on) and keep its client ID, secret and groups claim ready. Have a second browser (or a private window) for the person
+who signs in, and sign-in turned on in Quartermaster (6.19). Type the secret only into the page.
+
+1. **Settings, Users & sign-in.** Find **Single sign-on (company)**. Copy the redirect address it shows into the provider's app.
+
+2. Fill in the provider address, client ID and client secret, press **Check the provider**.
+
+You should see: "The provider answers. N signing keys found, so the signature of every sign-in is checked." A wrong address says
+"Could not reach ..." or "The provider answered 404 ...".
+
+3. Leave **Only people I add under Users**, turn on **single sign-on**, Save. Under **Users**, add yourself or a colleague by
+   their company e-mail address (the one the provider sends), with **No password** ticked.
+
+You should see: the card says "On: people can use Sign in with ...", and the secret box says "Saved". In the other
+browser, the sign-in page has a **Sign in with ...** button above the user name and password.
+
+4. In the other browser click it, sign in at the provider.
+
+You should see: you land on Overview, signed in as the person you added, with their roles. Settings, Users shows nothing odd, and
+**Audit log** has "Signed in with single sign-on".
+
+5. Try someone who was not added: sign in at the provider with another account.
+
+You should see: back on the sign-in page, in red: "... has not been given access to Quartermaster. Ask an administrator to add that address."
+The audit log has "Single sign-on refused" with the reason.
+
+6. Switch to **Make a person at their first sign-in**, add a group row (a group the provider sends, for example `qm-testers`) with role
+   Tester, Save, and sign in again with that second account (a member of the group).
+
+You should see: the person is made at once (Users shows them with the badge **Single sign-on**) with the role Tester. In the audit
+log: "Created a user from single sign-on".
+
+7. Change the group at the provider (take the person out of it), sign out and in again.
+
+You should see: their roles no longer include Tester (the audit log says "Changed roles from single sign-on", from and to).
+
+8. Tick **Only people in one of these groups may sign in** and sign in with an account in no mapped group.
+
+You should see: refused with "... is not in a group that gives access to Quartermaster."
+
+9. Type your company's e-mail domain under **E-mail domains allowed**, Save, and try an account with another domain.
+
+You should see: refused with "... is not at an e-mail domain that may sign in here."
+
+10. Tick **Require single sign-on**, Save. In a third window try a user name and password for a tester.
+
+You should see: "your company requires single sign-on: use the single sign-on button instead". An administrator's password
+still works. Untick it again when you are done, if you like.
+
+If a sign-in fails with "The provider refused the sign-in (invalid_client)", the client ID or secret is wrong. "did not say the person's
+e-mail address" means the provider needs the `email` scope (or a Microsoft account with an e-mail address). Groups missing: check the groups
+claim name on the card and that the provider adds it to the **ID token**.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.
