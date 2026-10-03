@@ -275,6 +275,22 @@ def test_company_single_sign_on_is_set_up_in_the_pages_and_a_person_signs_in_wit
     expect(page.locator("main")).to_contain_text("Single sign-on")  # the badge on Pat's line
 
 
+def test_the_test_library_installs_a_pack_and_offers_its_suite(secure: Site, page: Page) -> None:
+    page.goto(f"{secure.url}/#/packs")
+    card = page.locator("section", has=page.get_by_text("HCM services (read only)", exact=True))
+    expect(card).to_contain_text("checked on a pod: 23 of 23 passed", timeout=WAIT)
+    expect(page.locator("main")).to_contain_text("only ask the pod questions (GET)")
+    card.get_by_role("button", name="Install", exact=True).click()
+    expect(card).to_contain_text("Installed (version 1)", timeout=WAIT)
+    expect(card).to_contain_text("Up to date.")
+    page.goto(f"{secure.url}/#/tests")
+    expect(page.locator("main")).to_contain_text("Workers: the service answers", timeout=WAIT)  # tests like any other
+    page.goto(f"{secure.url}/#/packs")
+    card = page.locator("section", has=page.get_by_text("HCM services (read only)", exact=True))
+    card.get_by_role("button", name="Run these tests").click()
+    expect(page.locator(".drawer").get_by_label("Suite")).to_have_value("library-hcm-services", timeout=WAIT)
+
+
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:
     page.goto(f"{site.url}/#/runs")
     page.locator("main a[href^='#/runs/']").first.click()

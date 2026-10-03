@@ -48,7 +48,7 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 | Screenshot comparison before and after a release | No | **Yes** (visual tools sell this) |
 | Run the same flow as several roles | Part: personas exist, no role-regression report | Probably |
 | Mobile and cross-browser | Part: Chromium only | Maybe |
-| Ready-made Oracle test library (hundreds of tests) | No: a few examples | **Yes**, and it is what Opkey-style tools lead with |
+| Ready-made Oracle test library | Part: 63 read-only checks of Oracle REST services in 5 packs, run on one test pod; no screen tests, nothing that creates data | **Yes**: screen flows (Hire to Retire, Procure to Pay, Order to Cash), which need to be run on a pod before they can be trusted |
 | Explorer mode (finds new pages and suggests tests) | No | Later, as planned |
 | Server mode for a team | No | Last step before go live, you will do it |
 
@@ -63,7 +63,7 @@ far more strange pages than we have.
 
 ## 4. Suggested order if you want to close gaps
 
-1. Starter library of common read-only and create flows (shows value on day one).
+1. Screen and create flows for the test library (Hire to Retire, Procure to Pay, Order to Cash). The read-only service checks are done.
 2. BIP or OTBI report check and FBDI or HDL import steps.
 3. Visual comparison.
 4. Two-way ticket sync, only if a client asks for it.

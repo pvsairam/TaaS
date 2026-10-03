@@ -26,6 +26,7 @@ computers and other web sites cannot start runs.
     GET  /api/certification?release=26A  the release's certification pack (.zip): a Word summary to
                                      sign and each test's latest evidence document on that release
     GET  /api/attention              what needs a person, by kind
+    GET  /api/packs                  the test library: packs of ready-made tests (POST /install {"pack"} copies one in)
     GET  /api/suites                 saved suites and the tests each has now (POST: save, /delete, /preview a rule)
     POST /api/runs                   also {"suite": "smoke"}: run the tests a saved suite has right now
     GET  /api/data                   test data: the data sets, who uses them, pods with no value, generated values
@@ -90,6 +91,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import yaml
 
+from quartermaster import packs
 from quartermaster.ai import providers as ai_providers
 from quartermaster.dsl.data import DataError, merge_sets
 from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, files_of_tests, read_groups
@@ -531,6 +533,8 @@ class App:
             return _json(self.test_data())
         if route[:1] == ["suites"]:
             return self._suites(method, route[1:], data)
+        if route[:1] == ["packs"]:
+            return self._packs(method, route[1:], data)
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -1184,6 +1188,46 @@ class App:
             who=self._who_name(),
         )
         return Reply(HTTPStatus.OK, data, "application/zip", name)
+
+    def _packs(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        """The test library: the packs that come with Quartermaster, and installing one into the tests folder."""
+        try:
+            if method == "GET" and not route:
+                return _json({"folder": f"{self.tests_root.name}/{packs.INSTALL_DIR}", "packs": self._pack_views()})
+            if method == "POST" and route == ["install"]:
+                pack = packs.catalog.get_pack(str(data.get("pack") or ""))
+                done = packs.install(self.tests_root, pack)
+                self.audit.add(
+                    "Installed a library pack",
+                    pack.title,
+                    {k: len(v) for k, v in done.items() if isinstance(v, list) and v},
+                )
+                return _json({**done, "pack": self._pack_views(pack.id)[0]}, HTTPStatus.CREATED)
+        except packs.catalog.PackError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _pack_views(self, only: str = "") -> list[dict[str, Any]]:
+        out = []
+        for pack in packs.list_packs():
+            if only and pack.id != only:
+                continue
+            out.append(
+                {
+                    "id": pack.id,
+                    "title": pack.title,
+                    "module": pack.module,
+                    "kind": pack.kind,
+                    "version": pack.version,
+                    "description": pack.description,
+                    "needs": pack.needs,
+                    "read_only": pack.read_only,
+                    "checked": pack.checked,
+                    "tests": pack.tests,
+                    "installed": packs.pack_status(self.tests_root, pack),
+                }
+            )
+        return out
 
     def _check_suite(self, name: str) -> None:
         suites.tests_of(self.tests_root, name, self.tests())

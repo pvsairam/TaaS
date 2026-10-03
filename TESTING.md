@@ -1264,6 +1264,53 @@ If a sign-in fails with "The provider refused the sign-in (invalid_client)", the
 e-mail address" means the provider needs the `email` scope (or a Microsoft account with an e-mail address). Groups missing: check the groups
 claim name on the card and that the provider adds it to the **ID token**.
 
+### 6.34 Test library
+
+Read only, safe on your pod: every test in the library only asks the pod questions (GET). The test user you set in Settings needs
+permission to read the REST services of the areas you try; where it does not, that test fails with "the API answered HTTP 403".
+
+1. Click **Test library** in the menu.
+
+You should see: five cards (Financials, HCM, Procurement, Sales and Service, Supply Chain), each with the number of tests, a green line
+"checked on a pod: N of N passed" and what the test user needs. At the top a box says what the tests do and what they do not.
+
+2. On **HCM services (read only)**, open **The 23 tests**, then click **Install**.
+
+You should see: a message "HCM services (read only): 23 added." and, on the card, "Installed (version 1) in tests/library/hcm-services. Up to date."
+**Run these tests** appears. Click **Tests**: 23 new tests, each called like "Workers: the service answers and returns the fields integrations rely on".
+Click **Suites**: a suite "HCM services (read only) (library)" with 23 tests.
+
+3. Click **Test library**, **Run these tests** on the HCM card, then **Start run**.
+
+You should see: 23 tests run in a few minutes (they are plain service calls made through the signed-in session). Open the run.
+Passing tests say the service answered and the fields were there. Tests that fail are the information you wanted: open one.
+A step "The Absence plans service answers" failing with "the API answered HTTP 404" means this pod's release does not have that service;
+"HTTP 403" means the test user may not read it; "the API reply has no items[0].X" means either the pod has no record of that kind
+or the field was renamed or removed. Look at **Needs attention**: they are listed by kind there like any other failure.
+
+4. Open one test (for example Workers) and its **Steps** tab, then its **File** tab.
+
+You should see: step 1 asks for one worker and checks `count`, `hasMore`, `PersonId` and `PersonNumber`; the second step (where there is one) reads the
+worker again by its id. The file is plain YAML you can change. In Notepad, open `my_tests\library\hcm-services\workers.yaml` and add `"items[0].LastName": "*"`
+under `check:` (a field you rely on), save, and run the test again.
+
+5. Press **Install again** on the HCM card.
+
+You should see: "... 22 unchanged, 1 kept as you have them" and the line on the card "You have changed 1 file; it is kept as it is when you update."
+Your edit is still in the file.
+
+6. From a terminal in the Quartermaster folder:
+
+   ```
+   qm packs list --tests my_tests
+   qm packs install financials-services --tests my_tests
+   qm run my_tests --suite library-financials-services
+   ```
+
+You should see: the list says which packs are installed and when they were last checked; the second installs the Financials pack; the third runs just its 13 tests (the pod set in the terminal as in Part 5).
+
+7. If you want to see exactly what a pack's tests do to your pod, nothing: open any file of a pack. Every step is `GET`. The test library never creates, changes or deletes anything.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

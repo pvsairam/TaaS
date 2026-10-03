@@ -920,6 +920,44 @@ def _audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _packs(args: argparse.Namespace) -> int:
+    """The test library: list the packs that come with Quartermaster, or copy some into a tests folder."""
+    from quartermaster import packs as library
+
+    root = Path(args.tests)
+    try:
+        if args.action == "list":
+            for pack in library.list_packs():
+                got = library.pack_status(root, pack) if root.is_dir() else None
+                state = (
+                    "not installed"
+                    if got is None
+                    else f"installed v{got['version']}" + (", update available" if got["update_available"] else "")
+                )
+                checked = (
+                    f", last checked {pack.checked['date']}: {pack.checked['passed']} of {pack.checked['of']} passed"
+                    if pack.checked
+                    else ", not checked on a pod"
+                )
+                print(f"{pack.id:<24} {len(pack.tests):>3} tests  {state}{checked}")
+            return 0
+        names = [p.id for p in library.list_packs()] if args.all else args.names
+        if not names:
+            print("error: name a pack (qm packs list shows them) or use --all", file=sys.stderr)
+            return 2
+        root.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            done = library.install(root, library.catalog.get_pack(name))
+            said = ", ".join(f"{len(v)} {k}" for k, v in done.items() if isinstance(v, list) and v) or "nothing to do"
+            print(f"{name}: {said}. Suite: {done['suite']}")
+            for kept in done["kept"]:
+                print(f"    kept your version of {kept}")
+        return 0
+    except library.catalog.PackError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
 def _users(args: argparse.Namespace) -> int:
     """Manage sign-in from a terminal: for getting back in when nobody can sign in. Whoever has the computer's
     files could always do this, so it adds no new way in."""
@@ -1087,6 +1125,13 @@ def main(argv: list[str] | None = None) -> int:
     dv.add_argument("--out", required=True, help="JSON file to write the page names to")
     dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     dv.set_defaults(func=_discover)
+
+    pk = sub.add_parser("packs", help="the test library: list ready-made packs of tests, or install some into a folder")
+    pk.add_argument("action", choices=["list", "install"])
+    pk.add_argument("names", nargs="*", help="install: the packs (qm packs list shows them)")
+    pk.add_argument("--all", action="store_true", help="install: every pack")
+    pk.add_argument("--tests", default="tests", help="the tests folder (default: tests)")
+    pk.set_defaults(func=_packs)
 
     su = sub.add_parser("suites", help="list the saved suites in a tests folder and how many tests each has now")
     su.add_argument("tests", nargs="?", default="tests", help="the tests folder (default: tests)")

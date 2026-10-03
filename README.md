@@ -333,6 +333,38 @@ single sign-on, sign in once, save the browser state with `context.storage_state
 that file. Exporting into a folder that already has the files is refused unless you say to replace them (`--force`), so your
 edits are not lost by accident.
 
+## Test library (ready-made tests)
+
+**Test library** in the menu has packs of ready-made tests that come with Quartermaster. **Install** copies a pack into
+`<your tests folder>/library/<pack>/`, where its tests are ordinary tests: run them, schedule them, edit them, put them in suites.
+A suite for the pack (`library-<pack>`) is made with them, so one click runs them all.
+
+| Pack | Tests | What it asks the pod |
+|---|---|---|
+| `hcm-services` | 23 | workers, public workers, locations, departments, jobs, job families, grades, positions, legal employers, organizations, legislative data groups, absences, absence plans, user accounts, salaries, payroll relationships, goal plans, performance goals, documents of record, checklists, recruiting requisitions |
+| `financials-services` | 13 | payables and receivables invoices, receipts, credit memos, ledgers, account combinations, currencies, payment terms, journal batches, expense reports, bank accounts, projects, ERP integrations |
+| `procurement-services` | 6 | suppliers, purchase orders, requisitions, agreements, procurement agents, negotiations |
+| `supply-chain-services` | 12 | items (both versions), catalogs, inventory organizations, units of measure, subinventories, shipments, receiving, work orders, production resources, calendars, Order Hub sales orders |
+| `sales-services` | 9 | accounts, contacts, leads, opportunities, activities, resources, products, service requests, households |
+
+What they are: each test asks one Oracle REST service for a single record (`GET ...?limit=1`) and checks that the service
+still answers and still returns the fields integrations rely on (for example `PersonId` and `PersonNumber` for workers), then
+reads that record again by its id where the service allows it. That is where a quarterly update most often breaks something quietly: a renamed or
+removed field, or a service that stopped answering. What they are not: they never click through screens, and **nothing is ever created,
+changed or deleted** (every step is a `GET`; a test in a pack is checked to be so).
+
+- **Checked on a pod.** Every pack says when it was last run on a pod and how many of its tests passed (`checked` in its `pack.yaml`).
+  That was one test pod, so on yours the result can differ: your release may not have a service, your offerings may not be on, your test user may
+  not be allowed to read one (HTTP 403), or a pod without any record of a kind fails the field check ("the API reply has no items[0]...").
+  Run the pack once on your pod and read what fails: that is information, not noise.
+- **Updating.** Installing again after a new Quartermaster release adds new tests and updates the ones you have not changed. A file you changed
+  is kept as it is, and the page and `qm packs install` say so.
+- **From a terminal:** `qm packs list --tests my_tests`, `qm packs install hcm-services --tests my_tests`, `qm packs install --all`.
+- **Checking a pack yourself** (for the people who maintain packs): `python tools/check_pack.py src/quartermaster/packs/hcm-services --write` runs a
+  pack's tests with Quartermaster's own engine against the pod in `QM_FUSION_URL`, `QM_FUSION_USER` and `QM_FUSION_PASSWORD`, plain HTTP, no browser, GET only.
+- **Not in the library yet:** tests that click through Oracle's screens (they depend on the pod's menus, roles and release, so they cannot be shipped
+  honestly without being run on that pod: record them with **Record a test** or the examples in `examples/tests`), and anything that creates data.
+
 ## Suites (a name for a group of tests)
 
 Tests belong to your client, not to a release or a project, so you do not copy them. A **suite** is a saved rule that picks

@@ -179,6 +179,7 @@ def required_role(method: str, route: list[str]) -> str:
         "attention",
         "tickets",
         "suites",
+        "packs",
         "schedules",
         "releases",
         "signin",
