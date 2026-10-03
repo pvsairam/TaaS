@@ -1290,6 +1290,8 @@ def attention_key(item: dict[str, Any]) -> str:
         return f"ui:{item.get('test_id')}:{item.get('run_id')}:{item.get('step_index')}"
     if cat == "unreadable":
         return f"file:{item.get('file')}:{hashlib.sha1(str(item.get('error')).encode()).hexdigest()[:10]}"
+    if cat == "cleanup":
+        return f"cleanup:{item.get('test_id')}:{item.get('run_id')}"
     if item.get("test_id"):
         return f"fail:{item.get('test_id')}:{item.get('run_id')}"
     return f"run:{item.get('run_id')}"

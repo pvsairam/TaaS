@@ -4,7 +4,7 @@ import {openRunDrawer, openViewer} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
 
-const ORDER = ["assertion", "missing_element", "service_call", "timeout", "authentication", "failure", "could_not_run", "ui_change", "unreadable"];
+const ORDER = ["assertion", "missing_element", "service_call", "timeout", "authentication", "failure", "could_not_run", "cleanup", "ui_change", "unreadable"];
 const LOOK = {
   assertion: {ic: "x", tone: "danger", short: "Check did not match"},
   missing_element: {ic: "target", tone: "danger", short: "Item not found"},
@@ -13,6 +13,7 @@ const LOOK = {
   authentication: {ic: "lock", tone: "danger", short: "Sign-in problem"},
   failure: {ic: "x", tone: "danger", short: "Failed"},
   could_not_run: {ic: "attention", tone: "danger", short: "Could not run"},
+  cleanup: {ic: "attention", tone: "warning", short: "Cleanup did not finish"},
   ui_change: {ic: "wrench", tone: "warning", short: "Oracle screen changed"},
   unreadable: {ic: "file", tone: "danger", short: "Unreadable file"},
 };
@@ -67,6 +68,14 @@ function item(i) {
         h("div", {}, h("span", {class: "caption"}, "Written to find"), i.old_text),
         h("div", {}, h("span", {class: "caption"}, "Found last time by"), i.new_text)),
       h("p", {class: "meta"}, "The test passed by trying its second way. Accepting makes that the first way, so it keeps passing after the quarterly update. A copy of the old file is kept."));
+  } else if (i.category === "cleanup") {
+    const steps = i.cleanup_steps || [];
+    body = h("div", {class: "stack", style: "gap:8px"},
+      callout("warning", "Records from this test may still be on the pod.",
+        `The test ${i.result === "passed" ? "passed" : i.result === "failed" ? "failed" : "finished"}, but its cleanup ${i.cleanup_status === "failed" ? "did not work" : "only partly worked"}. Leftovers can make the next run fail (for example a name that already exists). Remove them by hand on the pod, or fix the cleanup step and run the test again.`),
+      steps.length ? h("ul", {style: "margin:0;padding-left:20px"}, steps.map((x) => h("li", {}, `Cleanup step ${x.number} (${x.intent}): ${x.error}`)))
+        : h("div", {}, i.error),
+      i.detail ? disclose("Technical details", h("pre", {class: "block"}, i.detail)) : null);
   } else if (i.category === "unreadable") {
     body = h("pre", {class: "block"}, i.error);
   } else if (i.step) {

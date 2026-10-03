@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from conftest import FakeDriver
+from test_service_api import add_suite_tests, app, call, finished_suite_run  # noqa: F401, F811  (app is a fixture)
 
 from quartermaster.domain.models import Environment, ScreenshotMode, StepStatus
 from quartermaster.dsl.loader import SpecError, load_test
@@ -195,3 +196,48 @@ def test_a_run_without_cleanup_has_no_cleanup_in_its_record(tmp_path: Path, stag
     result = run_test(_load(tmp_path, text), stage_env, _Pod(), run_id="R1")
     record = build_record(result, run_dir=tmp_path, test_file=None, video_mode="off", videos=[])
     assert "cleanup" not in record and "cleanup_status" not in record
+
+
+# ------------------------------------------------------------------ Needs attention
+
+
+def test_the_suite_entry_names_the_cleanup_steps_that_failed(tmp_path: Path, stage_env: Environment) -> None:
+    from quartermaster.evidence.suite import _entry
+
+    result = run_test(_load(tmp_path), stage_env, _Pod(refuse_delete=True), run_id="R1")
+    record = build_record(result, run_dir=tmp_path, test_file=None, video_mode="off", videos=[])
+    entry = _entry(record, tmp_path, None, tmp_path)
+    assert entry["cleanup_status"] == "failed"
+    assert entry["cleanup_failed"][0]["intent"] == "Remove the location" and entry["cleanup_failed"][0]["number"] == 1
+    ok = run_test(_load(tmp_path), stage_env, _Pod(), run_id="R2")
+    clean = _entry(
+        build_record(ok, run_dir=tmp_path, test_file=None, video_mode="off", videos=[]), tmp_path, None, tmp_path
+    )
+    assert "cleanup_failed" not in clean
+
+
+def test_a_cleanup_that_did_not_finish_is_in_needs_attention_even_when_the_test_passed(app: Any) -> None:  # noqa: F811
+    import json
+
+    add_suite_tests(app)
+    run = finished_suite_run(app)
+    path = Path(app.queue.store.get(run["id"])["suite_dir"]) / "suite.json"
+    suite = json.loads(path.read_text(encoding="utf-8"))
+    passed = next(r for r in suite["runs"] if r["status"] == "passed")
+    passed["cleanup_status"] = "failed"
+    passed["cleanup_failed"] = [
+        {"number": 1, "intent": "Remove the location", "error": "The API answered 403 Forbidden."}
+    ]
+    path.write_text(json.dumps(suite), encoding="utf-8")
+
+    todo = call(app, "GET", "/api/attention")
+    (item,) = [i for i in todo["items"] if i["category"] == "cleanup"]
+    assert item["test_id"] == passed["test_id"] and item["result"] == "passed" and item["cleanup_status"] == "failed"
+    assert item["cleanup_steps"][0]["intent"] == "Remove the location"
+    assert item["key"].startswith("cleanup:") and todo["categories"]["cleanup"] == "Cleanup that did not finish"
+    assert todo["counts"]["cleanup"] == 1 and "cause" not in item or item.get("cause") is None
+
+    # dismissing it does not hide a test failure, and the failure of the same run is a separate item
+    call(app, "POST", "/api/attention/dismiss", {"keys": [item["key"]]})
+    after = call(app, "GET", "/api/attention")
+    assert "cleanup" not in after["counts"] and after["counts"]["assertion"] == 1

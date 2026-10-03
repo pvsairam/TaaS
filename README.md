@@ -148,8 +148,8 @@ cleanup:
 ```
 
 - A cleanup that fails is shown on the run and in the Word document ("Cleanup did not finish: records
-  from this test may still be on the pod"). It never changes the test's result, and the other cleanup
-  steps still run.
+  from this test may still be on the pod"), and in **Needs attention** as "Cleanup that did not finish", even when
+  the test passed. It never changes the test's result, and the other cleanup steps still run.
 - If the test failed before it made the record, `${location_id}` was never saved. The step is then
   skipped ("Nothing to clean up") instead of calling an address with a blank in it.
 - A cleanup `DELETE` must use a saved value such as `${location_id}`. A fixed address is refused when

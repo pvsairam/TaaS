@@ -290,6 +290,7 @@ CATEGORIES = {
     "service_call": "Service calls that failed",
     "failure": "Other failures",
     "could_not_run": "Runs that could not start",
+    "cleanup": "Cleanup that did not finish",
     "ui_change": "Oracle screen changes",
     "unreadable": "Test files that could not be read",
 }
@@ -398,6 +399,26 @@ def attention(
             if suggestion:
                 items[-1]["suggestion"] = suggestion
             items[-1]["cause"] = likely_cause(items[-1])  # after the suggestion: it changes the advice
+        if r.get("cleanup_status") in ("partial", "failed"):
+            # whatever the test result: records it made may still be on the pod
+            steps = r.get("cleanup_failed") or []
+            first = steps[0] if steps else {}
+            items.append(
+                {
+                    **base,
+                    "category": "cleanup",
+                    "result": r["status"],
+                    "cleanup_status": r["cleanup_status"],
+                    "step": first.get("number"),
+                    "intent": first.get("intent"),
+                    "error": plain_error(first.get("error")) if first else "A cleanup step failed.",
+                    "detail": first.get("error"),
+                    "cleanup_steps": [
+                        {"number": c.get("number"), "intent": c.get("intent"), "error": plain_error(c.get("error"))}
+                        for c in steps
+                    ],
+                }
+            )
         for h in r.get("healing") or []:
             if h.get("source", "fallback") != "fallback":
                 continue  # a suggestion for a failed step is shown on that failure (see _suggestion)

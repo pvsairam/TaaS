@@ -496,6 +496,14 @@ You should see: the test is unreadable (see **Needs attention**, "Unreadable fil
 DELETE must use a value the test saved, such as `${location_id}`. Put the line back as it was,
 or delete the demo file when you are done.
 
+5. To see a cleanup that fails, change the cleanup line to
+   `value: GET /hcmRestApi/resources/11.13.18.05/locationsV2/1` (a location that does not exist), and run the demo.
+
+You should see: the test still **passes**. Click **Needs attention**: a card **Cleanup did not finish** says
+"Records from this test may still be on the pod" and lists "Cleanup step 1 (...)" with the pod's answer. The
+Overview card says "1 cleanup not finished". **Dismiss** hides it until the next run of that test has a failed cleanup
+again. Put the cleanup line back when you are done.
+
 ### 6.15 Backup and restore
 
 1. Click **Settings**, then the **General** tab. Find **Backup and restore**.

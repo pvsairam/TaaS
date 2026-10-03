@@ -264,6 +264,11 @@ def _entry(record: dict[str, Any], run_dir: Path, doc: Path | None, evidence_roo
     }
     if record.get("cleanup_status"):
         entry["cleanup_status"] = record["cleanup_status"]
+        bad = [c for c in record.get("cleanup", []) if c.get("status") == "failed"]
+        if bad:  # which cleanup steps did not work, for Needs attention
+            entry["cleanup_failed"] = [
+                {"number": c.get("index", 0) + 1, "intent": c.get("intent", ""), "error": c.get("error")} for c in bad
+            ]
     if record.get("flaky"):
         entry["flaky"] = True
     if failed:
