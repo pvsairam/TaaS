@@ -29,6 +29,7 @@ Other variables:
 | `QM_FUSION_USER_<PERSONA>`, `QM_FUSION_PASSWORD_<PERSONA>` | A test user for a persona the tests switch to (`HR Manager` is `HR_MANAGER`). |
 | `QM_FUSION_ALLOWED_HOSTS` | Host names that are test pods although their name has no dev, test or stage in it. |
 | `QM_STORAGE_STATE` | A file saved with `context.storage_state()` after signing in by hand, for single sign-on and MFA. It is used instead of a password. |
+| `QM_ENV_NAME`, `QM_FUSION_KIND` | The pod's name and kind (`DEV`, `TEST`, `STAGE`), to choose the values in a test's `PODS`. When not set, the name is the first part of the pod's host name and the kind is read from it. |
 | `QM_CHROMIUM_PATH` | A Chromium to use instead of Playwright's own. |
 | `QM_HEADED` | `1` shows the browser. |
 
@@ -37,6 +38,9 @@ Other variables:
 - The test data is a `DATA` dictionary at the top; `${name}` in a step is filled in from it, from values kept by earlier
   REST steps, from `${RUN_ID}` (unique per run, so names do not clash) and from `${env:NAME}` (a secret read from the
   environment).
+- A test may also have `PODS` (values that differ by pod, chosen by the pod's name or kind) and `GENERATE` (values made
+  fresh for every run: a unique code, a date from today, a number, one of a list). `fusion.use_data(...)` at the top of
+  the test applies them. If this pod has no value for a name that others have, the step stops saying so.
 - Every step is `with fusion.step(n, "what it does"):`. A failing step says which step it was and saves a screenshot in
   `evidence/`.
 - Every item is found by a list of ways, in order. The first way that finds exactly one element is used.

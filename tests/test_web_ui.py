@@ -76,6 +76,7 @@ PAGES = [
     ("#/runs", "Runs"),
     ("#/tests", "Tests"),
     ("#/library", "Shared steps"),
+    ("#/data", "Test data"),
     ("#/impact", "Release impact"),
     ("#/attention", "Needs attention"),
     ("#/schedules", "Schedules"),
@@ -141,6 +142,23 @@ def test_the_shared_steps_page_shows_the_group_and_who_uses_it(site: Site, page:
     see(page, "Open the Locations page")
     see(page, "used by 1 test")
     see(page, "A test with shared steps")
+
+
+def test_the_test_data_page_shows_sets_gaps_and_generated_values(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/data")
+    see(page, "Names on the pods")
+    see(page, "used by 1 test")
+    see(page, "A test with test data")
+    see(page, "Some pods have no value.")
+    see(page, "special on ")
+    see(page, "Values made fresh for every run")
+    sample = page.locator("table[aria-label='Values made for A test with test data'] tbody td code").last
+    expect(sample).to_have_text(re.compile(r"^REF-[A-Z0-9]{6}$"), timeout=WAIT)
+    page.goto(f"{site.url}/#/tests/hcm%2Fuses_data.yaml")
+    page.get_by_role("tab", name="Test data").click()
+    see(page, "Data sets used:")
+    see(page, "Different on some pods")
+    see(page, "6 letters and digits, new each run after 'REF-'")
 
 
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:

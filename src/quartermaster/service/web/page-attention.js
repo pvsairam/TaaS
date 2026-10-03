@@ -5,13 +5,14 @@ import {openTicket, ticketChips} from "./page-tickets.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
 
-const ORDER = ["assertion", "missing_element", "service_call", "timeout", "authentication", "failure", "could_not_run", "cleanup", "ui_change", "unreadable"];
+const ORDER = ["assertion", "missing_element", "service_call", "timeout", "authentication", "test_data", "failure", "could_not_run", "cleanup", "ui_change", "unreadable"];
 const LOOK = {
   assertion: {ic: "x", tone: "danger", short: "Check did not match"},
   missing_element: {ic: "target", tone: "danger", short: "Item not found"},
   service_call: {ic: "server", tone: "danger", short: "Service call failed"},
   timeout: {ic: "clock", tone: "danger", short: "Screen did not respond"},
   authentication: {ic: "lock", tone: "danger", short: "Sign-in problem"},
+  test_data: {ic: "file", tone: "warning", short: "No test data on this pod"},
   failure: {ic: "x", tone: "danger", short: "Failed"},
   could_not_run: {ic: "attention", tone: "danger", short: "Could not run"},
   cleanup: {ic: "attention", tone: "warning", short: "Cleanup did not finish"},
@@ -84,6 +85,8 @@ function item(i) {
     body = h("div", {class: "stack", style: "gap:8px"},
       h("div", {}, h("strong", {}, `Failed at step ${i.step}: `), i.intent),
       h("div", {}, i.error),
+      i.category === "test_data" ? callout("info", "A gap in the test data, not a broken release.",
+        "Add the value for this pod to the data set (or the test's own pods block), then run the test again. Nothing was sent to the pod.") : null,
       i.compare ? h("div", {class: "compare"},
         h("div", {}, h("span", {class: "caption"}, "Expected"), i.compare.expected || "(empty)"),
         h("div", {}, h("span", {class: "caption"}, "Observed"), i.compare.observed || "(empty)")) : null,
@@ -155,6 +158,7 @@ function actions(i) {
   }
   if (i.run_id) out.push(button("See the run", {size: "sm", href: runLink(i.run_id)}));
   if (i.category === "authentication") out.push(button("Settings", {size: "sm", href: "#/settings"}));
+  if (i.category === "test_data") out.push(button("Open test data", {size: "sm", href: "#/data"}));
   if (i.file && i.category !== "ui_change" && i.category !== "unreadable") {
     out.push(button("Run again", {size: "sm", kind: i.category === "ui_change" ? "" : "primary", ic: "runs", disabled: !state.status.ready, onClick: () => openRunDrawer(i.file)}));
   }

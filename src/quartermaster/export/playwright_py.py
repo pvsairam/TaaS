@@ -90,9 +90,23 @@ def render_test(test: TestCase, source: str = "", function: str = "") -> str:
         lines += ["pytestmark = [" + ", ".join(f"pytest.mark.{m}" for m in marks) + "]", ""]
     if test.data:
         lines += ["DATA = {"] + [f"    {k!r}: {v!r}," for k, v in test.data.items()] + ["}", ""]
+    if test.pods:
+        lines += [
+            "# Values that differ by pod: the pod's name or kind (DEV, TEST, STAGE), then its values.",
+            "PODS = {",
+        ]
+        lines += [f"    {p!r}: {block!r}," for p, block in test.pods.items()] + ["}", ""]
+    if test.generate:
+        lines += ["# Made fresh for every run (see generate_values in fusion_runtime.py).", "GENERATE = {"]
+        lines += [f"    {k!r}: {r.model_dump(exclude_none=True)!r}," for k, r in test.generate.items()] + ["}", ""]
     lines += ["", f"def {name}(fusion):"]
     body: list[str] = []
-    if test.data:
+    if test.pods or test.generate:
+        args = ["DATA" if test.data else "{}"]
+        args += ["pods=PODS"] if test.pods else []
+        args += ["generate=GENERATE"] if test.generate else []
+        body.append(f"fusion.use_data({', '.join(args)})")
+    elif test.data:
         body.append("fusion.data.update(DATA)")
     body.append(f"fusion.login({test.persona!r})")
     steps = [_step_block(i, s) for i, s in enumerate(test.steps, 1)]

@@ -11,6 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from quartermaster.domain.models import Action, Release, TestCase
+from quartermaster.dsl.data import DataError, merge_sets
 from quartermaster.dsl.library import LibraryError, expand, files_of_tests
 
 
@@ -48,6 +49,10 @@ def load_test(path: str | Path) -> TestCase:
     except LibraryError as e:
         raise SpecError(f"{path}: {e}") from e
     try:
+        raw = merge_sets(raw, path)  # data sets (`data_sets:`) become the test's own data and pod values
+    except DataError as e:
+        raise SpecError(f"{path}: {e}") from e
+    try:
         test = TestCase.model_validate(raw)
     except ValidationError as e:
         raise SpecError(f"{path}: {e}") from e
@@ -78,11 +83,24 @@ def load_release(path: str | Path) -> Release:
 
 def _check_placeholders(test: TestCase, path: Path) -> None:
     """Every ${name} must be declared in the test's `data` block or be a runtime variable."""
-    known = set(test.data) | RUNTIME_VARS
-    for key, val in test.data.items():
+    made = set(test.generate)  # values made fresh for every run
+    for name in sorted(made):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in RUNTIME_VARS or name in test.data:
+            raise SpecError(f"{path}: generate '{name}' must be a new name (letters, digits, underscores)")
+    pod_names = {k for block in test.pods.values() for k in block}
+    clash = sorted(made & pod_names)
+    if clash:
+        raise SpecError(f"{path}: '{clash[0]}' is both generated and given a value for a pod")
+    known = set(test.data) | pod_names | made | RUNTIME_VARS
+    allowed = RUNTIME_VARS | made
+    values = [(f"data '{k}'", v) for k, v in test.data.items()]
+    values += [(f"pods: {p} '{k}'", v) for p, block in test.pods.items() for k, v in block.items()]
+    for where, val in values:
         for name in _PLACEHOLDER.findall(val):
-            if name not in RUNTIME_VARS and not name.startswith(SECRET):
-                raise SpecError(f"{path}: data '{key}' may only reference runtime variables, not ${{{name}}}")
+            if name not in allowed and not name.startswith(SECRET):
+                raise SpecError(
+                    f"{path}: {where} may only reference runtime variables or generated values, not ${{{name}}}"
+                )
     for i, step in enumerate(test.steps):
         texts = [step.value or ""] + [v for _, v in (step.target.ordered() if step.target else [])]
         for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):

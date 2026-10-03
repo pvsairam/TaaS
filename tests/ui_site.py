@@ -109,6 +109,16 @@ def build_site(tmp: Path) -> Site:
         "library: open-locations\ntitle: Open the Locations page\nparams:\n  page_name: Locations\nsteps:\n"
         "  - action: navigate\n    intent: Open ${page_name}\n    value: Workforce Structures > ${page_name}\n"
     )
+    (tests / "_data").mkdir()
+    (tests / "_data" / "pod-names.yaml").write_text(
+        "dataset: pod-names\ntitle: Names on the pods\nvalues:\n  business_unit: US1 Business Unit\n"
+        "pods:\n  STAGE: {business_unit: US1 Stage BU, special: Stage only}\n"
+    )
+    (tests / "hcm" / "uses_data.yaml").write_text(
+        "id: hcm.uses-data\ntitle: A test with test data\nmodule: HCM\nproduct: HR\n"
+        "data_sets: [pod-names]\ngenerate:\n  ref: {unique: 6, prefix: 'REF-'}\n"
+        "steps:\n  - action: api_call\n    intent: Look\n    value: GET /x?bu=${business_unit}&r=${ref}\n"
+    )
     (tests / "hcm" / "shared_user.yaml").write_text(
         "id: hcm.shared-user\ntitle: A test with shared steps\nmodule: HCM\nproduct: HR\n"
         "steps:\n  - use: open-locations\n"

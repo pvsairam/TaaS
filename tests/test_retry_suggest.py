@@ -432,7 +432,15 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
     from quartermaster.dsl.loader import load_tests
 
     tests = {t.id: t for t in load_tests(EXAMPLES / "demos")}
-    assert set(tests) == {"demo.retry", "demo.suggest", "demo.cleanup", "demo.library-one", "demo.library-two"}
+    assert set(tests) == {
+        "demo.retry",
+        "demo.suggest",
+        "demo.cleanup",
+        "demo.library-one",
+        "demo.library-two",
+        "demo.test-data",
+        "demo.test-data-gap",
+    }
     for t in tests.values():
         for step in [*t.steps, *t.cleanup]:
             # nothing here may change data on the pod: no REST call but GET, and no Save, Submit or Delete
@@ -446,3 +454,6 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
         one.steps[0].shared == "read-locations" and one.steps[0].value is not None and "limit=1" in one.steps[0].value
     )
     assert two.steps[0].value is not None and "limit=2" in two.steps[0].value and one.cleanup and two.cleanup
+    data, gap = tests["demo.test-data"], tests["demo.test-data-gap"]  # test data: a data set, a made value, a gap
+    assert data.data == {"rows": "2"} and data.pods["TEST"] == {"rows": "1"} and "pick" in data.generate
+    assert gap.pods == {"STAGE": {"location_limit": "1"}} and "location_limit" not in gap.data

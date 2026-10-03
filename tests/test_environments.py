@@ -58,6 +58,7 @@ def test_an_environment_with_its_users(tmp_path: Path) -> None:
     }
     run = envs.run_environ(terminal)
     assert run["QM_FUSION_URL"] == POD + "/" and run["QM_FUSION_KIND"] == "DEV" and run["PATH"] == "/bin"
+    assert run["QM_ENV_NAME"] == env["name"]  # the pod's own test data is chosen by this name or its kind
     assert (run["QM_FUSION_USER"], run["QM_FUSION_PASSWORD"]) == ("test.user2", "Secret#123")
     assert (run["QM_FUSION_USER_LINE_MANAGER"], run["QM_FUSION_PASSWORD_LINE_MANAGER"]) == ("mgr", "Mgr#1")
     assert "QM_FUSION_USER_OTHER" not in run  # another client's user never comes along

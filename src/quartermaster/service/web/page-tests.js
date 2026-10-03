@@ -131,9 +131,15 @@ export async function testPage(file) {
         h("span", {})))));
     } else if (tab === "data") {
       const keys = Object.keys(t.data || {});
-      panel.replaceChildren(keys.length ? h("div", {class: "stack"}, h("dl", {class: "kv"}, keys.flatMap((k) => [h("dt", {}, k),
-        h("dd", {}, String(t.data[k]).startsWith("${env:") ? h("span", {class: "row", style: "gap:6px"}, icon("lock"), "Masked; read from ", h("code", {}, String(t.data[k]).slice(6, -1))) : String(t.data[k]))])),
-      h("p", {class: "hint"}, "Steps use these values as ${name}. Change them in the file to test with other data.")) :
+      const more = (t.pods || []).length || (t.generate || []).length;
+      panel.replaceChildren(keys.length || more ? h("div", {class: "stack"}, keys.length ? h("dl", {class: "kv"}, keys.flatMap((k) => [h("dt", {}, k),
+        h("dd", {}, String(t.data[k]).startsWith("${env:") ? h("span", {class: "row", style: "gap:6px"}, icon("lock"), "Masked; read from ", h("code", {}, String(t.data[k]).slice(6, -1))) : String(t.data[k]))])) : null,
+      h("p", {class: "hint"}, "Steps use these values as ${name}. Change them in the file to test with other data."),
+      (t.data_sets || []).length ? h("p", {class: "hint"}, "Data sets used: ", t.data_sets.map((n, i) => [i ? ", " : "", h("a", {href: "#/data"}, n)]), ".") : null,
+      (t.pods || []).length ? h("div", {}, h("div", {class: "label"}, "Different on some pods"),
+        h("dl", {class: "kv"}, t.pods.flatMap((p) => [h("dt", {}, p.pod), h("dd", {}, Object.entries(p.values).map(([k, v]) => `${k} = ${v}`).join(", "))]))) : null,
+      (t.generate || []).length ? h("div", {}, h("div", {class: "label"}, "Made fresh for every run"),
+        h("dl", {class: "kv"}, t.generate.flatMap((g) => [h("dt", {}, g.name), h("dd", {}, g.rule)]))) : null) :
         emptyState({ic: "tests", title: "No test data", text: "Values this test types are written in its steps."}));
     } else if (tab === "history") {
       panel.replaceChildren(t.history.length ? table({

@@ -23,6 +23,7 @@ computers and other web sites cannot start runs.
     GET  /api/certification?release=26A  the release's certification pack (.zip): a Word summary to
                                      sign and each test's latest evidence document on that release
     GET  /api/attention              what needs a person, by kind
+    GET  /api/data                   test data: the data sets, who uses them, pods with no value, generated values
     GET  /api/tests                  test files in the tests folder, with their last result
     GET  /api/test?file=<path>       one test: steps in plain words, data, history, the file
     POST /api/test/accept-update     {"file", "step_index", "new"} accept a screen change
@@ -85,11 +86,12 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.ai import providers as ai_providers
+from quartermaster.dsl.data import DataError, merge_sets
 from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, files_of_tests, read_groups
 from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
-from quartermaster.service import insights
+from quartermaster.service import insights, testdata
 from quartermaster.service.aieval import AiEval
 from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, describe
@@ -510,6 +512,8 @@ class App:
             return _json(self.sr_draft(str((query.get("run") or [""])[0]), str((query.get("test") or [""])[0])))
         if method == "GET" and route == ["library"]:
             return _json(self.library())
+        if method == "GET" and route == ["data"]:
+            return _json(self.test_data())
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -1098,6 +1102,15 @@ class App:
         self.audit.add("Exported tests as Playwright", rel or "all tests", {"tests": str(len(tests))})
         return Reply(HTTPStatus.OK, buf.getvalue(), "application/zip", name)
 
+    def test_data(self) -> dict[str, Any]:
+        """The data sets, who uses them, the pods that lack a value, and the values tests make fresh."""
+        pods: list[dict[str, str]] = []
+        for client in self.environments.listing()["clients"]:
+            if self.client_id and client["id"] != self.client_id:
+                continue
+            pods += [{"name": e["name"], "kind": e["kind"]} for e in client["environments"]]
+        return testdata.overview(self.tests_root, pods)
+
     def library(self) -> dict[str, Any]:
         """The shared step groups, which tests use each, and the files that could not be used."""
         directory = self.tests_root / LIBRARY_DIR
@@ -1154,9 +1167,15 @@ class App:
         except yaml.YAMLError:
             loaded = None
         spec: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
-        data: dict[str, Any] = spec["data"] if isinstance(spec.get("data"), dict) else {}
-        steps = []
         expanded, _ = _expanded(spec, path)
+        try:
+            folded = merge_sets(expanded, path)  # data sets folded into the test's own data
+        except DataError:
+            folded = expanded
+        data: dict[str, Any] = folded["data"] if isinstance(folded.get("data"), dict) else {}
+        pods: dict[str, Any] = folded["pods"] if isinstance(folded.get("pods"), dict) else {}
+        rules = folded.get("generate") if isinstance(folded.get("generate"), dict) else {}
+        steps = []
         for i, step in enumerate(expanded.get("steps") or []):
             if not isinstance(step, dict):
                 continue
@@ -1181,6 +1200,17 @@ class App:
         return {
             **item,
             "data": data,
+            "data_sets": [str(n) for n in spec.get("data_sets") or []]
+            if isinstance(spec.get("data_sets"), list)
+            else [],
+            "pods": [
+                {"pod": str(p), "values": {str(k): str(v) for k, v in b.items()}}
+                for p, b in pods.items()
+                if isinstance(b, dict)
+            ],
+            "generate": [
+                {"name": str(k), "rule": testdata.describe_rule(r)} for k, r in rules.items() if isinstance(r, dict)
+            ],
             "steps_detail": steps,
             "yaml": text,
             "history": history,

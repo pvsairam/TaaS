@@ -1017,6 +1017,60 @@ You should see: an error that the folder already has the files, so nothing is re
 
 If a test behaves differently in the export than in Quartermaster, send me the test, the step number and what the pod showed.
 
+### 6.29 Test data
+
+Read only, safe on your pod (same as the demos in 6.14). You need an environment set up in Settings, with its **Kind**
+(DEV, TEST or STAGE) chosen.
+
+1. Copy the demos again, with the data folder:
+
+   ```powershell
+   Copy-Item examples\demos\* my_tests\ -Recurse
+   ```
+
+   Press F5 in Quartermaster. Click **Test data** in the menu.
+
+You should see: a card **How many rows to ask for**, "used by 1 test", with a table that has one row for each of your
+pods (its name and kind) and the number of rows that pod gets (1 for a TEST or STAGE pod, 2 for a DEV pod). Under it a
+card **Values made fresh for every run** with a name, `pick`, how it is made ("a whole number from 1 to 3") and a sample.
+
+2. Click **Tests**, open **Test data demo (reads only)**, and open its **Test data** tab.
+
+You should see: `rows = 2`, "Data sets used: pod-sizes", "Different on some pods" (TEST and STAGE) and "Made fresh for
+every run: pick".
+
+3. Run **Test data demo (reads only)** twice. Open each run and read the two steps.
+
+You should see: both pass. Step 1 shows `.../locationsV2?limit=2` (or 1, if your pod is a TEST or STAGE pod). Step 2 shows
+`limit=` with a number from 1 to 3. The second run may show another number: it is made again for each run.
+
+4. Run **Test data gap demo (stops unless STAGE)**.
+
+You should see: it fails at step 1 with "No test data for location_limit on (your pod's name) (its kind)", and the other
+steps are marked not run. Click **Needs attention**: the item is called **No test data on this pod** with a note that it
+is a gap in the data, not a broken release, and a button **Open test data**. The test never called the pod.
+
+5. In Notepad, open `my_tests\data_gap_demo.yaml`. Under `pods:` add a line for your pod's kind, for example
+`  DEV: {location_limit: "1"}` (use TEST if your pod is a TEST pod), save, and run it again.
+
+You should see: it passes now.
+
+6. In Notepad, open `my_tests\_data\pod-sizes.yaml` and change `rows: "2"` to `rows: "3"`. Press F5 on **Test data**.
+
+You should see: the table shows 3 for a pod that is not TEST or STAGE. Run the demo again: step 1 asks for 3. Put it back.
+
+7. In Notepad, in `my_tests\data_demo.yaml`, change `data_sets: [pod-sizes]` to `data_sets: [pod-sizez]`. Open **Test data**.
+
+You should see: a red box "A test uses a data set that does not exist. 'pod-sizez'". The test shows as unreadable in
+**Needs attention**, with a message naming the sets that do exist. Change it back.
+
+8. Download the export: **Tests**, then **Export**. Unzip it and open `test_demo_test_data.py`.
+
+You should see: a `DATA` and a `PODS` dictionary, a `GENERATE` dictionary, and `fusion.use_data(DATA, pods=PODS, generate=GENERATE)`
+at the top of the test. Running it with pytest on your pod gives the same values as above.
+
+9. Delete the demo files from `my_tests` when you are done (including the `_data` folder).
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

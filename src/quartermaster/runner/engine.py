@@ -27,6 +27,7 @@ from quartermaster.domain.models import (
     StepStatus,
     TestCase,
 )
+from quartermaster.dsl.data import effective_data, generate_values, pod_only_names
 from quartermaster.dsl.loader import SECRET, display_value, render_text_names, render_value
 from quartermaster.locators.resolver import Resolution, ResolutionError, resolve
 from quartermaster.runner.rest import check_reply, parse_request, render_body
@@ -82,7 +83,10 @@ def run_test(
         if on_event is not None:
             on_event({"type": kind, "test_id": test.id, "run_id": run_id, "at": _now(), **fields})
 
-    runtime = {"RUN_ID": run_id}
+    # What the test's data is on this pod, and the values made fresh for this run (see dsl/data.py).
+    data_problem = _missing_data(test, env)
+    test = test.model_copy(update={"data": effective_data(test.data, test.pods, env.name, env.kind.value)})
+    runtime = {"RUN_ID": run_id, **generate_values(test.generate, run_id)}
     results: list[StepResult] = []
     healing: list[HealingProposal] = []
     started_at = _now()
@@ -100,6 +104,11 @@ def run_test(
                 "expected": step.expected,
                 "written_step": step.written_step,
             }
+            if data_problem and i == 0:  # no step is tried with a value that is not there
+                results.append(StepResult(**base, status=StepStatus.FAILED, error=data_problem, started_at=_now()))
+                emit("step_end", index=i, intent=step.intent, status="failed", error=data_problem, evidence=[])
+                failed = True
+                continue
             if failed:
                 results.append(StepResult(**base, status=StepStatus.SKIPPED))
                 emit("step_end", index=i, intent=step.intent, status=StepStatus.SKIPPED.value, error=None, evidence=[])
@@ -220,6 +229,22 @@ def run_test(
     )
     emit("run_end", status=result.status.value)
     return result
+
+
+def _missing_data(test: TestCase, env: Environment) -> str | None:
+    """A sentence when the test uses a value that some pods give but this pod does not, else None."""
+    mine = effective_data(test.data, test.pods, env.name, env.kind.value)
+    wanted = pod_only_names(test.data, test.pods) - set(mine)
+    if not wanted:
+        return None
+    text = " ".join(s.model_dump_json() for s in [*test.steps, *test.cleanup])
+    missing = sorted(n for n in wanted if "${" + n + "}" in text)
+    if not missing:
+        return None
+    return (
+        f"No test data for {', '.join(missing)} on {env.name} ({env.kind.value}). Other pods have a value, this one "
+        "does not: add it to the data set (or the test's `pods:`) under this pod's name or kind"
+    )
 
 
 def _retries_for(step: Step, default: int) -> int:

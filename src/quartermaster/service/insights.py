@@ -288,6 +288,7 @@ CATEGORIES = {
     "missing_element": "Items not found on the screen",
     "timeout": "Screens that did not respond",
     "authentication": "Sign-in problems",
+    "test_data": "Test data this pod does not have",
     "service_call": "Service calls that failed",
     "failure": "Other failures",
     "could_not_run": "Runs that could not start",
@@ -301,6 +302,8 @@ def classify(error: str | None) -> str:
     """Which kind of failure an error message describes (from its wording, nothing more)."""
     text = error or ""
     low = text.lower()
+    if low.startswith("no test data for"):
+        return "test_data"  # a value the pod's data does not have: not a broken release
     if "missingcredentials" in low or "sign in" in low or "sign-in" in low or "password" in low or "login" in low:
         return "authentication"
     if "the api answered" in low or "the api reply" in low or "in the api reply" in low:

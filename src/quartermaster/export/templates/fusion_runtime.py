@@ -18,11 +18,15 @@ Failures save a screenshot in `evidence/`.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
+import random
 import re
+import string
 import time
 import uuid
 from collections.abc import Callable, Iterator
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -81,6 +85,39 @@ def assert_test_pod(url: str, environ: dict[str, str] | None = None) -> None:
         )
 
 
+def generate_values(rules: dict[str, dict[str, Any]], run_id: str, today: date | None = None) -> dict[str, str]:
+    """Values made fresh for a run: `unique` (letters and digits), `date` (today plus some days), `number`, `choice`.
+    The same run id always gives the same values, so a run is easy to read back."""
+    day = today or date.today()
+    out: dict[str, str] = {}
+    for name, rule in rules.items():
+        rng = random.Random(hashlib.sha256(f"{run_id}/{name}".encode()).digest())
+        if rule.get("unique") is not None:
+            alphabet = string.ascii_uppercase + string.digits
+            body = "".join(rng.choice(alphabet) for _ in range(int(rule["unique"])))
+            out[name] = f"{rule.get('prefix', '')}{body}{rule.get('suffix', '')}"
+        elif rule.get("date") is not None:
+            out[name] = (day + timedelta(days=int(rule.get("plus_days", 0)))).strftime(rule.get("format", "%Y-%m-%d"))
+        elif rule.get("number") is not None:
+            out[name] = str(rng.randint(int(rule["number"][0]), int(rule["number"][1])))
+        else:
+            out[name] = str(rng.choice(rule["choice"]))
+    return out
+
+
+def pod_identity(url: str, environ: dict[str, str] | None = None) -> tuple[str, str]:
+    """(the pod's name, its kind: DEV, TEST or STAGE or empty). QM_ENV_NAME and QM_FUSION_KIND say so when set;
+    otherwise the name is the first part of the host (abcd-dev2) and the kind is read from it."""
+    env = os.environ if environ is None else environ
+    host = (urlparse(url).hostname or "").lower()
+    name = env.get("QM_ENV_NAME") or host.split(".")[0]
+    kind = (env.get("QM_FUSION_KIND") or "").upper()
+    if not kind:
+        word = re.search(r"-(dev|test|stage|stg|uat|sit|qa)\d*(?:\.|$)", host)
+        kind = {"dev": "DEV", "stg": "STAGE", "stage": "STAGE", "test": "TEST"}.get(word.group(1) if word else "", "")
+    return name, kind
+
+
 def json_get(data: Any, path: str) -> Any:
     """A value in a JSON reply by its path, for example items[0].PersonNumber. Raises KeyError when absent."""
     here = data
@@ -128,12 +165,35 @@ class Fusion:
         self.evidence = Path(evidence)
         self.run_id = uuid.uuid4().hex[:8].upper()
         self.data: dict[str, str] = {}
+        self.generated: dict[str, str] = {}
+        self._pod_only: set[str] = set()  # names that only some pods give
         self.saved: dict[str, str] = {}
         self.settle_ms = 15_000
         self.poll_s = 15.0
         self.context: Any = None
         self.page: Any = None
         self._inflight: set[Any] = set()
+
+    # ------------------------------------------------------------------ test data
+
+    def use_data(
+        self,
+        data: dict[str, str],
+        pods: dict[str, dict[str, str]] | None = None,
+        generate: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        """The test's data as it is on this pod (a pod's own values by its name or kind, on top of `data`), and
+        the values made fresh for this run."""
+        name, kind = pod_identity(self.url)
+        mine: dict[str, str] = {}
+        for wanted in (kind, name):  # the kind first, the pod's own name on top
+            for pod, block in (pods or {}).items():
+                if wanted and pod.casefold() == wanted.casefold():
+                    mine.update(block)
+        self.data.update({**data, **mine})
+        self._pod_only = {k for block in (pods or {}).values() for k in block} - set(data)
+        self.generated = generate_values(generate or {}, self.run_id)
+        self._pod = f"{name} ({kind or 'kind not known'})"
 
     # ------------------------------------------------------------------ text with ${...}
 
@@ -149,9 +209,14 @@ class Fusion:
                 if var not in os.environ:
                     raise StepFailure(f"set the environment variable {var} (the test types a masked value)")
                 return os.environ[var]
-            for source in (self.data, self.saved, {"RUN_ID": self.run_id}):
+            for source in (self.data, self.generated, self.saved, {"RUN_ID": self.run_id}):
                 if name in source:
                     return str(source[name])
+            if name in self._pod_only:
+                raise StepFailure(
+                    f"No test data for {name} on {self._pod}. Other pods have a value, this one does not: add it "
+                    "to PODS in the test under this pod's name or kind"
+                )
             return m.group(0)
 
         return _PLACEHOLDER.sub(fill, text)

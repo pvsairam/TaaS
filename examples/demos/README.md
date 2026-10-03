@@ -1,6 +1,6 @@
 # Demo tests
 
-Five small tests to try the newer features on your own pod. They only read from the pod (they never
+Seven small tests to try the newer features on your own pod. They only read from the pod (they never
 save, submit or delete), and they are kept out of `examples/tests` so "Run all tests" and new clients do
 not pick them up.
 
@@ -9,7 +9,7 @@ To use them, copy them into your tests folder, then open **Tests** (press F5 if 
     Windows PowerShell:   Copy-Item examples\demos\* my_tests\ -Recurse
     Mac or Linux:         cp -r examples/demos/* my_tests/
 
-(`-Recurse` / `-r` also copies the `_library` folder the two shared-steps demos need.)
+(`-Recurse` / `-r` also copies the `_library` and `_data` folders the shared-steps and test-data demos need.)
 
 Delete them from `my_tests` when you are done. Steps for each are in TESTING.md (6.14 and 6.16).
 
@@ -19,3 +19,5 @@ Delete them from `my_tests` when you are done. Steps for each are in TESTING.md 
 | `suggest_demo.yaml` | Suggested fixes | It fails at step 2; Needs attention suggests the link "Locations" |
 | `cleanup_demo.yaml` | Cleanup after a test | It passes, and a box says "Test data cleaned up" |
 | `library_demo_one.yaml`, `library_demo_two.yaml` | Shared steps | Both pass. Shared steps lists `read-locations` used by 2 tests |
+| `data_demo.yaml` | Test data | It passes. Test data lists the data set `pod-sizes`, and the run page shows how many rows each step asked for |
+| `data_gap_demo.yaml` | A gap in the test data | It stops at step 1 with "No test data for location_limit" (unless your pod is a STAGE pod) |

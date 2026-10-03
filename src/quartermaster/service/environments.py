@@ -180,6 +180,7 @@ class Environments:
                 del out[key]
         out["QM_FUSION_URL"] = env["url"]
         out["QM_FUSION_KIND"] = env["kind"]
+        out["QM_ENV_NAME"] = str(env.get("name") or "")  # the pod's own test data is chosen by this name or kind
         out.pop("QM_FUSION_ALLOWED_HOSTS", None)
         if env.get("not_production"):  # confirmed in Settings: runs accept this one host only
             out["QM_FUSION_ALLOWED_HOSTS"] = urlsplit(env["url"]).hostname or ""

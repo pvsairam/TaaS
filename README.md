@@ -321,7 +321,11 @@ Shared steps are written out in full inside each test. What the export keeps:
 - the Navigator, Redwood date boxes, type-ahead lists, REST steps with the browser's session (and values kept for later
   steps), waiting for a scheduled process, personas, and the refusal to run on a pod that looks like production;
 - `${name}` data, `${RUN_ID}` and `${env:SECRET}` (a secret stays a reference to an environment variable: no password
-  is ever written into an exported file); a failing step names itself and saves a screenshot in `evidence/`.
+  is ever written into an exported file); a failing step names itself and saves a screenshot in `evidence/`;
+- the **test data** (see Test data above): a test with data sets or `pods:` gets a `PODS` dictionary, and one with
+  `generate:` gets a `GENERATE` dictionary, both chosen at run time by the pod (`QM_ENV_NAME` and `QM_FUSION_KIND`,
+  or read from the pod's host name when they are not set). A name this pod has no value for stops the step with the
+  same "No test data for ..." message.
 
 What it does not have: Quartermaster's retries, its suggested fixes for renamed items (when Oracle renames something,
 edit the list of ways in the test), the Word evidence documents, schedules, release impact and approvals. For a pod behind
@@ -362,6 +366,53 @@ steps:
 - **Shared steps** (menu) lists every group, what it takes, which tests use it, and warns about a test that uses a group that does not exist. A test's **Steps** tab marks the steps that come from a group.
 - A suggested fix or an accepted Oracle screen change for a shared step is written to the shared file, and the card says so: every test that uses the group follows.
 - Backups include the `_library` folder (it is part of your tests).
+
+## Test data (names that belong to a pod, and values made fresh for every run)
+
+Two problems come up in every regression suite. A test that creates an invoice must not use the same invoice number
+twice. And every pod has its own business units, suppliers and ledgers, so a test written on one pod breaks on the next.
+
+**Values made fresh for every run.** Add a `generate:` block to a test:
+
+```yaml
+generate:
+  invoice_no: {unique: 6, prefix: "INV-"}                      # INV-7K2Q9X: new each run
+  start_date: {date: today, plus_days: 30, format: "%Y-%m-%d"} # 30 days from today
+  amount: {number: [100, 999]}                                 # a whole number in that range
+  currency: {choice: [USD, EUR, GBP]}                          # one of these
+```
+
+Use them in steps as `${invoice_no}`, like any other data. The values come from the run's own id, so they stay the
+same all through one run and the evidence shows exactly what was typed. A generated name may not clash with a name in
+`data`, and a `data` value may use a generated one (`code: "C-${invoice_no}"`).
+
+**Data sets for each pod.** Put a file in the `_data` folder inside your tests folder:
+
+```yaml
+dataset: hcm-basics
+title: Names on the pods
+values:                          # used on every pod unless a pod below says otherwise
+  business_unit: US1 Business Unit
+pods:                            # by the environment's name in Settings, or by its kind (DEV, TEST, STAGE)
+  DEV2: {business_unit: Vision Operations}
+  STAGE: {business_unit: US1 Stage BU}
+```
+
+A test uses it with `data_sets: [hcm-basics]` and writes `${business_unit}` in its steps. A test can also have its own
+`pods:` block. The order is: the data set's values, then its pod values, then the test's own `data:`, then the test's
+own `pods:` (the last one wins). A pod is matched by its name first, then by its kind, without regard to capital letters.
+
+- **No value on this pod.** If a test uses a name that other pods give but the pod being tested does not, the test stops
+  at step 1 with "No test data for X on DEV2 (DEV)". Nothing is sent to the pod, and **Needs attention** shows it as
+  "No test data on this pod", so a gap in the data is never mistaken for a broken release.
+- **Test data** (menu) lists every data set as a table of what each of your pods gets (a missing value is marked), which
+  tests use it, a warning for a set that does not exist or a file that cannot be read, and the values each test makes
+  fresh, shown for a made-up run. A test's **Test data** tab shows the sets, the pod values and the rules it uses.
+- The web service tells each run which pod it is for (`QM_ENV_NAME`). In a terminal, `qm run --env-name DEV2 --kind DEV`
+  does the same.
+- Never write a password in a data set. Use `${env:NAME}` for anything secret, as in `data:`.
+- The `_data` folder is not for tests: test lists, runs and impact analysis skip it. Backups include it.
+- Exported Playwright tests keep all of this (see below).
 
 ## Reading Oracle's What's New
 

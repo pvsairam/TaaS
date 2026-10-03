@@ -6,8 +6,9 @@ validated once at the edge (YAML load, LLM output, API input) and trusted afterw
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -153,6 +154,47 @@ PRIORITY_WEIGHT: dict[Priority, float] = {
 }
 
 
+class GenerateRule(_Strict):
+    """How one value is made fresh for every run (see dsl/data.py). Exactly one of unique, date, number, choice."""
+
+    unique: int | None = Field(default=None, ge=4, le=16, description="Letters and digits, new each run")
+    prefix: str = Field(default="", max_length=40)
+    suffix: str = Field(default="", max_length=40)
+    date: Literal["today"] | None = None
+    plus_days: int = Field(default=0, ge=-3650, le=3650)
+    format: str = Field(default="%Y-%m-%d", max_length=40)
+    number: tuple[int, int] | None = None
+    choice: list[str] | None = Field(default=None, min_length=1, max_length=50)
+
+    @field_validator("choice", mode="before")
+    @classmethod
+    def _scalars_as_text(cls, value: Any) -> Any:
+        if isinstance(value, list) and all(isinstance(v, str | int | float) and not isinstance(v, bool) for v in value):
+            return [str(v) for v in value]
+        return value
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> GenerateRule:
+        kinds = [k for k in ("unique", "date", "number", "choice") if getattr(self, k) is not None]
+        if len(kinds) != 1:
+            raise ValueError("give exactly one of unique, date, number or choice")
+        used = self.model_fields_set
+        if kinds[0] != "unique" and used & {"prefix", "suffix"}:
+            raise ValueError("prefix and suffix go with `unique`")
+        if kinds[0] != "date" and used & {"plus_days", "format"}:
+            raise ValueError("plus_days and format go with `date`")
+        if self.number is not None and self.number[0] > self.number[1]:
+            raise ValueError("number: the first value must not be larger than the second")
+        if self.date is not None:
+            try:
+                text = datetime(2000, 1, 2).strftime(self.format)
+            except ValueError as e:
+                raise ValueError(f"format is not a date format: {e}") from e
+            if not text.strip():
+                raise ValueError("format must produce some text, for example %Y-%m-%d")
+        return self
+
+
 class TestCase(_Strict):
     __test__ = False  # stop pytest from collecting this class
 
@@ -166,6 +208,12 @@ class TestCase(_Strict):
     tags: list[str] = Field(default_factory=list)
     estimated_minutes: float = Field(default=5.0, gt=0)
     data: dict[str, str] = Field(default_factory=dict)
+    # Data sets used (files in `_data`). Their values are folded into `data` and `pods` when the test is loaded.
+    data_sets: list[str] = Field(default_factory=list)
+    # Values that differ by pod: a pod's name or kind (DEV, TEST, STAGE) to the values it uses instead of `data`.
+    pods: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Values made fresh for every run, used in steps as ${name}.
+    generate: dict[str, GenerateRule] = Field(default_factory=dict)
     steps: list[Step] = Field(min_length=1)
     # Steps that remove what the test made on the pod. They run after the steps above, whether those
     # passed or failed. A cleanup that fails is reported but never changes the test's result.

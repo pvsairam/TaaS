@@ -850,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
     rn = sub.add_parser("run", help="run specs against the pod in QM_FUSION_URL")
     rn.add_argument("tests", help="spec file or directory")
     rn.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
-    rn.add_argument("--env-name", default="fusion")
+    rn.add_argument("--env-name", default=os.environ.get("QM_ENV_NAME") or "fusion")
     rn.add_argument("--headed", action="store_true", help="show the browser window")
     rn.add_argument(
         "--no-highlight", action="store_true", help="no red marks on what is clicked or filled (live or in screenshots)"
@@ -918,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
     rc.add_argument("--product", required=True, help="e.g. Global Human Resources")
     rc.add_argument("--persona", default="")
     rc.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
-    rc.add_argument("--env-name", default="fusion")
+    rc.add_argument("--env-name", default=os.environ.get("QM_ENV_NAME") or "fusion")
     rc.add_argument("--evidence", default="evidence")
     rc.add_argument("--events", help="keep the steps recorded so far in this file (used by the web UI)")
     rc.add_argument("--guide", help="a manual scenario (JSON) to do by hand, marking each step Pass or Fail")

@@ -7,6 +7,7 @@ import {runPage, runsPage} from "./page-runs.js";
 import {testPage, testsPage} from "./page-tests.js";
 import {attentionPage} from "./page-attention.js";
 import {libraryPage} from "./page-library.js";
+import {dataPage} from "./page-data.js";
 import {recordPage} from "./page-record.js";
 import {settingsPage} from "./page-settings.js";
 import {impactPage} from "./page-impact.js";
@@ -24,6 +25,7 @@ const NAV = [
   {id: "runs", label: "Runs", ic: "runs"},
   {id: "tests", label: "Tests", ic: "tests"},
   {id: "library", label: "Shared steps", ic: "layers"},
+  {id: "data", label: "Test data", ic: "server"},
   {id: "impact", label: "Release impact", ic: "target"},
   {id: "attention", label: "Needs attention", ic: "attention"},
   {id: "schedules", label: "Schedules", ic: "clock"},
@@ -192,6 +194,7 @@ export async function route() {
     else if (page === "tests" && state.query.view === "review") await reviewPage();
     else if (page === "tests") await testsPage();
     else if (page === "library") await libraryPage();
+    else if (page === "data") await dataPage();
     else if (page === "attention") await attentionPage();
     else if (page === "impact") await impactPage();
     else if (page === "record") await recordPage();
