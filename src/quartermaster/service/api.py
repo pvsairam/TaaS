@@ -85,6 +85,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.ai import providers as ai_providers
+from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, read_groups, test_files
 from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
@@ -421,6 +422,8 @@ class App:
             return _json(self.dismiss_attention(data))
         if method == "GET" and route == ["attention", "sr"]:
             return _json(self.sr_draft(str((query.get("run") or [""])[0]), str((query.get("test") or [""])[0])))
+        if method == "GET" and route == ["library"]:
+            return _json(self.library())
         if method == "GET" and route == ["test"]:
             return _json(self.test_detail(str((query.get("file") or [""])[0])))
         if method == "POST" and route == ["test", "accept-update"]:
@@ -933,7 +936,7 @@ class App:
             if r["status"] in insights.PASSING and r["release"]:
                 validated.setdefault(r["test_id"], r["release"])
         out = []
-        for f in sorted(self.tests_root.rglob("*.y*ml")):
+        for f in test_files(self.tests_root):
             rel = f.relative_to(self.tests_root).as_posix()
             item: dict[str, Any] = {
                 "file": rel,
@@ -954,7 +957,8 @@ class App:
                     priority=str(spec.get("priority", "")),
                     tags=[str(t) for t in spec.get("tags") or []],
                     owner=str(spec.get("owner", "")),
-                    steps=len(spec.get("steps") or []),
+                    steps=len(_expanded(spec, f)[0].get("steps") or []),
+                    uses=_uses(spec),
                 )
             except (yaml.YAMLError, ValueError, OSError) as e:
                 item["problem"] = f"Could not read this file: {e}"
@@ -965,6 +969,53 @@ class App:
             item["release_validated"] = validated.get(item.get("id", ""))
             out.append(item)
         return out
+
+    def library(self) -> dict[str, Any]:
+        """The shared step groups, which tests use each, and the files that could not be used."""
+        directory = self.tests_root / LIBRARY_DIR
+        groups, problems = read_groups(directory if directory.is_dir() else None)
+        used: dict[str, list[dict[str, str]]] = {}
+        for f in test_files(self.tests_root):
+            try:
+                spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            except (yaml.YAMLError, OSError):
+                continue
+            for name in _uses(spec) if isinstance(spec, dict) else []:
+                used.setdefault(name, []).append(
+                    {
+                        "file": f.relative_to(self.tests_root).as_posix(),
+                        "title": str(spec.get("title") or spec.get("id")),
+                    }
+                )
+        out = []
+        for name, (path, raw) in sorted(groups.items()):
+            out.append(
+                {
+                    "name": name,
+                    "title": str(raw.get("title") or ""),
+                    "description": str(raw.get("description") or ""),
+                    "file": path.relative_to(self.tests_root).as_posix(),
+                    "params": [
+                        {"name": str(k), "default": None if v is None else str(v)}
+                        for k, v in (raw.get("params") or {}).items()
+                    ],
+                    "steps": [
+                        {"action": str(s.get("action", "")), "intent": str(s.get("intent", ""))} for s in raw["steps"]
+                    ],
+                    "cleanup": len(raw.get("cleanup") or []),
+                    "used_by": used.get(name, []),
+                    "yaml": path.read_text(encoding="utf-8"),
+                }
+            )
+        missing = sorted(set(used) - set(groups))
+        return {
+            "folder": f"{self.tests_root.name}/{LIBRARY_DIR}",
+            "groups": out,
+            "problems": [
+                {"file": p.relative_to(self.tests_root).as_posix(), "problem": why[:300]} for p, why in problems
+            ],
+            "missing": [{"name": m, "used_by": used[m]} for m in missing],
+        }
 
     def test_detail(self, rel: str) -> dict[str, Any]:
         path = self._test_file(rel)
@@ -977,7 +1028,8 @@ class App:
         spec: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
         data: dict[str, Any] = spec["data"] if isinstance(spec.get("data"), dict) else {}
         steps = []
-        for i, step in enumerate(spec.get("steps") or []):
+        expanded, _ = _expanded(spec, path)
+        for i, step in enumerate(expanded.get("steps") or []):
             if not isinstance(step, dict):
                 continue
             target: dict[str, Any] = step["target"] if isinstance(step.get("target"), dict) else {}
@@ -990,6 +1042,7 @@ class App:
                     "intent": step.get("intent", ""),
                     "value": "" if step.get("value") is None else _fill(str(step.get("value")), data),
                     "found_by": found_by,
+                    "shared": step.get("shared"),
                 }
             )
         history = insights.test_history(item.get("id", ""), self.queue.store.list(limit=500))
@@ -1281,6 +1334,25 @@ def _tail(log: Path, n: int = 40) -> str:
 
 
 # ---------------------------------------------------------------------- HTTP
+
+
+def _uses(spec: Any) -> list[str]:
+    """The shared groups a test file uses, in order, each once."""
+    names: list[str] = []
+    if isinstance(spec, dict):
+        for step in [*(spec.get("steps") or []), *(spec.get("cleanup") or [])]:
+            if isinstance(step, dict) and isinstance(step.get("use"), str) and step["use"] not in names:
+                names.append(step["use"])
+    return names
+
+
+def _expanded(spec: Any, path: Path) -> tuple[dict[str, Any], list[tuple[str | None, int]]]:
+    """The spec with shared steps in place; the file as it is when the shared steps cannot be read."""
+    try:
+        out, origins = expand(spec, path)
+    except LibraryError:
+        out, origins = spec, []
+    return (out if isinstance(out, dict) else {}), origins
 
 
 def attention_key(item: dict[str, Any]) -> str:

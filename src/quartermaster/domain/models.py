@@ -126,6 +126,8 @@ class Step(_Strict):
     options: dict[str, Any] = Field(default_factory=dict)
     # For a test made from a manual scenario: the number of the written step this action does.
     written_step: int | None = Field(default=None, ge=1)
+    # The shared group this step came from (see dsl/library.py); set when a test is loaded, not written.
+    shared: str | None = None
 
     @model_validator(mode="after")
     def _check_shape(self) -> Step:

@@ -729,6 +729,40 @@ You should see: "Signed in with Google" and "Google sign-in refused", each with 
 
 7. To turn it off: untick **Turn on Continue with Google**, Save. The button disappears.
 
+### 6.21 Shared steps
+
+Read only, safe on your pod (same as the demos in 6.14).
+
+1. Copy the demos again, this time with the shared folder:
+
+   ```powershell
+   Copy-Item examples\demos\* my_tests\ -Recurse
+   ```
+
+   Press F5 in Quartermaster. Click **Shared steps** in the menu.
+
+You should see: one card, **Read some locations (reads only)**, "used by 2 tests", with its one step,
+"A test can hand in how_many (if not given: 1)", and the two demo tests listed.
+
+2. Click **Tests**, open **Shared steps demo two**, then the **Steps** tab.
+
+You should see: one step "Find 2 location(s)" with a small tag **shared: read-locations**.
+
+3. Run **Shared steps demo one** and **demo two**.
+
+You should see: both pass. Each shows a blue box **Test data cleaned up** (the group's cleanup was added to each test).
+
+4. Open `my_tests\_library\read-locations.yaml` in Notepad. Change `locationsV2?limit=` to `locationsV9?limit=` and save. Run both demos.
+
+You should see: **both** fail at step 1, from one change in one file. Put it back to `locationsV2` and both pass again.
+
+5. In Notepad, in `my_tests\library_demo_one.yaml`, change `use: read-locations` to `use: read-locationz`. Open **Shared steps**.
+
+You should see: a red box "A test uses shared steps that do not exist. 'read-locationz'". The test shows as unreadable in
+**Needs attention** with a message naming the groups that do exist. Change it back.
+
+6. Delete the demo files from `my_tests` when you are done (including `_library\read-locations.yaml`).
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

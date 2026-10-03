@@ -266,6 +266,40 @@ Run history is kept in `.qm/` (next to where you started `qm serve`); evidence s
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
 
+## Shared steps
+
+Steps you use in many tests (open a page, create a record) can be written once and shared. Put a YAML file in
+the `_library` folder inside your tests folder (`my_tests\_library\open-locations.yaml`):
+
+```yaml
+library: open-locations          # the name tests use
+title: Open the Locations page
+params:                          # optional: what a test may change (no value = the test must give it)
+  page_name: Locations
+steps:                           # the same kind of steps a test has
+  - action: navigate
+    intent: Open ${page_name}
+    value: Workforce Structures > ${page_name}
+cleanup:                         # optional: added to the cleanup of every test that uses it
+  - ...
+```
+
+A test uses it with one step, and may hand in values:
+
+```yaml
+steps:
+  - use: open-locations
+    with: {page_name: Locations}
+```
+
+- When a test loads, that step is replaced by the group's steps, so the runner, the evidence and healing see ordinary steps.
+- `${param}` in a group is what the test handed in (or the default). Any other `${name}` is test data: the test needs it in its `data`.
+- A group's `cleanup:` is added after the test's own cleanup. A cleanup `DELETE` must still use a saved value.
+- A group cannot use another group. The `_library` folder is not for tests: test lists, runs and impact analysis skip it.
+- **Shared steps** (menu) lists every group, what it takes, which tests use it, and warns about a test that uses a group that does not exist. A test's **Steps** tab marks the steps that come from a group.
+- A suggested fix or an accepted Oracle screen change for a shared step is written to the shared file, and the card says so: every test that uses the group follows.
+- Backups include the `_library` folder (it is part of your tests).
+
 ## Sign-in and roles
 
 Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in

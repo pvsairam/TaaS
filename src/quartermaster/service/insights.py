@@ -16,6 +16,7 @@ from typing import Any
 
 import yaml
 
+from quartermaster.dsl.library import LibraryError, expand, library_dir_for, read_groups
 from quartermaster.evidence.document import plain_error
 from quartermaster.service.triage import likely_cause
 
@@ -379,7 +380,8 @@ def attention(
             "document": r.get("document"),
             "folder": r.get("run_dir"),
         }
-        spec = _load_spec(tests_root / test["file"])
+        spec, origins = _load_spec(tests_root / test["file"])
+        where = _Where(tests_root, test["file"], origins)
         if r["status"] == "failed":
             f = r.get("failed_step") or {}
             raw = f.get("error")
@@ -395,7 +397,7 @@ def attention(
                     "compare": expected_observed(raw),
                 }
             )
-            suggestion = _suggestion(r, f, spec)
+            suggestion = _suggestion(r, f, spec, where)
             if suggestion:
                 items[-1]["suggestion"] = suggestion
             items[-1]["cause"] = likely_cause(items[-1])  # after the suggestion: it changes the advice
@@ -434,6 +436,7 @@ def attention(
                     **base,
                     "category": "ui_change",
                     "step_index": h["step_index"],
+                    **where.fix(h["step_index"]),
                     "step": h["step_index"] + 1,
                     "intent": h.get("intent", ""),
                     "old": old,
@@ -483,7 +486,9 @@ def attention(
     }
 
 
-def _suggestion(result: dict[str, Any], failed: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any] | None:
+def _suggestion(
+    result: dict[str, Any], failed: dict[str, Any], spec: dict[str, Any], where: _Where | None = None
+) -> dict[str, Any] | None:
     """What a failed step's item may have become, if the run found out (see runner.suggest) and the test
     does not already try it first."""
     number = failed.get("number")
@@ -500,6 +505,7 @@ def _suggestion(result: dict[str, Any], failed: dict[str, Any], spec: dict[str, 
             continue
         return {
             "step_index": index,
+            **(where.fix(index) if where else {}),
             "source": h["source"],
             "confidence": h.get("confidence"),
             "why": h.get("why") or "",
@@ -542,12 +548,39 @@ def _last_error_line(message: str) -> str:
     return line or "The run stopped before any test ran."
 
 
-def _load_spec(path: Path) -> dict[str, Any]:
+def _load_spec(path: Path) -> tuple[dict[str, Any], list[tuple[str | None, int]]]:
+    """The test as raw YAML with its shared steps in place, and where each step is written (see dsl/library)."""
     try:
         spec = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
-        return {}
-    return spec if isinstance(spec, dict) else {}
+        return {}, []
+    try:
+        spec, origins = expand(spec, path)
+    except LibraryError:
+        return {}, []
+    return (spec, origins) if isinstance(spec, dict) else ({}, [])
+
+
+class _Where:
+    """Which file, and which step in it, a step of a test is written in: the test, or a shared group."""
+
+    def __init__(self, tests_root: Path, test_file: str, origins: list[tuple[str | None, int]]):
+        self.tests_root, self.test_file, self.origins = tests_root, test_file, origins
+        self._groups: dict[str, Path] | None = None
+
+    def fix(self, index: int) -> dict[str, Any]:
+        """`fix_file` and `fix_step` for editing that step, plus `shared` (the group) when it is not the test's own."""
+        if not 0 <= index < len(self.origins):
+            return {"fix_file": self.test_file, "fix_step": index}
+        group, number = self.origins[index]
+        if group is None:
+            return {"fix_file": self.test_file, "fix_step": number}
+        if self._groups is None:
+            found, _ = read_groups(library_dir_for(self.tests_root / self.test_file))
+            self._groups = {name: path for name, (path, _) in found.items()}
+        path = self._groups.get(group)
+        file = path.relative_to(self.tests_root.resolve()).as_posix() if path else self.test_file
+        return {"fix_file": file, "fix_step": number, "shared": group}
 
 
 def _strategies(spec: dict[str, Any], index: int) -> list[dict[str, str]]:

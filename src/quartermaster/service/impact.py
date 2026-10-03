@@ -153,6 +153,7 @@ class Releases:
         scenarios (imported scripts) count as coverage too, and are ranked by risk the same way."""
         # Imported here so the rest of the service does not need the analysis libraries loaded.
         from quartermaster.domain.models import Priority
+        from quartermaster.dsl.library import test_files
         from quartermaster.dsl.loader import SpecError, load_release, load_test
         from quartermaster.impact.analyzer import (
             COVERAGE_THRESHOLD,
@@ -171,7 +172,7 @@ class Releases:
         tests: list[Any] = []
         files: dict[str, str] = {}
         problems: list[dict[str, str]] = []
-        for spec in sorted(tests_root.rglob("*.y*ml")):
+        for spec in test_files(tests_root):
             rel = spec.relative_to(tests_root).as_posix()
             try:
                 t = load_test(spec)

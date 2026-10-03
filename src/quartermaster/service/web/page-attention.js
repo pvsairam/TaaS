@@ -67,7 +67,8 @@ function item(i) {
       h("div", {class: "compare"},
         h("div", {}, h("span", {class: "caption"}, "Written to find"), i.old_text),
         h("div", {}, h("span", {class: "caption"}, "Found last time by"), i.new_text)),
-      h("p", {class: "meta"}, "The test passed by trying its second way. Accepting makes that the first way, so it keeps passing after the quarterly update. A copy of the old file is kept."));
+      h("p", {class: "meta"}, "The test passed by trying its second way. Accepting makes that the first way, so it keeps passing after the quarterly update. A copy of the old file is kept."),
+      i.shared ? h("p", {class: "meta"}, `This step is in the shared steps '${i.shared}', so accepting changes every test that uses it.`) : null);
   } else if (i.category === "cleanup") {
     const steps = i.cleanup_steps || [];
     body = h("div", {class: "stack", style: "gap:8px"},
@@ -89,7 +90,8 @@ function item(i) {
         h("span", {}, `${i.suggestion.source === "ai" ? "The AI thinks" : "A similar name on the screen suggests"} the step should find `,
           h("strong", {}, i.suggestion.new_text), ` instead of ${i.suggestion.old_text}.`,
           i.suggestion.why ? ` ${i.suggestion.why}${/[.!?]$/.test(i.suggestion.why) ? "" : "."}` : "",
-          " It is only a suggestion: the test is unchanged until you accept it, and the old ways stay as a fallback. Run the test again afterwards to check it.")) : null,
+          " It is only a suggestion: the test is unchanged until you accept it, and the old ways stay as a fallback. Run the test again afterwards to check it.",
+          i.suggestion.shared ? ` This step is in the shared steps '${i.suggestion.shared}': accepting changes every test that uses it.` : "")) : null,
       i.cause ? callout(i.cause.sr ? "warning" : "info", `Likely cause: ${i.cause.title}.`, i.cause.advice) : null,
       i.detail && i.detail !== i.error ? disclose("Technical details", h("pre", {class: "block"}, i.detail)) : null);
   } else {
@@ -128,7 +130,7 @@ function actions(i) {
     out.push(button("Accept update", {kind: "primary", size: "sm", ic: "check", onClick: async (e) => {
       e.currentTarget.disabled = true;
       try {
-        await api("/api/test/accept-update", {file: i.file, step_index: i.step_index, new: i.new});
+        await api("/api/test/accept-update", {file: i.fix_file || i.file, step_index: i.fix_step ?? i.step_index, new: i.new});
         toast("Test updated. A copy of the old file was kept.");
         attentionPage();
       } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
@@ -138,7 +140,7 @@ function actions(i) {
     out.push(button("Use the suggestion", {kind: "primary", size: "sm", ic: "check", onClick: async (e) => {
       e.currentTarget.disabled = true;
       try {
-        await api("/api/test/accept-update", {file: i.file, step_index: i.suggestion.step_index, new: i.suggestion.new, add: true});
+        await api("/api/test/accept-update", {file: i.suggestion.fix_file || i.file, step_index: i.suggestion.fix_step ?? i.suggestion.step_index, new: i.suggestion.new, add: true});
         toast("Test updated. A copy of the old file was kept. Run the test again to check it.");
         attentionPage();
       } catch (err) { toast(err.message); e.currentTarget.disabled = false; }

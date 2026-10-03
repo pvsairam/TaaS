@@ -432,7 +432,7 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
     from quartermaster.dsl.loader import load_tests
 
     tests = {t.id: t for t in load_tests(EXAMPLES / "demos")}
-    assert set(tests) == {"demo.retry", "demo.suggest", "demo.cleanup"}
+    assert set(tests) == {"demo.retry", "demo.suggest", "demo.cleanup", "demo.library-one", "demo.library-two"}
     for t in tests.values():
         for step in [*t.steps, *t.cleanup]:
             # nothing here may change data on the pod: no REST call but GET, and no Save, Submit or Delete
@@ -441,3 +441,8 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
             assert step.action in (Action.API_CALL, Action.NAVIGATE, Action.CLICK)
     assert tests["demo.cleanup"].cleanup and tests["demo.retry"].steps[0].action is Action.API_CALL
     assert tests["demo.suggest"].steps[1].target is not None
+    one, two = tests["demo.library-one"], tests["demo.library-two"]  # the shared steps, with and without a value
+    assert (
+        one.steps[0].shared == "read-locations" and one.steps[0].value is not None and "limit=1" in one.steps[0].value
+    )
+    assert two.steps[0].value is not None and "limit=2" in two.steps[0].value and one.cleanup and two.cleanup
