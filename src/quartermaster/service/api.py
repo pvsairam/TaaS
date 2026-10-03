@@ -85,7 +85,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 
 from quartermaster.ai import providers as ai_providers
-from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, read_groups, test_files
+from quartermaster.dsl.library import LIBRARY_DIR, LibraryError, expand, files_of_tests, read_groups
 from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
@@ -936,7 +936,7 @@ class App:
             if r["status"] in insights.PASSING and r["release"]:
                 validated.setdefault(r["test_id"], r["release"])
         out = []
-        for f in test_files(self.tests_root):
+        for f in files_of_tests(self.tests_root):
             rel = f.relative_to(self.tests_root).as_posix()
             item: dict[str, Any] = {
                 "file": rel,
@@ -975,7 +975,7 @@ class App:
         directory = self.tests_root / LIBRARY_DIR
         groups, problems = read_groups(directory if directory.is_dir() else None)
         used: dict[str, list[dict[str, str]]] = {}
-        for f in test_files(self.tests_root):
+        for f in files_of_tests(self.tests_root):
             try:
                 spec = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
             except (yaml.YAMLError, OSError):

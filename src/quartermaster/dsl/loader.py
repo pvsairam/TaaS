@@ -11,7 +11,7 @@ import yaml
 from pydantic import ValidationError
 
 from quartermaster.domain.models import Action, Release, TestCase
-from quartermaster.dsl.library import LibraryError, expand, test_files
+from quartermaster.dsl.library import LibraryError, expand, files_of_tests
 
 
 class SpecError(ValueError):
@@ -57,7 +57,7 @@ def load_test(path: str | Path) -> TestCase:
 
 def load_tests(directory: str | Path) -> list[TestCase]:
     directory = Path(directory)
-    tests = [load_test(p) for p in test_files(directory)]
+    tests = [load_test(p) for p in files_of_tests(directory)]
     seen: dict[str, int] = {}
     for t in tests:
         seen[t.id] = seen.get(t.id, 0) + 1

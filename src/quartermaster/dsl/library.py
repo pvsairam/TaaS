@@ -49,7 +49,7 @@ class LibraryError(ValueError):
     """A shared group is missing, wrong or used wrongly. The message is for the person writing the test."""
 
 
-def test_files(root: Path) -> list[Path]:
+def files_of_tests(root: Path) -> list[Path]:
     """Every test file under `root`, in a fixed order, without the shared groups."""
     return sorted(p for p in root.rglob("*.y*ml") if LIBRARY_DIR not in p.relative_to(root).parts[:-1])
 

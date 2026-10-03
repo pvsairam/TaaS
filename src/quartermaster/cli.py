@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from quartermaster.domain.models import Environment, EnvironmentKind, RunResult, ScreenshotMode, StepStatus, TestCase
-from quartermaster.dsl.library import test_files
+from quartermaster.dsl.library import files_of_tests
 from quartermaster.dsl.loader import SpecError, load_release, load_test, load_tests
 from quartermaster.evidence.document import write_evidence_document
 from quartermaster.evidence.run_record import build_record, new_run_id, run_folder, write_record
@@ -80,7 +80,7 @@ def _run(args: argparse.Namespace) -> int:
     target = Path(args.tests)
     if target.is_dir():
         tests: list[TestCase] = load_tests(target)  # also rejects duplicate ids
-        files: list[Path] = test_files(target)  # same order load_tests uses
+        files: list[Path] = files_of_tests(target)  # same order load_tests uses
     else:
         tests, files = [load_test(target)], [target]
     if args.only:

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from test_service_api import add_suite_tests, app, call, finished_suite_run  # noqa: F401, F811  (app is a fixture)
 
-from quartermaster.dsl.library import LibraryError, expand, library_dir_for, test_files
+from quartermaster.dsl.library import LibraryError, expand, files_of_tests, library_dir_for
 from quartermaster.dsl.loader import SpecError, load_test, load_tests
 
 OPEN = """
@@ -159,7 +159,7 @@ def test_a_cleanup_delete_in_a_group_still_has_to_use_a_saved_value(tmp_path: Pa
 def test_group_files_are_not_tests(tmp_path: Path) -> None:
     path = tree(tmp_path)
     root = tmp_path / "tests"
-    assert test_files(root) == [path]
+    assert files_of_tests(root) == [path]
     assert [t.id for t in load_tests(root)] == [
         "t.shared"
     ]  # the groups are not loaded as tests (and so not 'duplicate')
