@@ -93,6 +93,7 @@ from quartermaster.service.environments import Environments
 from quartermaster.service.heal import accept_update
 from quartermaster.service.impact import Releases
 from quartermaster.service.manual import ManualScripts, needs_data
+from quartermaster.service.notify import Notifier, NotifyError
 from quartermaster.service.prepare_all import PrepareAll
 from quartermaster.service.recording import COMMANDS, RecordCommandBuilder, Recording, qm_record_command
 from quartermaster.service.runner import DEFAULT_OPTIONS, CommandBuilder, RunQueue, qm_run_command
@@ -145,12 +146,14 @@ class App:
         client_id: str = "",
         shared_dir: Path | None = None,
         keys_entered: set[str] | None = None,
+        address: Callable[[], str] | None = None,
     ):
         """One workspace. Alone (tests, `qm serve` before clients) it sets up its own Environments.
         Under a Hub, one App per client: `client_id` names the client, `environments` and the
         settings, release lists and AI keys in `shared_dir` are shared by all clients."""
         shared = shared_dir or data_dir
         self.client_id = client_id
+        self.address: Callable[[], str] = address or (lambda: "")  # where this service answers, for links
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
         self.queue = RunQueue(
@@ -186,9 +189,32 @@ class App:
         self.recording.on_finished = self.prepare_all.finished
         self.schedules = Schedules(data_dir / "schedules.json", submit=self._scheduled_run)
         self.audit = AuditLog(data_dir / "audit.jsonl")
+        self.notifier = Notifier(
+            data_dir,
+            client=lambda: (
+                str((self.environments.client_environment(self.client_id) or {}).get("client") or "")
+                if self.client_id
+                else str((self.environments.active() or {}).get("client") or "")
+            ),
+            address=lambda: self.address(),
+            audit=self.audit,
+        )
+        self.queue.on_finished = self.notifier.run_finished
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
         self.queue.environ = self.recording.environ = self.signin.environ = self.run_environ
         self.queue.defaults = lambda: {"retries": self._retries()}
+
+    def _notifications(self, method: str, route: list[str], data: dict[str, Any]) -> Reply:
+        try:
+            if method == "GET" and route == ["notifications"]:
+                return _json(self.notifier.view())
+            if method == "POST" and route == ["notifications"]:
+                return _json(self.notifier.update(data))
+            if method == "POST" and route == ["notifications", "test"]:
+                return _json(self.notifier.send_test(str(data.get("channel") or "")))
+        except NotifyError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
     def _retries(self) -> int:
         """How many times a failed step is tried again (Settings, Evidence); 1 until chosen."""
@@ -288,6 +314,8 @@ class App:
             return Reply(HTTPStatus.OK, self.audit.as_csv().encode("utf-8-sig"), "text/csv; charset=utf-8", name)
         if method == "GET" and route == ["tests"]:
             return _json(self.tests())
+        if route[:1] == ["notifications"]:
+            return self._notifications(method, route, data)
         if route == ["settings"]:
             if method == "POST":
                 try:

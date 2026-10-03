@@ -112,6 +112,8 @@ class RunQueue:
         self.environ: Callable[[], dict[str, str]] | None = None
         # Run options chosen in Settings, used when a request does not give its own (e.g. retries).
         self.defaults: Callable[[], dict[str, Any]] | None = None
+        # Told about every run that has ended (passed, failed, error or stopped), with its row from the store.
+        self.on_finished: Callable[[dict[str, Any]], None] | None = None
         self.tests_root = tests_root.resolve()
         self.evidence_root = evidence_root.resolve()
         self.work_dir = work_dir
@@ -194,6 +196,7 @@ class RunQueue:
                 self._wake.clear()
                 continue
             self._execute(run)
+            self._tell_finished(run["id"])
 
     def _execute(self, run: dict[str, Any]) -> None:
         folder = self.work_dir / run["id"]
@@ -237,6 +240,17 @@ class RunQueue:
             fields["status"] = "error"
             fields["error"] = _last_lines(log) or f"The run stopped with exit code {code}."
         self.store.update(run["id"], **fields)
+
+    def _tell_finished(self, run_id: str) -> None:
+        """What happens after a run (a notification, for one) must never stop the queue."""
+        if self.on_finished is None:
+            return
+        try:
+            row = self.store.get(run_id)
+            if row is not None and row["status"] in FINISHED:
+                self.on_finished(row)
+        except Exception as e:
+            print(f"warning: after run {run_id}: {type(e).__name__}: {e}", file=sys.stderr)
 
     # ------------------------------------------------------------------ helpers
 

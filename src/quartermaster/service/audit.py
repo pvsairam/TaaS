@@ -98,6 +98,10 @@ def describe(route: list[str], data: dict[str, Any], reply: Any) -> Described | 
     options: dict[str, Any] = given if isinstance(given, dict) else {}
     if key == "settings":
         return "Changed settings", "Settings", {k: v for k, v in data.items() if isinstance(v, str | int | bool)}
+    if key == "notifications":  # never the webhook address or the password: only which settings changed
+        return "Changed notification settings", "Notifications", {"changed": ", ".join(sorted(data))}
+    if key == "notifications/test":
+        return "Sent a test notification", str(data.get("channel") or ""), {"result": reply.get("message")}
     if key == "ai/key":
         return ("Entered the AI key" if str(data.get("key") or "").strip() else "Removed the AI key"), "AI", {}
     if key == "environments/client":

@@ -241,7 +241,7 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 | **Needs attention** | Test team | Failures grouped by kind (checks that did not match, items not found, service calls that failed, screens that did not respond, sign-in problems, runs that could not start, unreadable files) with the failed step, expected and observed, the screenshot and the last release it passed on. Oracle screen changes are accepted with one click (the old file is kept). Each failure says its likely cause from the run history (the Oracle update, changed data, or the test itself); when it is the update, **Draft SR** writes an Oracle service request to copy into My Oracle Support. |
 | **Schedules** | Test leads | Tests that run by themselves on chosen days at a chosen time (for example every night at 02:00), while `qm serve` runs. Each shows when it runs next and links to its last run; **Run now** starts it at once. |
 | **Record a test** | Functional team | Name the test and start. A browser opens already signed in. While recording: a timer, the steps so far, Pause and Resume, Add check, Add note (what should happen at a step), Mask value, Undo and Finish. |
-| **Settings** | Everyone | **Clients and environments**: add each client and its pods (address, Oracle release, kind, sign-in), with test users and personas; passwords are typed here and saved encrypted (by Windows for your Windows user), never shown again. Production pods are refused. Switch the pod in use from the menu. Each client is kept apart: its own tests, manual scripts, evidence, runs, schedules, Needs attention and audit log (the first client keeps the default folders; others are in `clients/<name>-<code>/`), and every client's schedules run even when another is in use. **Backup and restore** (General tab): download one zip with your tests, run history, clients and settings, and put it back later. Also: the AI assistant (any provider; the key is kept in memory or in an environment variable), evidence options, folders, theme and keyboard shortcuts. For pods behind single sign-on or MFA, **Sign in by hand** opens a browser to sign in once; runs then reuse that session (kept in memory only). |
+| **Settings** | Everyone | **Clients and environments**: add each client and its pods (address, Oracle release, kind, sign-in), with test users and personas; passwords are typed here and saved encrypted (by Windows for your Windows user), never shown again. Production pods are refused. Switch the pod in use from the menu. Each client is kept apart: its own tests, manual scripts, evidence, runs, schedules, Needs attention and audit log (the first client keeps the default folders; others are in `clients/<name>-<code>/`), and every client's schedules run even when another is in use. **Notifications** (a message to Slack, Teams or e-mail when a run fails), **Backup and restore** (General tab): download one zip with your tests, run history, clients and settings, and put it back later. Also: the AI assistant (any provider; the key is kept in memory or in an environment variable), evidence options, folders, theme and keyboard shortcuts. For pods behind single sign-on or MFA, **Sign in by hand** opens a browser to sign in once; runs then reuse that session (kept in memory only). |
 | **Audit log** | Test leads, auditors | Who changed what in Quartermaster and when: runs started, approvals, accepted screen changes, test data saved, imports, schedules, settings and sign-ins. Never passwords, keys or test data values. Search, and download as CSV. |
 
 Start a run from anywhere with **New run** (or press `N`). `Ctrl+K` searches and runs anything: pages, tests,
@@ -265,6 +265,29 @@ lists are kept in `.qm/releases`, and imported manual scripts in `.qm/manual` (t
 Run history is kept in `.qm/` (next to where you started `qm serve`); evidence stays in `evidence/`
 as with `qm run`. The web UI needs nothing extra installed. It only answers on this computer
 (127.0.0.1), and refuses requests from other web sites, so other people and pages cannot start runs.
+
+## Notifications (tell people when a run fails)
+
+Settings, **Notifications** (for the client in use: every client has its own) sends a short message
+when a run fails, so nobody has to open the page to find out. Two ways, either or both:
+
+- **Slack, Microsoft Teams or another service**: paste a webhook address (Slack: Incoming Webhooks;
+  Teams: a Workflows webhook, "When a Teams webhook request is received"). "Other" posts plain JSON.
+- **E-mail**: your own mail server (host, port, STARTTLS or SSL, user and password), the sender and
+  the people to write to.
+
+**When to send:** for scheduled runs only (the default: nobody watches those) or for every run; and only
+when something failed, or after every finished run. A run you stop never sends anything.
+
+**What a message says:** the client, the run, how many tests failed, and for each failed test its name,
+the failed step and the kind of problem. Never passwords or test data. What a check expected and found
+comes from the pod and can hold personal data, so it is left out unless you switch on *Include what went
+wrong*.
+
+The webhook address (anyone with it can post to the channel) and the mail password are saved encrypted,
+like the pod passwords, and are never shown again. **Send a test message** tries a channel at once. Every
+attempt, good or bad, is listed under *Recent messages* and in the audit log, so a channel that stopped
+working is noticed. Sending happens in the background and never stops a run.
 
 ## Backup and restore
 

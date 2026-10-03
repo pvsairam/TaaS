@@ -563,6 +563,7 @@ def _serve(args: argparse.Namespace) -> int:
         app.stop()
         return 2
     address = f"http://127.0.0.1:{port_of(server)}"
+    app.address = address
     app.start()
     print(f"Quartermaster is running at {address}  (tests: {tests}, evidence: {args.evidence})")
     print("Keep this window open while you use it. Press Ctrl+C to stop.")

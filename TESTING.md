@@ -575,6 +575,41 @@ You should see: the run passes. Open the file: `- role: "link:Locations"` is the
 
 Delete the demo files from `my_tests` when you are done.
 
+### 6.17 Notifications when a run fails
+
+You need one place to receive a message. Use whichever you have:
+
+- a **Slack** or **Microsoft Teams** channel where you may add a webhook (Slack: Apps, Incoming Webhooks;
+  Teams: Workflows, "When a Teams webhook request is received" and post to a channel), or
+- a **mail server** you may send through (host, port, user and password), or
+- for a harmless first try: a free test address from a web page such as webhook.site (it shows what was
+  posted; the test message holds no secrets). Choose **Other (sends JSON)** and paste the address it gives you.
+
+1. Click **Settings**, then the **Notifications** tab. A blue box says nothing is switched on.
+2. In the Slack, Teams or other service box, choose the service, paste the address, tick
+   **Send to this webhook** and click **Save**. (For e-mail, fill in the box below it instead.)
+3. Click **Send a test message**.
+
+You should see: "Sent to the webhook." (or "Sent to 1 recipient(s)." for e-mail) in green, and the message
+"Test message from Quartermaster" in your channel or inbox. Under **Recent messages** the attempt is
+listed. If it did not work, the text says why, for example "the webhook answered HTTP 404" or "the mail
+server refused the user name or password". The address and password are not shown again; the box says
+"Saved (hidden)".
+
+4. Make a run fail on a schedule, which is what notifications are for. Copy the demo files if you have not
+   (see 6.14), then open **Schedules**, **New schedule**: Name `Notify check`, what to test: **Retry demo
+   (always fails, reads only)**, today only, a time two minutes ahead, **On** ticked. Save it, then click
+   **Run now** on it so you need not wait.
+
+You should see: when the run ends (about a minute), a message like "Acme: 1 of 1 test failed" in your
+channel or inbox, naming **Retry demo**, the failed step and "service calls that failed". It does not
+contain the pod's own text. **Recent messages** lists it, and the **Audit log** has "Sent a notification".
+
+5. Start the same test yourself from **Tests**. You should see no message, because the default is
+   scheduled runs only. In **When to send**, choose **Every run**, **Save**, and run it again: now a message comes.
+6. Delete the schedule when you are done (open it, **Delete**), and switch notifications off if you only
+   wanted to try them.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

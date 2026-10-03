@@ -54,6 +54,7 @@ class Hub:
         old = Settings(data_dir / "settings.json").get()
         self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
         self.audit = AuditLog(data_dir / "audit.jsonl")
+        self.address = ""  # where this service answers (set by qm serve), for the links in notifications
         self._keys: set[str] = set()  # AI keys pasted in Settings, shared by all clients, in memory only
         self._apps: dict[str, App] = {}
         self._lock = threading.RLock()
@@ -87,6 +88,7 @@ class Hub:
             client_id=client_id,
             shared_dir=self.data_dir,
             keys_entered=self._keys,
+            address=lambda: self.address,
             **self._options,
         )
         self._apps[client_id] = app

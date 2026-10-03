@@ -5,6 +5,7 @@ import {checkPod, openFolder} from "./components.js";
 import {connection, envName, loadCommon, schedule, state} from "./state.js";
 import {setTheme, show} from "./app.js";
 import {environmentsCard} from "./page-environments.js";
+import {notificationsTab} from "./page-notifications.js";
 
 export async function settingsPage() {
   await loadCommon();
@@ -34,6 +35,9 @@ export async function settingsPage() {
       byHandRow(st))});
   const tab = TABS.some(([id]) => id === state.query.tab) ? state.query.tab : "environments";
   const environments = tab === "environments" ? await environmentsCard(settingsPage) : null;
+  if (state.page !== "settings") return;
+
+  const notifications = tab === "notifications" ? await notificationsTab(settingsPage) : null;
   if (state.page !== "settings") return;
 
   const ai = aiCard(st.ai);
@@ -89,6 +93,7 @@ export async function settingsPage() {
     environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse), h("div", {class: "stack"}, environments)),
     evidence: h("div", {style: "max-width:720px"}, evidence),
     ai: h("div", {style: "max-width:720px"}, ai),
+    notifications,
     general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, appearance), h("div", {class: "stack"}, shortcuts)),
   }[tab];
   show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
@@ -100,7 +105,8 @@ export async function settingsPage() {
     content);
 }
 
-const TABS = [["environments", "Clients & environments"], ["evidence", "Evidence"], ["ai", "AI assistant"], ["general", "General"]];
+const TABS = [["environments", "Clients & environments"], ["evidence", "Evidence"], ["ai", "AI assistant"],
+  ["notifications", "Notifications"], ["general", "General"]];
 
 // Backup and restore: one zip with the tests, run history, clients and settings (never the passwords).
 // A restore is only stored here; the next start of Quartermaster applies it, because its databases are
