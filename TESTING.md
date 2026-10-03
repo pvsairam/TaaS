@@ -484,19 +484,19 @@ You should see: the run passes. Under the test's name a blue box says **Test dat
 ("1 cleanup step done after the test"). Open the Word document: near the end there is a
 **Cleanup of test data** table with the step marked Passed.
 
-3. Open `my_tests\cleanup_demo.yaml` and change `locationsV2?limit=1` to `locationsV9?limit=1`. Run it again.
+3. Open the file `my_tests\cleanup_demo.yaml` in Notepad (the page only shows a test, it has no edit button) and change `locationsV2?limit=1` to `locationsV9?limit=1`. Run it again.
 
 You should see: the run fails at step 1, and the blue box says **Nothing to clean up**: the test
 never saved a location, so the cleanup step was skipped instead of calling an address with a blank
 in it. The Word document shows the cleanup step as "Nothing to clean".
 
-4. Put `locationsV2?limit=1` back. Now change the cleanup line to `value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/300`.
+4. Save the file. Put `locationsV2?limit=1` back. Now change the cleanup line (in Notepad too) to `value: DELETE /hcmRestApi/resources/11.13.18.05/locationsV2/300`.
 
 You should see: the test is unreadable (see **Needs attention**, "Unreadable files") and says a cleanup
 DELETE must use a value the test saved, such as `${location_id}`. Put the line back as it was,
 or delete the demo file when you are done.
 
-5. To see a cleanup that fails, change the cleanup line to
+5. To see a cleanup that fails, in Notepad change the cleanup line (the last `value:` line) of `my_tests\cleanup_demo.yaml` to
    `value: GET /hcmRestApi/resources/11.13.18.05/locationsV2/1` (a location that does not exist), and run the demo.
 
 You should see: the test still **passes**. Click **Needs attention**: a card **Cleanup did not finish** says
