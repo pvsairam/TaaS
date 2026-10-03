@@ -6,6 +6,7 @@ The sample data is built by `ui_site.py`. Skipped when Playwright is not install
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import zipfile
@@ -201,6 +202,27 @@ def test_a_schedule_can_run_a_suite(site: Site, page: Page) -> None:
     drawer.get_by_role("button", name="Save").click()
     see(page, "Nightly HCM")
     see(page, "Suite: Everything in HCM")
+
+
+def test_the_audit_log_says_it_is_whole_and_exports_a_checkable_zip(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/audit")
+    see(page, "The audit log is whole.")
+    page.get_by_role("button", name="Export", exact=True).click()
+    drawer = page.locator(".drawer")
+    drawer.get_by_label("Format").select_option("jsonl")
+    drawer.get_by_label("Word").fill("sample site")
+    expect(drawer).to_contain_text("1 line will be in the export.", timeout=WAIT)
+    with page.expect_download() as got:
+        drawer.get_by_role("link", name="Download the zip").click()
+    with zipfile.ZipFile(got.value.path()) as z:
+        assert sorted(z.namelist()) == ["HOW_TO_VERIFY.txt", "audit.jsonl", "manifest.json"]
+        manifest = json.loads(z.read("manifest.json"))
+        assert (
+            manifest["entries"] == 1
+            and manifest["filters"] == {"text": "sample site"}
+            and manifest["log"]["chain"] == "intact"
+        )
+        assert "Opened the sample site" in z.read("audit.jsonl").decode()
 
 
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:

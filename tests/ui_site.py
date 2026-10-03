@@ -104,6 +104,7 @@ def build_site(tmp: Path) -> Site:
     )
     app = hub.app
     add_suite_tests(app)
+    app.audit.add("Opened the sample site", "Sample", {"for": "the browser tests"}, who="Test Person")
     (tests / "_library").mkdir()
     (tests / "_library" / "open-locations.yaml").write_text(
         "library: open-locations\ntitle: Open the Locations page\nparams:\n  page_name: Locations\nsteps:\n"

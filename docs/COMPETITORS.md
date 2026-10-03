@@ -41,6 +41,7 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 | Test data: unique values per run, dates from today, values that belong to each pod, a clear stop when a pod lacks one | Yes (not tested on a real pod) | No |
 | Setup steps that check or make data first (for example "the period is open"); a setup that is not met is told apart from a broken release | Yes (not tested on a real pod) | No |
 | Saved suites by tag, folder, module, product, priority or named tests, run from a page, a schedule or the command line | Yes (not tested on a real pod) | No |
+| Audit trail: every line chained by hash so a change shows, a filtered export (CSV or JSON lines) with a manifest, offline check | Yes | No (stronger: send the lines to a company log service) |
 | FBDI or HDL file import steps | No | **Yes** |
 | BIP or OTBI report checks | No | **Yes** |
 | Screenshot comparison before and after a release | No | **Yes** (visual tools sell this) |

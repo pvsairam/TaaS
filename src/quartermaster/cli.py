@@ -843,6 +843,83 @@ def _restore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _audit(args: argparse.Namespace) -> int:
+    """Check or export the audit log from a terminal: a scheduled copy, or checking an export an auditor was sent."""
+    import zipfile
+
+    from quartermaster.service import auditexport
+    from quartermaster.service.audit import AuditLog, check_export, computer_user
+
+    log = AuditLog(Path(args.data) / "audit.jsonl")
+    if args.action == "export":
+        try:
+            data, name, manifest = auditexport.build(
+                log,
+                fmt=args.format,
+                exported_by=computer_user(),
+                since=args.since or "",
+                until=args.until or "",
+                who=args.who or "",
+                text=args.text or "",
+            )
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        out = Path(args.out) if args.out else Path(name)
+        out.write_bytes(data)
+        print(f"Wrote {out}: {manifest['entries']} lines, chain {manifest['log']['chain']}.")
+        return 0
+    if args.file:  # an exported file: each line must be what its hash says
+        path = Path(args.file)
+        raw = path.read_bytes()
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as z:
+                member = next((n for n in z.namelist() if n.endswith(".jsonl")), None)
+                if member is None:
+                    print("error: this zip has no .jsonl file (only the .jsonl export can be checked)", file=sys.stderr)
+                    return 2
+                raw = z.read(member)
+        got = check_export(raw)
+        if not got["ok"]:
+            print(f"BROKEN at line {got['problem']['line']}: {got['problem']['why']}")
+            return 1
+        gaps = (
+            f", {got['gaps']} gap(s) where lines are missing between two (normal for a filtered export)"
+            if got["gaps"]
+            else ""
+        )
+        print(f"OK: {got['entries']} lines, each is what its hash says{gaps}. Newest hash: {got['head']}")
+        return 0
+    got = log.verify()
+    if not got["ok"]:
+        print(f"BROKEN at line {got['problem']['line']}: {got['problem']['why']}")
+        return 1
+    note = f" ({got['legacy']} older lines from before hashing are covered by the first hash)" if got["legacy"] else ""
+    print(f"OK: {got['entries']} lines, the chain is whole{note}. Newest hash: {got['head']}")
+    if args.against:
+        import json
+
+        manifest = (
+            json.loads(Path(args.against).read_text(encoding="utf-8")) if not zipfile.is_zipfile(args.against) else {}
+        )
+        if not manifest:
+            with zipfile.ZipFile(args.against) as z:
+                manifest = json.loads(z.read("manifest.json"))
+        kept = manifest.get("log") or {}
+        if not kept.get("head"):
+            print("That manifest has no newest hash to check against (the log was empty or not hashed then).")
+            return 0
+        why = log.holds(str(kept["head"]), int(kept.get("entries") or 0))
+        if why:
+            print(f"NOT CONSISTENT with the manifest: {why}.")
+            return 1
+        print(
+            f"Consistent with the manifest of {manifest.get('exported_at', 'that export')}: "
+            "nothing before it was cut off."
+        )
+    return 0
+
+
 def _users(args: argparse.Namespace) -> int:
     """Manage sign-in from a terminal: for getting back in when nobody can sign in. Whoever has the computer's
     files could always do this, so it adds no new way in."""
@@ -1059,6 +1136,23 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--no-browser", action="store_true", help="do not open the web browser")
     sv.set_defaults(func=_serve)
+
+    au = sub.add_parser("audit", help="check the audit log's chain of hashes, or export it (a zip with a manifest)")
+    au.add_argument("action", choices=["verify", "export"])
+    au.add_argument("file", nargs="?", help="verify: an exported .jsonl (or the zip) instead of the live log")
+    au.add_argument("--data", default=".qm", help="the data folder")
+    au.add_argument(
+        "--against", help="verify: a manifest.json (or the zip) from an earlier export to hold the log against"
+    )
+    au.add_argument("--out", help="export: where to write the zip (default: a dated name here)")
+    au.add_argument(
+        "--format", default="jsonl", choices=["csv", "jsonl"], help="export: csv for spreadsheets, jsonl to verify"
+    )
+    au.add_argument("--from", dest="since", help="export: first day, like 2026-10-01")
+    au.add_argument("--to", dest="until", help="export: last day")
+    au.add_argument("--who", help="export: only this person (any part of the name)")
+    au.add_argument("--text", help="export: only lines with this text")
+    au.set_defaults(func=_audit)
 
     us = sub.add_parser("users", help="sign-in: list users, add one, reset a password, or turn sign-in off")
     us.add_argument("action", choices=["list", "add", "passwd", "disable-signin"])

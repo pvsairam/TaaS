@@ -709,6 +709,33 @@ then has an **Approval** section with all of it, and an `approvals.json` with th
 - Quartermaster has no log-in of its own yet, so the name is the one the approver types, next to the user
   signed in to the computer. The pack says so. With sign-in on (see Sign-in and roles) the approver is the signed-in person and only approvers may approve.
 
+## Audit trail (an export an auditor can check)
+
+The **Audit log** page records who did what and when: runs, approvals, accepted screen changes, settings, suites, sign-ins
+(also the failed ones and a Google sign-in that was refused), users added, removed or given a new password, backups and
+exports. Passwords, keys and test data values are never written to it.
+
+- **Tamper evidence.** Each line carries `prev` (the hash of the line before it) and `hash` (SHA-256 over `prev` and the
+  line's own content). Changing, removing, adding or reordering a line breaks the chain from that line on. The Audit log page
+  checks it every time it opens and says **The audit log is whole** or **has been changed** with the line number and why.
+  Lines written before this existed have no hash; the first hashed line is chained to a hash of everything before it, so
+  those are covered too. The same check from a terminal: `qm audit verify`.
+- **Export** (Audit log, **Export**; administrators and approvers). A zip with the lines as **CSV** (for a spreadsheet) or
+  **JSON lines** (for security tools, and the format that can be checked again), optionally only from a date to a date, one
+  person, or lines with a word. It also has `manifest.json` (what is in the file, its SHA-256, who exported it and when, whether it
+  is the complete log, and the newest hash and line count of the whole log) and `HOW_TO_VERIFY.txt`. The export is itself a line
+  in the log.
+- **Check an export** with `qm audit verify audit.jsonl` (or the zip): every line must still be what its hash says, and
+  a complete export is checked as one chain. An export that was filtered has gaps on purpose; they are counted.
+- **Cut-off lines.** A chain cannot show that the newest lines were removed. Keep a manifest somewhere else (or send it
+  to someone). Later `qm audit verify --against manifest.json` checks that the line the export ended with is still in the log and
+  the log has not got shorter.
+- **From a terminal, on a schedule:** `qm audit export --out audit-october.zip --from 2026-10-01 --to 2026-10-31 --format jsonl`.
+  Without `--data` it uses `.qm`. The plain **Download CSV** is as it was.
+- This is evidence of change, not a lock: someone who can write the file and also rewrites every later line could build a new
+  chain. Keeping manifests (or the zip) outside this computer is what makes that visible, and for stronger guarantees send
+  the JSON lines to a log service your company controls.
+
 ## Notifications (tell people when a run fails)
 
 Settings, **Notifications** (for the client in use: every client has its own) sends a short message

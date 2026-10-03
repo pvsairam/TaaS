@@ -1163,6 +1163,50 @@ You should see: the first lists each suite with how many tests it has and their 
 You should see: it is gone and its file is removed. The tests themselves are untouched. Delete the demo files from
 `my_tests` when you are done (including the `_suites` folder).
 
+### 6.32 Audit trail
+
+1. Click **Audit log** in the menu.
+
+You should see: a blue box **The audit log is whole.** with the number of lines and the dates they run from and to, then the
+table. Buttons **Export** and **Download CSV** at the top.
+
+2. Do something that is recorded: start any run, or change the release in Settings. Press F5 on **Audit log**.
+
+You should see: the new line at the top, and the blue box still says the log is whole (with one more line).
+
+3. Click **Export**. Choose **JSON lines**, type a word that is in some lines (for example the name of a test) in **Word**, and watch the
+   line at the bottom say how many lines will be in the export. Click **Download the zip**, and unzip it.
+
+You should see: three files: `audit.jsonl`, `manifest.json` and `HOW_TO_VERIFY.txt`. In the manifest: the number of lines, your
+filter under `filters`, `"complete": false`, and `log.chain` is `intact`. Back on the Audit log page there is a new line,
+**Exported the audit log**, with your name.
+
+4. In a terminal in the Quartermaster folder:
+
+   ```
+   qm audit verify
+   qm audit verify path\to\audit.jsonl
+   ```
+
+You should see: `OK: ... the chain is whole` for the first, and `OK: ... each is what its hash says` for the second.
+
+5. Now try to cheat. Close Quartermaster. Open `.qm\audit.jsonl` in Notepad, change a word in one line (for example the name in
+   a **Who**), save, and run `qm audit verify` again.
+
+You should see: `BROKEN at line N: this line was changed`, with N the line you edited, and the exit code is 1. Start Quartermaster:
+the Audit log page shows a red box **The audit log has been changed.** with the same line number. Change the word back: it is whole again.
+
+6. Put your backup copy of `.qm\audit.jsonl` back, then delete a whole line in the middle of the file in Notepad and save.
+
+You should see: `BROKEN at line N+1: the line before it was changed, removed or moved` (N is the line you deleted).
+
+7. Make an export of the whole log (no word, no dates) and keep the `manifest.json`. Then, with Quartermaster closed, delete the **last** line of `.qm\audit.jsonl`.
+
+You should see: `qm audit verify` still says OK (a chain cannot see the end cut off), but
+`qm audit verify --against path\to\manifest.json` says `NOT CONSISTENT with the manifest: the newest line of that export is not in the log any more`.
+
+Make a copy of `.qm\audit.jsonl` before step 5, and put it back when you are done.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

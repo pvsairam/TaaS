@@ -8,6 +8,9 @@ computers and other web sites cannot start runs.
     GET  /api/settings, POST /api/settings   {"environment_name", "release"}
     POST /api/attention/dismiss      {"keys"} hide items of Needs attention (they come back if it fails again)
     GET  /api/audit, /api/audit.csv  the audit log: who changed what, when (newest first; the CSV oldest first)
+                                     /api/audit?from=&to=&who=&text=&what= picks lines
+    GET  /api/audit/verify           is the chain of hashes in the log whole? (which line broke it, if not)
+    GET  /api/audit/export?format=csv|jsonl&from=&to=&who=&text=&what=   a zip: the lines, manifest.json, how to check
     GET  /api/environments           clients and their pods (never passwords), and which one runs use
     POST /api/environments/client, /client/delete, /environment, /environment/delete, /user, /user/delete,
          /activate, /check           set them up on the page; passwords are saved encrypted (vault.py)
@@ -94,10 +97,11 @@ from quartermaster.dsl.suites import SuiteError
 from quartermaster.evidence.certification import certification_rows, summarize_rows, write_certification_pack
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
-from quartermaster.service import insights, suites, testdata
+from quartermaster.service import audit as audit_module
+from quartermaster.service import auditexport, insights, suites, testdata
 from quartermaster.service.aieval import AiEval
 from quartermaster.service.approvals import ApprovalError, Approvals
-from quartermaster.service.audit import AuditLog, describe
+from quartermaster.service.audit import AuditLog, computer_user, describe
 from quartermaster.service.discovery import Discovery
 from quartermaster.service.environments import Environments
 from quartermaster.service.heal import accept_update
@@ -437,7 +441,15 @@ class App:
         if method == "GET" and route == ["status"]:
             return _json(self.status())
         if method == "GET" and route == ["audit"]:
-            return _json({"entries": self.audit.entries()})
+            picked = {k: str((query.get(k) or [""])[0]).strip() for k in ("from", "to", "who", "text", "what")}
+            if not any(picked.values()):
+                return _json({"entries": self.audit.entries()})
+            found = self.audit.select(picked["from"], picked["to"], picked["who"], picked["text"], picked["what"])
+            return _json({"entries": found[::-1][: audit_module.MAX_SHOWN], "matching": len(found)})
+        if method == "GET" and route == ["audit", "verify"]:
+            return _json(self.audit.verify())
+        if method == "GET" and route == ["audit", "export"]:
+            return self._audit_export(query)
         if method == "GET" and route == ["audit.csv"]:
             name = f"quartermaster-audit-{datetime.now():%Y%m%d}.csv"
             return Reply(HTTPStatus.OK, self.audit.as_csv().encode("utf-8-sig"), "text/csv; charset=utf-8", name)
@@ -1144,6 +1156,34 @@ class App:
         except ValueError as e:  # SuiteError is a ValueError
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _audit_export(self, query: dict[str, list[str]]) -> Reply:
+        """The audit log (or the part asked for) as a zip with a manifest, and the export itself goes in the log."""
+        asked = {k: str((query.get(k) or [""])[0]).strip() for k in ("format", "from", "to", "who", "text", "what")}
+        try:
+            data, name, manifest = auditexport.build(
+                self.audit,
+                fmt=asked["format"] or "csv",
+                exported_by=self._who_name() or computer_user(),
+                since=asked["from"],
+                until=asked["to"],
+                who=asked["who"],
+                text=asked["text"],
+                action=asked["what"],
+            )
+        except ValueError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        self.audit.add(
+            "Exported the audit log",
+            name,
+            {
+                "format": manifest["format"],
+                "entries": manifest["entries"],
+                **{f"filter {k}": v for k, v in manifest["filters"].items()},
+            },
+            who=self._who_name(),
+        )
+        return Reply(HTTPStatus.OK, data, "application/zip", name)
 
     def _check_suite(self, name: str) -> None:
         suites.tests_of(self.tests_root, name, self.tests())

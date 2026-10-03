@@ -159,6 +159,8 @@ def required_role(method: str, route: list[str]) -> str:
         return "admin"  # the Google client ID and secret
     if route == ["tickets", "settings"]:
         return "admin"  # where the tracker is
+    if route[:2] == ["audit", "export"]:
+        return "approver"  # a copy of the whole record leaves the program
     if method == "GET":
         return "admin" if head in ("users", "backup", "notifications") else "any"
     if head == "approvals":
