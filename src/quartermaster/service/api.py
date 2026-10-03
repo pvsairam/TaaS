@@ -90,6 +90,7 @@ from quartermaster.evidence.certification import certification_rows, summarize_r
 from quartermaster.evidence.document import plain_error
 from quartermaster.runner.session import ENV as SESSION_ENV
 from quartermaster.service import insights
+from quartermaster.service.aieval import AiEval
 from quartermaster.service.approvals import ApprovalError, Approvals
 from quartermaster.service.audit import AuditLog, describe
 from quartermaster.service.discovery import Discovery
@@ -212,6 +213,9 @@ class App:
         self.signin = SignIn(signin_command, cwd=cwd)  # single sign-on or MFA: a person signs in once
         self.discovery = Discovery(
             data_dir / "discovery", cwd=cwd, audit=lambda what, subject, details: self.audit.add(what, subject, details)
+        )
+        self.ai_eval = AiEval(
+            data_dir / "ai_eval.json", audit=lambda what, subject, details: self.audit.add(what, subject, details)
         )
         self.tickets = Tickets(
             data_dir / "tickets", audit=lambda what, subject, details: self.audit.add(what, subject, details)
@@ -447,6 +451,13 @@ class App:
             return _json(self.settings.get())
         if method == "POST" and route == ["ai", "key"]:
             return _json(self.set_ai_key(str(data.get("key") or "")))
+        if route == ["ai", "eval"]:
+            if method == "POST":
+                try:
+                    return _json(self.ai_eval.start(ai_providers.config_from(self.settings.get())))
+                except ValueError as e:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+            return _json(self.ai_eval.view())
         if method == "POST" and route == ["ai", "check"]:
             return _json(ai_providers.check(ai_providers.config_from(self.settings.get())))
         if route[:1] == ["signin"]:

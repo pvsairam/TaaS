@@ -942,6 +942,36 @@ log does not show what the pod displayed.
    own tests that you committed, run it by hand again, and look at the summary. Only in a private repository, add
    `QM_NIGHTLY_DETAILS` = `on` and run again: now the failed step shows what the pod displayed.
 
+### 6.27 AI quality check
+
+Needs an AI provider and key saved in Settings (any provider). It sends 15 short made-up questions and nothing from your pod.
+
+1. Click **Settings**, then **AI assistant**. Choose your provider, model and key, click **Save**, then **Test the AI**.
+   Below the AI box find **AI quality check**.
+
+You should see: "Not run yet". The button **Check this AI** is grey until an AI is chosen and its key works.
+
+2. Click **Check this AI**.
+
+You should see: the button counts up ("Asking... 7 of 15"), taking about a minute.
+
+3. When it ends:
+
+You should see: a verdict (Good, Usable with care, Weak), a percentage, and a table of counts. Open **Every question**: each
+question has a coloured result, what the AI picked and what was wanted. A **Wrong pick** is the one to care about; the card says how many
+would have reached you.
+
+4. Change the model in the AI box (a smaller one if you used a large one), Save, and check again.
+
+You should see: a second score. Click **Earlier checks**: both scores are listed with the model names, so you can compare.
+
+5. Open **Audit log**.
+
+You should see: "Started the AI quality check" and "Finished the AI quality check" with the score. No keys.
+
+If every question says "Could not ask", the key or the model name is wrong: use **Test the AI** and fix it first. If a model scores
+Weak, tell me which model and send a screenshot of **Every question**, so I can see whether the questions or the model are at fault.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

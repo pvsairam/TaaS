@@ -444,6 +444,35 @@ Read this before turning the last two on:
   Enable on the Actions page.
 - A run that finds a failure ends red, which is how GitHub knows to tell you. A failed **cleanup** is on the summary too.
 
+## AI quality check (is the AI any good at this?)
+
+When a test cannot find a button, Quartermaster can ask the AI chosen in Settings what it became. The answer is only a
+suggestion that you accept, and Quartermaster checks it (found exactly once, not a Save or Delete the step never mentions).
+Still, models differ, and you should know how well yours does before you trust it.
+
+**Settings, AI assistant, AI quality check, Check this AI** asks the AI 15 made-up questions, each with a right answer:
+
+- 10 where one control on the screen is the item under a new name (a renamed button, a reworded field, a Redwood card, a
+  count added to a name, a step that says Save and a button called Save and Close, and a dangerous neighbour such as
+  Delete Draft next to Next);
+- 5 where the item is simply not on the screen (an error page, a look-alike, only dangerous buttons, two identical buttons).
+  The right answer there is *none*.
+
+It counts: **right pick**, **right "none"**, **missed it** (said none, harmless), **wrong pick** (the harmful answer, with how
+many would have reached you and how many the checks stopped), **unreadable** and **could not ask**. The verdict:
+
+| Verdict | Meaning |
+|---|---|
+| Good | At least 80% right and no wrong pick. |
+| Usable with care | At least 60% right and every wrong pick was stopped by the checks. Read each suggestion. |
+| Weak | Wrong picks the checks cannot rule out, or mostly unhelpful. Try a stronger model, or switch AI suggestions off. |
+
+The last 12 checks are kept with the model's name, so you can compare two models. **Only invented screens are sent** (no pod
+text and none of your tests); it costs 15 short questions. Every check is in the audit log. From a terminal:
+`qm eval-ai --ai-provider openai --ai-model <name> --ai-key-env OPENAI_API_KEY --min-score 0.8` (exit code 1 when it falls
+short), or `--cases my_cases.yaml` for your own golden cases in the format of
+`src/quartermaster/ai/evals/suggest_cases.yaml`. The questions about the other AI uses (Prepare) are not covered yet.
+
 ## Sign-in and roles
 
 Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in

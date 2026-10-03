@@ -319,6 +319,44 @@ def _discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _eval_ai(args: argparse.Namespace) -> int:
+    """Ask the AI the golden questions (ai/evals/suggest.py) and print how it did. Exit 1 when it falls short."""
+    from quartermaster.ai.evals import suggest as evals
+    from quartermaster.ai.providers import chat, config_from
+
+    config = config_from(  # what a provider's preset knows (its address, its key variable) need not be typed
+        {
+            "ai_provider": args.ai_provider,
+            "ai_model": args.ai_model,
+            "ai_base_url": args.ai_base_url,
+            "ai_key_env": args.ai_key_env,
+            "ai_workspace": args.ai_workspace,
+        }
+    )
+    problem = config.problem() if args.ai_provider else "choose an AI with --ai-provider (and --ai-model, --ai-key-env)"
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
+    try:
+        cases = evals.load_cases(Path(args.cases)) if args.cases else evals.load_cases()
+    except evals.CaseError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    report = evals.run(
+        cases, lambda system, prompt: chat(config, system, prompt, max_tokens=300, timeout=45), label=config.label
+    )
+    for r in report["cases"]:
+        print(f"{r['outcome'].upper():<10} {r['id']}" + (f"  (picked {r['picked']!r})" if r.get("picked") else ""))
+    c = report["counts"]
+    print(
+        f"\n{config.label}: {c['correct'] + c['right_none']} of {report['asked']} right "
+        f"({report['score']:.0%}); wrong {c['wrong']} (reached the person: {report['wrong_reached']}), "
+        f"missed {c['missed']}, unreadable {c['unreadable']}, errors {c['error']}"
+    )
+    print(report["advice"])
+    return 0 if report["verdict"] in ("good", "usable") and report["score"] >= args.min_score else 1
+
+
 def _nightly_summary(args: argparse.Namespace) -> int:
     """Print the Markdown summary of a nightly run from the report `qm run --report` wrote (see nightly.py)."""
     from quartermaster.nightly import read_report, summarize
@@ -867,6 +905,20 @@ def main(argv: list[str] | None = None) -> int:
     dv.add_argument("--out", required=True, help="JSON file to write the page names to")
     dv.add_argument("--kind", default=os.environ.get("QM_FUSION_KIND", "DEV"), choices=["DEV", "TEST", "STAGE"])
     dv.set_defaults(func=_discover)
+
+    ev = sub.add_parser(
+        "eval-ai", help="check how good the AI is at suggesting a missing item (sends only made-up screens)"
+    )
+    ev.add_argument("--ai-provider", default="", help="AI provider id, e.g. openai, anthropic, openrouter")
+    ev.add_argument("--ai-model", default="")
+    ev.add_argument("--ai-base-url", default="")
+    ev.add_argument("--ai-key-env", default="", help="NAME of the environment variable with the AI key")
+    ev.add_argument("--ai-workspace", default="", help="Anthropic only: workspace ID")
+    ev.add_argument(
+        "--cases", default="", help="your own golden cases file (default: the ones that come with Quartermaster)"
+    )
+    ev.add_argument("--min-score", type=float, default=0.0, help="exit 1 when fewer than this share (0 to 1) is right")
+    ev.set_defaults(func=_eval_ai)
 
     ns = sub.add_parser("nightly-summary", help="the summary page of a nightly run (used by GitHub Actions)")
     ns.add_argument("report", help="the JSON file written by qm run --report")

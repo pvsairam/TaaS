@@ -9,6 +9,7 @@ import {notificationsTab} from "./page-notifications.js";
 import {usersTab} from "./page-users.js";
 import {autoBackupCard} from "./page-autobackup.js";
 import {discoveryCard} from "./page-discovery.js";
+import {aiEvalCard} from "./page-aieval.js";
 import {ticketSettingsCard} from "./page-tickets.js";
 
 export async function settingsPage() {
@@ -91,6 +92,7 @@ export async function settingsPage() {
   const backups = tab === "general" ? await backupCard() : null;
   const autoBackups = tab === "general" ? await autoBackupCard() : null;
   const tracker = tab === "general" ? await ticketSettingsCard() : null;
+  const aiQuality = tab === "ai" ? await aiEvalCard(st.ai) : null;
   if (state.page !== "settings") return;
 
   const appearance = card({title: "Appearance",
@@ -105,7 +107,7 @@ export async function settingsPage() {
   const content = {
     environments: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, inUse, discovery), h("div", {class: "stack"}, environments)),
     evidence: h("div", {style: "max-width:720px"}, evidence),
-    ai: h("div", {style: "max-width:720px"}, ai),
+    ai: h("div", {class: "stack", style: "max-width:720px"}, ai, aiQuality),
     notifications,
     users,
     general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, autoBackups, appearance), h("div", {class: "stack"}, tracker, shortcuts)),

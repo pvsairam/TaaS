@@ -205,6 +205,14 @@ def test_pod_discovery_is_off_until_it_is_allowed_and_can_be_switched_off_again(
     )
 
 
+def test_the_ai_quality_check_is_there_and_needs_an_ai_to_be_chosen_first(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/settings?tab=ai")
+    card = page.locator("section", has_text="AI quality check")
+    expect(card).to_contain_text("Not run yet", timeout=WAIT)
+    expect(card).to_contain_text("made-up questions")
+    expect(card.get_by_role("button", name="Check this AI")).to_be_disabled()
+
+
 # ------------------------------------------------------------------ ticket links
 
 
