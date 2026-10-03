@@ -109,7 +109,11 @@ def parse_release(name: str, content: bytes, release_id: str = "") -> ReleaseImp
         sheets = read_workbook(content)
         best = max(sheets.values(), key=lambda rows: _header_score(_find_header(rows)[1]), default=[])
         return _from_rows(best, release_id)
-    raise ImportError_("use an .xlsx, .csv, .json or .yaml file")
+    if suffix in (".html", ".htm", ".txt", ".md"):  # a saved What's New page, or text copied from it
+        from quartermaster.importers.whats_new import parse_whats_new
+
+        return parse_whats_new(name, content, release_id)
+    raise ImportError_("use an .xlsx, .csv, .json, .yaml, .html (a saved What's New page) or .txt file")
 
 
 def _own_format(content: bytes, suffix: str, release_id: str) -> ReleaseImport:

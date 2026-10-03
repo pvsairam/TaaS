@@ -31,7 +31,7 @@ questions and name ideas) is in **[docs/PLAN.md](docs/PLAN.md)**.
 | Record and playback: `qm record` captures clicks/typing into a YAML spec | `src/quartermaster/recorder/` |
 | Evidence per run: screenshots (off / on failure / every step), video, `run.json`, Word document | `src/quartermaster/evidence/` |
 | `qm` CLI (`validate`, `plan`, `run`, `record`, `document`, `serve`) | `src/quartermaster/cli.py` |
-| Release feature list import (Oracle feature-listing .xlsx, .csv, .json/.yaml) and manual test script import (.xlsx), standard library only | `src/quartermaster/importers/` |
+| Release feature list import (Oracle feature-listing .xlsx, .csv, .json/.yaml, a saved What's New page .html or pasted text) and manual test script import (.xlsx), standard library only | `src/quartermaster/importers/` |
 | Web UI on your own computer (`qm serve`): start runs, follow them live, record, open evidence | `src/quartermaster/service/` |
 
 ## Start it (no terminal)
@@ -236,7 +236,7 @@ Your browser opens `http://127.0.0.1:8765`. Keep the terminal open while you use
 | **Overview** | Managers first, everyone | Pass rate, test coverage, what needs attention and runs this week. Release readiness for the pod's Oracle release (passed on it, failed on it, passed only on an earlier release, never passed), a comparison of releases once tests have run on two, recent activity and coverage by module. **Approval** records who approved the release and on which results. **Certification pack** downloads a zip for a release: a Word summary (with the approval in it, still with a sign-off table for paper) (every test's result on that release, what failed, what has not run yet) with each test's evidence document. |
 | **Runs** | Testers | Every run with its result, module, release, environment, start, duration, who ran it and tests passed; search and filter. A run shows live progress in words ("Executing step 3 of 10…"), then each test's steps with screenshots, expected and observed values, video, documents and details. Technical detail stays folded away until asked for. |
 | **Tests** | Functional team, testers | Every test with its module and last result; search, filter by module or result, and choose extra columns (process, job role, owner, release validated, environment, last run, duration, tags, updated). A test's own page reads its steps in plain words with the real test data. |
-| **Release impact** | Release managers, test leads | Import an Oracle update's feature list (the Readiness feature-listing spreadsheet, any .xlsx or .csv with a Feature column, or a release .json/.yaml). See which tests the update puts at risk and why, which features no test covers yet, and a suggested run under an optional time limit (critical tests always included). Tick opt-ins you have switched on, choose tests, and run just those. |
+| **Release impact** | Release managers, test leads | Import an Oracle update's feature list (the Readiness feature-listing spreadsheet, any .xlsx or .csv with a Feature column, a release .json/.yaml, or the What's New page itself, saved as .html or pasted as text). See which tests the update puts at risk and why, which features no test covers yet, and a suggested run under an optional time limit (critical tests always included). Tick opt-ins you have switched on, choose tests, and run just those. |
 | **Tests: Manual scenarios** | Functional team, test leads | Import Excel test scripts (a Test Scenarios and Test Cases workbook, or an action list with reference numbers), or type a new scenario's steps with **New scenario** (paste several lines to get one step per line). Each scenario is listed with its cases, steps, its Quartermaster result and missing test data. **Run by hand** the first time: a signed-in browser opens, the tester marks each step Pass or Fail, Quartermaster takes a picture at each mark and makes the Word evidence document, and remembers the clicks. After that, **Run** plays the scenario by itself. Or **Prepare**: an AI follows the written steps in the pod by itself (it stops rather than guess, and never presses Save, Submit or Delete unless the step says so); a person checks its pictures and approves it before it runs. **Prepare all** does this for every scenario that needs it, one after another; **To review** then shows each scenario with the picture of every step, to tick the right ones and **Approve selected**. Scenarios are matched to release features: Release impact shows which to run and which features only a manual script covers. |
 | **Needs attention** | Test team | Failures grouped by kind (checks that did not match, items not found, service calls that failed, screens that did not respond, sign-in problems, runs that could not start, unreadable files) with the failed step, expected and observed, the screenshot and the last release it passed on. Oracle screen changes are accepted with one click (the old file is kept). Each failure says its likely cause from the run history (the Oracle update, changed data, or the test itself); when it is the update, **Draft SR** writes an Oracle service request to copy into My Oracle Support. |
 | **Schedules** | Test leads | Tests that run by themselves on chosen days at a chosen time (for example every night at 02:00), while `qm serve` runs. Each shows when it runs next and links to its last run; **Run now** starts it at once. |
@@ -299,6 +299,35 @@ steps:
 - **Shared steps** (menu) lists every group, what it takes, which tests use it, and warns about a test that uses a group that does not exist. A test's **Steps** tab marks the steps that come from a group.
 - A suggested fix or an accepted Oracle screen change for a shared step is written to the shared file, and the card says so: every test that uses the group follows.
 - Backups include the `_library` folder (it is part of your tests).
+
+## Reading Oracle's What's New
+
+The feature spreadsheet has only a short line per feature. The What's New page has the detail that decides which
+tests matter: what changed on a screen, what you must switch on. Quartermaster reads that page, but never goes to
+Oracle's site itself (it would need your Oracle sign-in, and you stay in control of what it sees):
+
+1. In your browser open the What's New for the update, then **File, Save page as, Webpage, HTML only** (or select the
+   text and copy it).
+2. **Release impact, Import feature list**: choose the saved `.html` file, or paste the text. The release id (26D)
+   is read from the file name or the page; type it if it is not found.
+3. Check the preview, then **Save feature list**. Then use Release impact as always.
+
+How it reads, with no AI and nothing guessed:
+
+- A table with a **Feature** column (Oracle's feature summary) gives the list. The headings above it give the product
+  and the module (Human Capital Management is HCM, and so on). Its "Ready for use" and "Customer must take action"
+  columns decide the opt-in mark.
+- The text under a feature's own heading becomes its description (the page's own words, up to 1,200 characters), which
+  is what helps match the feature to your tests. "Customer must take action", "disabled by default", "opt in" or
+  steps to enable that need work mark it as opt-in; "you do not need to do anything" does not.
+- The kind of change (screen, process, report, service) comes from the words used: REST or API, report, approval or
+  process, page or screen.
+- A page with no feature table is read by its headings: the deepest headings that have text under them are the
+  features. Pasted text works the same (`#` lines, tab-separated rows, or short lines followed by longer ones).
+- Rows for another update, features without a product, and anything else left out are listed in the preview.
+
+A saved page keeps its tables and headings, so it reads better than pasted text. The preview shows each feature's text
+so you can check it. PDFs are not read yet: copy the text out of the PDF, or use the HTML page.
 
 ## Sign-in and roles
 

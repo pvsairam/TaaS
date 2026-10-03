@@ -792,6 +792,35 @@ You should see: a red box "A test uses shared steps that do not exist. 'read-loc
 
 6. Delete the demo files from `my_tests` when you are done (including `_library\read-locations.yaml`).
 
+### 6.22 Reading Oracle's What's New
+
+Uses a small sample page that comes with Quartermaster, so it needs no Oracle sign-in. Nothing is saved until you choose Save.
+
+1. Click **Release impact**, then **Import feature list**. Choose the file `examples\releases\26D_whats_new_sample.html`.
+
+You should see: the release box fills in with **26D**, and "4 features found for release 26D". **Columns used** says
+"Feature (table)" and "the text under each feature's heading". The first features are listed with their product,
+module, and "opt-in" on **New Personal Details Page** only. **Invoice Approval by Line** says Financials and BOTH.
+
+2. Click **What the page says** under a feature.
+
+You should see: the page's own words for it, for example for Redwood Worker Search: "Search for workers faster..." and the
+tip about the older page, nothing rewritten.
+
+3. Click **Save feature list**. Choose **26D.json** at the top if it is not already shown.
+
+You should see: the plan for 26D with those four features. Tests that mention search, personal details, locations or
+invoices are matched to them.
+
+4. Open the import again. Instead of a file, paste the contents of `examples\releases\26D_whats_new_sample.txt` into the
+   box **Or paste text** and click **Check file**.
+
+You should see: "2 features found for release 26D" (the text has two features).
+
+5. Now try your own: open a real What's New page of your update in your browser, save it as HTML only, and import it.
+   Look at the preview. If products or opt-in marks look wrong, tell me what the page looks like (a screenshot of the
+   page and of the preview) and I will adjust the reading.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

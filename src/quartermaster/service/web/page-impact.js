@@ -269,8 +269,10 @@ async function runChosen(e, plan, chosen) {
 
 export function openImport() {
   let file = null, content = "", preview = null;
-  const fileInput = h("input", {type: "file", class: "input", accept: ".xlsx,.xlsm,.csv,.json,.yaml,.yml", "aria-describedby": "imp-hint"});
+  const fileInput = h("input", {type: "file", class: "input", accept: ".xlsx,.xlsm,.csv,.json,.yaml,.yml,.html,.htm,.txt,.md", "aria-describedby": "imp-hint"});
   const releaseId = input({placeholder: "e.g. 26C", style: "max-width:140px", maxlength: "3", "aria-describedby": "imp-rel-hint"});
+  const paste = h("textarea", {class: "input", rows: "5", "aria-label": "Pasted What's New text", id: "imp-paste",
+    placeholder: "Or paste the text of the What's New page here", style: "width:100%;font:inherit;font-size:13px"});
   const result = h("div", {class: "stack", "aria-live": "polite"});
   const saveBtn = button("Save feature list", {kind: "primary", ic: "check", disabled: true});
   const checkBtn = button("Check file", {ic: "search", disabled: true});
@@ -289,6 +291,19 @@ export function openImport() {
     reader.onerror = () => result.replaceChildren(callout("danger", "The file could not be read.", null));
     reader.readAsDataURL(file);
   };
+  paste.oninput = () => {
+    preview = null;
+    saveBtn.disabled = true;
+    checkBtn.disabled = !(file || paste.value.trim());
+  };
+  // what is sent: the chosen file, or else the pasted text as a text file
+  const source = () => {
+    if (file) return {name: file.name, content};
+    const bytes = new TextEncoder().encode(paste.value);
+    let binary = "";
+    bytes.forEach((b) => { binary += String.fromCharCode(b); });
+    return {name: "pasted.txt", content: btoa(binary)};
+  };
   releaseId.oninput = () => { saveBtn.disabled = true; preview = null; };
   releaseId.onchange = () => { if (content) check(); };
 
@@ -296,14 +311,14 @@ export function openImport() {
     checkBtn.disabled = true;
     result.replaceChildren(h("div", {class: "skel", style: "height:80px"}));
     try {
-      preview = await api("/api/releases/import", {name: file.name, content, release_id: releaseId.value.trim()});
+      preview = await api("/api/releases/import", {...source(), release_id: releaseId.value.trim()});
       if (!releaseId.value) releaseId.value = preview.id;
       result.replaceChildren(previewView(preview));
       saveBtn.disabled = false;
     } catch (err) {
       result.replaceChildren(callout("danger", "This file cannot be used yet.", err.message));
     } finally {
-      checkBtn.disabled = !file;
+      checkBtn.disabled = !(file || paste.value.trim());
     }
   }
   checkBtn.onclick = check;
@@ -315,7 +330,7 @@ export function openImport() {
       saveBtn.onclick = async () => {
         saveBtn.disabled = true;
         try {
-          const saved = await api("/api/releases/import", {name: file.name, content, release_id: releaseId.value.trim(), save: true});
+          const saved = await api("/api/releases/import", {...source(), release_id: releaseId.value.trim(), save: true});
           toast(`Saved ${plural(saved.features, "feature")} of release ${saved.id}.`);
           close();
           view.pickedFor = "";
@@ -324,7 +339,8 @@ export function openImport() {
         } catch (err) { toast(err.message); saveBtn.disabled = false; }
       };
       return [
-        field2("File", fileInput, h("span", {id: "imp-hint"}, "An Excel sheet (.xlsx) or CSV with a Feature column, ideally also Product, Product Family and Customer Must Take Action. Or a Quartermaster release file (.json or .yaml).")),
+        field2("File", fileInput, h("span", {id: "imp-hint"}, "An Excel sheet (.xlsx) or CSV with a Feature column, ideally also Product, Product Family and Customer Must Take Action. Or a What's New page saved from your browser (.html: File, Save page as, Webpage HTML only). Or a Quartermaster release file (.json or .yaml).")),
+        field2("Or paste text", paste, "Copy the text of the What's New page and paste it. A saved .html page keeps its tables and headings, so it reads better."),
         field2("Oracle release", releaseId, h("span", {id: "imp-rel-hint"}, "The update these features are in. Rows for other updates are left out.")),
         callout("info", "Nothing is saved until you choose Save.", "The file stays on this computer; it is read here and kept in the Quartermaster data folder."),
         result,
@@ -352,5 +368,8 @@ function previewView(p) {
         p.skipped.length > 50 ? h("li", {class: "meta"}, `and ${p.skipped.length - 50} more`) : null)) : null,
     h("div", {}, h("div", {class: "caption", style: "margin-bottom:6px"}, "FIRST FEATURES"),
       h("ul", {class: "stack", style: "gap:6px;margin:0;padding-left:18px"}, p.sample.map((f) => h("li", {},
-        h("span", {style: "font-weight:500"}, f.title), h("span", {class: "meta"}, ` · ${f.product}${f.opt_in ? " · opt-in" : ""}`))))));
+        h("span", {style: "font-weight:500"}, f.title),
+        h("span", {class: "meta"}, ` · ${f.product} · ${f.module}${f.opt_in ? " · opt-in" : ""} · ${f.change_type}`),
+        f.description ? disclose("What the page says", h("p", {class: "meta", style: "margin:4px 0"}, f.description)) : null)))),
+    h("p", {class: "hint", style: "margin:0"}, "Read from the page's own text, nothing summarised or guessed. Check that the products and the opt-in marks are right before saving."));
 }
