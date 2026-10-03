@@ -536,6 +536,35 @@ users appear, and each user says the password is not saved yet: type it again.
 
 In a terminal: `qm backup my-backup.zip`, and, with Quartermaster closed, `qm restore my-backup.zip`.
 
+### 6.15b Automatic backups
+
+1. Click **Settings**, then the **General** tab. Find **Automatic backups**.
+
+You should see: "On: once a day after 02:00", the time, "Keep the newest 7", and "No automatic backup yet".
+(Quartermaster checks a minute after it starts, so a backup may already be listed.)
+
+2. Click **Back up now**.
+
+You should see: "Backup made." and one row under **Saved copies** with today's time, a size and **Download**, **Restore**.
+
+3. Type 99 in **Keep the newest** and click **Save**.
+
+You should see: a red message "keep between 1 and 30 backups". Type 3, **Save**: "Saved."
+
+4. Click **Back up now** four more times (wait a second between clicks, the file name has the time to the second).
+
+You should see: only the newest 3 copies are listed.
+
+5. Click **Download** on one and open the zip: it has `tests`, `data` and `backup.json`, like a normal backup.
+6. Set **After** to a time a few minutes from now, untick **Make a backup every day**, **Save**, then wait past that time.
+
+You should see: nothing new is made. Tick it again and **Save**: a new copy appears within a minute (the time has passed
+and none was made since).
+
+7. Open **Audit log**.
+
+You should see: "Made an automatic backup", "Changed the automatic backup settings", each with the file or what changed. No secrets.
+
 ### 6.16 Retries, flaky tests and suggested fixes
 
 **A. A step that fails is tried again**

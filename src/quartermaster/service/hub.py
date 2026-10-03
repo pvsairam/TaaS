@@ -29,6 +29,7 @@ from quartermaster.service import backup
 from quartermaster.service.api import ApiError, App, Reply
 from quartermaster.service.audit import AuditLog
 from quartermaster.service.auth import COOKIE, ROLES, Auth, AuthError
+from quartermaster.service.autobackup import AutoBackup, AutoBackupError
 from quartermaster.service.environments import Environments
 from quartermaster.service.google import BINDER_COOKIE, GoogleError, GoogleSignIn
 from quartermaster.service.settings import Settings
@@ -65,6 +66,10 @@ class Hub:
         old = Settings(data_dir / "settings.json").get()
         self.environments.import_from(os.environ, name=old["environment_name"], release=old["release"])
         self.audit = AuditLog(data_dir / "audit.jsonl")
+        self.autobackup = AutoBackup(
+            backup.Folders(tests_root, evidence_root, data_dir),
+            audit=lambda what, subject, details: self.audit.add(what, subject, details, who="Quartermaster"),
+        )
         # Sign-in and roles (off until switched on in Settings); one set of users for all clients.
         self.auth = Auth(
             data_dir / "users.db",
@@ -310,19 +315,50 @@ class Hub:
             if method == "POST" and route == "cancel":
                 backup.cancel(folders)
                 return _reply({"pending": None})
-        except backup.BackupError as e:
+            if route.startswith("auto"):
+                return self._auto_backup(method, route, url.query, body, folders)
+        except (backup.BackupError, AutoBackupError) as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _auto_backup(self, method: str, route: str, query: str, body: bytes, folders: backup.Folders) -> Reply:
+        auto = self.autobackup
+        if method == "GET" and route == "auto":
+            return _reply(auto.view())
+        if method == "POST" and route == "auto":
+            data = json.loads(body or b"{}")
+            if not isinstance(data, dict):
+                raise AutoBackupError("send the settings as a JSON object")
+            view = auto.update(data)
+            self.audit.add("Changed the automatic backup settings", "Backup", {"changed": ", ".join(sorted(data))})
+            return _reply(view)
+        if method == "POST" and route == "auto/run":
+            if auto.make() is None:
+                raise AutoBackupError(f"The backup could not be made: {auto.settings()['last_error']}")
+            return _reply(auto.view())
+        name = str((parse_qs(query).get("name") or [""])[0])
+        if method == "GET" and route == "auto/file":
+            content = auto.read(name)
+            self.audit.add("Downloaded an automatic backup", "Backup", {"file": name})
+            return Reply(HTTPStatus.OK, content, "application/zip", name)
+        if method == "POST" and route == "auto/restore":
+            wanted = str(json.loads(body or b"{}").get("name") or "")
+            info = backup.stage(folders, auto.read(wanted))
+            self.audit.add("Chose a backup to restore", "Backup", {"made": info.get("created_at"), "file": wanted})
+            return _reply({"pending": info})
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
     def start(self) -> None:
         with self._lock:
             self.sync()  # made but not started yet
             self._started = True
+            self.autobackup.start()
             for app in self._apps.values():
                 app.start()
 
     def stop(self) -> None:
         with self._lock:
             self._started = False
+            self.autobackup.stop()
             for app in self._apps.values():
                 app.stop()

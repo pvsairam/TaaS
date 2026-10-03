@@ -7,6 +7,7 @@ import {setTheme, show} from "./app.js";
 import {environmentsCard} from "./page-environments.js";
 import {notificationsTab} from "./page-notifications.js";
 import {usersTab} from "./page-users.js";
+import {autoBackupCard} from "./page-autobackup.js";
 
 export async function settingsPage() {
   await loadCommon();
@@ -80,6 +81,7 @@ export async function settingsPage() {
       h("p", {class: "hint", style: "margin:0"}, "The same choices are in New run; changing them in either place changes both. Prepare and Run by hand always show the browser."))});
 
   const backups = tab === "general" ? await backupCard() : null;
+  const autoBackups = tab === "general" ? await autoBackupCard() : null;
   if (state.page !== "settings") return;
 
   const appearance = card({title: "Appearance",
@@ -97,7 +99,7 @@ export async function settingsPage() {
     ai: h("div", {style: "max-width:720px"}, ai),
     notifications,
     users,
-    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, appearance), h("div", {class: "stack"}, shortcuts)),
+    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, autoBackups, appearance), h("div", {class: "stack"}, shortcuts)),
   }[tab];
   show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
     h("div", {class: "page-head"},

@@ -419,6 +419,20 @@ scripts and feature lists, schedules, the audit log, settings, and the clients a
   kept), so a restore can be undone. In a terminal, with Quartermaster closed: `qm restore my-backup.zip`.
 - Evidence you already have is never deleted by a restore that does not contain evidence.
 
+### Automatic backups
+
+On by default. While Quartermaster is running, one backup a day is saved in `.qm/backups/auto/` and the
+newest 7 are kept (Settings, General, **Automatic backups**: switch off, change the time, keep 1 to 30, include
+evidence, **Back up now**). It is the same zip as the download, so the same things are left out.
+
+- If the computer is off at the set time, the backup is made when Quartermaster is next running (a laptop
+  switched on at 9 gets the 2 o'clock backup at 9). Nothing is made while Quartermaster is closed.
+- Each copy can be downloaded or restored from the same card. A restore is applied at the next start, as above.
+- If a backup fails (no space, a locked file) the card says why, the audit log records it, and it is tried again
+  within a minute. Every backup and every change of these settings is in the audit log.
+- The copies are on the same computer, so they protect against a mistake or a bad restore, not against losing the
+  computer. Keep a downloaded copy somewhere else too (a synced folder, a USB stick).
+
 ## Proof of testing: screenshots, video and the Word evidence document
 
 Choose per run what to capture:
