@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from quartermaster.service import backup
+from quartermaster.service import atomic, backup
 
 FOLDER = "auto"
 PREFIX = "quartermaster-auto-"
@@ -197,8 +197,7 @@ class AutoBackup:
         return {}
 
     def _save(self, data: dict[str, Any]) -> None:
-        self._file.parent.mkdir(parents=True, exist_ok=True)
-        self._file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic.write_text(self._file, json.dumps(data, indent=2))
 
 
 def _when(iso: Any) -> datetime | None:

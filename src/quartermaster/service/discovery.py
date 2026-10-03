@@ -17,6 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from quartermaster.service import atomic
+
 TIMEOUT_S = 300
 
 
@@ -63,8 +65,7 @@ class Discovery:
     def set_enabled(self, key: str, on: bool) -> None:
         with self._lock:
             settings = {**self._settings(), self._slug(key): bool(on)}
-            self._folder.mkdir(parents=True, exist_ok=True)
-            (self._folder / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+            atomic.write_text(self._folder / "settings.json", json.dumps(settings))
         self._audit("Switched pod discovery on" if on else "Switched pod discovery off", "Discovery", {})
 
     def result(self, key: str) -> dict[str, Any] | None:
@@ -135,8 +136,7 @@ class Discovery:
                 if pages is None:
                     why = last[len("error: ") :] if last.startswith("error: ") else last
                     raise _Failed(why or "the look at the pod did not finish")
-                self._folder.mkdir(parents=True, exist_ok=True)
-                (self._folder / f"{self._slug(key)}.json").write_text(json.dumps(pages, indent=2), encoding="utf-8")
+                atomic.write_text(self._folder / f"{self._slug(key)}.json", json.dumps(pages, indent=2))
             except _Failed as e:
                 with self._lock:
                     self._states[key] = {"status": "failed", "error": str(e), "at": _now()}

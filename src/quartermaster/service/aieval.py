@@ -16,6 +16,7 @@ from typing import Any
 from quartermaster.ai import providers as ai_providers
 from quartermaster.ai.evals import suggest as evals
 from quartermaster.ai.providers import AIConfig
+from quartermaster.service import atomic
 
 KEEP = 12  # scores kept
 
@@ -83,8 +84,7 @@ class AiEval:
 
             result = evals.run(cases, ask, label=label, on_case=progress)
             rows = [result, *self.history()][:KEEP]
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(rows, indent=1), encoding="utf-8")
+            atomic.write_text(self._path, json.dumps(rows, indent=1))
             self._audit(
                 "Finished the AI quality check",
                 "AI",

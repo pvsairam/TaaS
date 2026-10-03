@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from quartermaster.service import atomic
+
 REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._#-]{0,39}$")
 _KEY_IN_URL = re.compile(r"[A-Z][A-Z0-9]+-\d+")
 MAX_URL = 400
@@ -62,8 +64,7 @@ class Tickets:
             new["create_template"] = _template(
                 str(data["create_template"] or ""), ("{title}", "{description}"), "new ticket address", any_of=True
             )
-        self._folder.mkdir(parents=True, exist_ok=True)
-        (self._folder / "settings.json").write_text(json.dumps(new, indent=2), encoding="utf-8")
+        atomic.write_text(self._folder / "settings.json", json.dumps(new, indent=2))
         self._audit("Changed the ticket tracker settings", "Tickets", {"changed": ", ".join(sorted(data))})
         return new
 
