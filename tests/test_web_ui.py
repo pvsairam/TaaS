@@ -205,6 +205,47 @@ def test_pod_discovery_is_off_until_it_is_allowed_and_can_be_switched_off_again(
     )
 
 
+# ------------------------------------------------------------------ ticket links
+
+
+def test_a_ticket_can_be_written_linked_and_removed_from_a_failure(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/settings?tab=general")
+    page.fill("#tt-link", "https://example.atlassian.net/browse/{key}")
+    page.fill(
+        "#tt-create",
+        "https://example.atlassian.net/secure/CreateIssueDetails!init.jspa?summary={title}&description={description}",
+    )
+    page.locator("section", has_text="Ticket tracker").get_by_role("button", name="Save").click()
+    expect(page.get_by_text("Saved.", exact=True)).to_be_visible(timeout=WAIT)
+
+    page.goto(f"{site.url}/#/attention")
+    card = page.locator("article[aria-label^='Check did not match']")
+    card.get_by_role("button", name="Ticket", exact=True).click()
+    drawer = page.locator(".drawer")
+    expect(drawer.locator("textarea")).to_have_value(re.compile("Redwood Shores"), timeout=WAIT)
+    expect(drawer.get_by_role("link", name=re.compile("Open .* with it|Open the tracker with it"))).to_be_visible()
+    page.fill("#tk-ref", "javascript:alert(1)")
+    drawer.get_by_role("button", name="Link ticket").click()
+    expect(drawer).to_contain_text("a ticket number uses letters", timeout=WAIT)
+    page.fill("#tk-ref", "PROJ-5")
+    drawer.get_by_role("button", name="Link ticket").click()
+    expect(drawer.locator("a[href='https://example.atlassian.net/browse/PROJ-5']")).to_be_visible(timeout=WAIT)
+    drawer.get_by_role("button", name="Close", exact=True).last.click()
+    expect(page.locator("article[aria-label^='Check did not match'] a[href$='/browse/PROJ-5']")).to_be_visible(
+        timeout=WAIT
+    )
+
+    page.goto(f"{site.url}/#/tests/hcm%2Flocation.yaml")  # the failing test shows its ticket too
+    expect(page.locator("main [data-tickets] a")).to_have_text("PROJ-5", timeout=WAIT)
+
+    page.goto(f"{site.url}/#/attention")
+    page.locator("article[aria-label^='Check did not match']").get_by_role(
+        "button", name=re.compile(r"Ticket \(1\)")
+    ).click()
+    page.locator(".drawer").get_by_role("button", name="Remove").click()
+    expect(page.locator(".drawer")).to_contain_text("No ticket linked yet", timeout=WAIT)
+
+
 # ------------------------------------------------------------------ Release impact: What's New
 
 

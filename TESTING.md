@@ -883,6 +883,41 @@ If step 3 says "the Navigator button was not found" or finds no pages, or finds 
 send me a screenshot of your pod's home page with the Navigator open, and of the card. The reading is made to cope with
 Oracle's menu without knowing its exact markup, but I have only tried it on a stand-in menu.
 
+### 6.25 Ticket links
+
+Needs a failing test in Needs attention (the retry demo from 6.16 fails on purpose). No tracker account is needed.
+
+1. Click **Settings**, then **General**. Find **Ticket tracker**. Type `https://example.atlassian.net/browse/{key}` in
+   **Ticket address** (use your real tracker's address if you have one), leave the other box empty, and click **Save**.
+
+You should see: "Saved.". A wrong address (for example one that does not start with https:// or has no {key}) gives a red message.
+
+2. Click **Needs attention**. On a failure card, click **Ticket**.
+
+You should see: a panel with a title and a description of the failure (test, step, expected and observed, release, run) and a
+**Copy title and description** button. There is no "Open ... with it" button, because no new-ticket address is set.
+
+3. Type `PROJ-123` under **Link a ticket** and click **Link ticket**.
+
+You should see: "Linked.", and `PROJ-123` under **Linked tickets**. Close the panel: the card now shows **Tickets PROJ-123** and its button says
+**Ticket (1)**. Click the tag: it opens `https://example.atlassian.net/browse/PROJ-123` in a new tab.
+
+4. Open **Tests** and the same test.
+
+You should see: **Tickets PROJ-123** under the test's name.
+
+5. Try to link `javascript:alert(1)`.
+
+You should see: a red message "a ticket number uses letters, digits and . _ # - only", and nothing linked.
+
+6. If a release is set, open **Overview** and download the **Certification pack**. Open the Word document, section "What failed".
+
+You should see: a row **Tickets** with `PROJ-123 (https://...)` under that test.
+
+7. Click **Ticket (1)**, then **Remove** next to the ticket. Open **Audit log**.
+
+You should see: the link gone, and "Linked a ticket" and "Removed a ticket link" in the log.
+
 ## Part 7. Stop
 
 Press Ctrl+C in the terminal running `qm serve`.

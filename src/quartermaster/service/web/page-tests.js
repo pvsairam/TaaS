@@ -6,6 +6,7 @@ import {openRunDrawer, releaseBadge} from "./components.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
 import {openManualImport, testsViewSwitch} from "./page-manual.js";
+import {ticketChips} from "./page-tickets.js";
 
 const filters = {q: "", status: "all", module: "all"};
 
@@ -160,7 +161,8 @@ export async function testPage(file) {
         h("div", {class: "row", style: "margin-bottom:6px"}, t.module ? h("span", {class: "tag"}, t.module) : null, t.process ? h("span", {class: "tag"}, t.process) : null,
           t.release_validated ? releaseBadge(t.release_validated, {prefix: "Validated on"}) : null),
         h("h1", {}, t.title || t.file),
-        h("p", {class: "lead"}, [t.product, t.persona ? `runs as ${t.persona}` : "", t.priority ? `${t.priority} priority` : ""].filter(Boolean).join(" · ") || t.file)),
+        h("p", {class: "lead"}, [t.product, t.persona ? `runs as ${t.persona}` : "", t.priority ? `${t.priority} priority` : ""].filter(Boolean).join(" · ") || t.file),
+        (t.tickets || []).length ? h("div", {class: "row", style: "gap:8px;margin-top:6px"}, h("span", {class: "meta"}, "Tickets"), ticketChips(t.tickets)) : null),
       button("Run this test", {kind: "primary", ic: "runs", disabled: !state.status.ready || Boolean(t.problem), onClick: () => openRunDrawer(t.file)})),
     t.problem ? h("div", {style: "margin-bottom:16px"}, callout("danger", "This file could not be read.", t.problem)) : null,
     h("div", {class: "grid g-4"},

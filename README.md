@@ -380,6 +380,28 @@ and the plan's summary counts them. The ranking of tests is not changed by it.
 Not done yet: finding which opt-in features are switched on in the pod (that needs the pod's own REST services and
 is worth trying on a real pod first). From a terminal: `qm discover --out pages.json`.
 
+## Ticket links (tie a failure to its ticket)
+
+When a test fails, someone raises a ticket in Jira, ServiceNow, Azure DevOps or another tracker. Quartermaster does not
+log in to the tracker and sends nothing to it, so it needs no tracker account. It does three things:
+
+- **Writes the ticket text.** On a failure in **Needs attention**, **Ticket** opens a ready title and description (test,
+  step, what was expected and seen, the release, the likely cause, the run) with **Copy**. If an administrator has set the
+  tracker's "new ticket" address, **Open the tracker with it** opens that page with the text filled in. Read it before
+  sharing: it can contain wording from the pod.
+- **Remembers the link.** Type the ticket number (PROJ-123) or paste its link, and **Link ticket**. The ticket shows on
+  the failure, on the test's page, and in the **certification pack** next to each failed test, so nobody raises the same
+  failure twice and a reviewer sees what tracks it. **Remove** unlinks it. Every link and unlink is in the audit log.
+- **Makes links.** In **Settings, General, Ticket tracker** (administrators) give the address of one ticket with `{key}`
+  for its number, for example `https://example.atlassian.net/browse/{key}`, and a number becomes a link. Optionally
+  the new-ticket address with `{title}` and `{description}`, for example
+  `https://example.atlassian.net/secure/CreateIssueDetails!init.jspa?summary={title}&description={description}`.
+
+Only `http` and `https` addresses are ever made into links. The links are kept per client in an append-only file
+(`tickets/links.jsonl` in the data folder, so they are in backups). Testers can link and unlink; only an
+administrator changes the tracker's address. Not done: creating the ticket in the tracker for you, and closing the link
+when the ticket closes (both need the tracker's login).
+
 ## Sign-in and roles
 
 Off by default: Quartermaster then works as it always has, for whoever opens it on the computer. Turn it on in

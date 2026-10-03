@@ -104,6 +104,7 @@ def write_certification_pack(
     prepared_by: str = "",
     approval: dict[str, Any] | None = None,
     approval_history: list[dict[str, Any]] | None = None,
+    tickets: dict[str, list[dict[str, Any]]] | None = None,
 ) -> tuple[str, bytes]:
     """The zip's file name and its bytes. `approval` is where the release's approval stands (see
     service.approvals); its history goes into the pack as approvals.json."""
@@ -124,7 +125,9 @@ def write_certification_pack(
             row["pack_file"] = name
             z.write(doc, name)
         summary = Path(evidence_root) / "_certification" / f"Certification {safe}.docx"
-        write_certification_document(rows, release, evidence_root, summary, prepared_by=prepared_by, approval=approval)
+        write_certification_document(
+            rows, release, evidence_root, summary, prepared_by=prepared_by, approval=approval, tickets=tickets
+        )
         z.write(summary, summary.name)
         if approval_history:
             z.writestr("approvals.json", json.dumps(approval_history, indent=2))
@@ -139,6 +142,7 @@ def write_certification_document(
     *,
     prepared_by: str = "",
     approval: dict[str, Any] | None = None,
+    tickets: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     doc = _Doc(evidence_root)  # failure pictures are relative to the evidence root
     run = [row for row in rows if row["result"]]
@@ -249,6 +253,16 @@ def write_certification_document(
                     ("Failed at", f"Step {f.get('number', '?')}: {f.get('intent', '')}" if f else "Not recorded"),
                     ("What happened", plain_error(f.get("error")) if f else "Not recorded"),
                     ("Run on", _when(r.get("at"))),
+                    *(
+                        [
+                            (
+                                "Tickets",
+                                ", ".join(f"{t['ref']} ({t['url']})" if t.get("url") else str(t["ref"]) for t in found),
+                            )
+                        ]
+                        if (found := (tickets or {}).get(row["test_id"]))
+                        else []
+                    ),
                 ],
                 status_row=("Result", "failed"),
             )

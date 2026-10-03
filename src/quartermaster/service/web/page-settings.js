@@ -9,6 +9,7 @@ import {notificationsTab} from "./page-notifications.js";
 import {usersTab} from "./page-users.js";
 import {autoBackupCard} from "./page-autobackup.js";
 import {discoveryCard} from "./page-discovery.js";
+import {ticketSettingsCard} from "./page-tickets.js";
 
 export async function settingsPage() {
   await loadCommon();
@@ -89,6 +90,7 @@ export async function settingsPage() {
 
   const backups = tab === "general" ? await backupCard() : null;
   const autoBackups = tab === "general" ? await autoBackupCard() : null;
+  const tracker = tab === "general" ? await ticketSettingsCard() : null;
   if (state.page !== "settings") return;
 
   const appearance = card({title: "Appearance",
@@ -106,7 +108,7 @@ export async function settingsPage() {
     ai: h("div", {style: "max-width:720px"}, ai),
     notifications,
     users,
-    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, autoBackups, appearance), h("div", {class: "stack"}, shortcuts)),
+    general: h("div", {class: "grid g-2"}, h("div", {class: "stack"}, storage, backups, autoBackups, appearance), h("div", {class: "stack"}, tracker, shortcuts)),
   }[tab];
   show([{label: "Settings"}, {label: TABS.find(([id]) => id === tab)[1]}],
     h("div", {class: "page-head"},

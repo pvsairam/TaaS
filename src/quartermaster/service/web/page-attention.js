@@ -1,6 +1,7 @@
 // Needs attention: the failure and maintenance workspace.
 import {api, badge, button, callout, chips, clock, disclose, drawer, emptyState, h, icon, toast, when} from "./ui.js";
 import {openRunDrawer, openViewer} from "./components.js";
+import {openTicket, ticketChips} from "./page-tickets.js";
 import {loadCommon, runLink, state, testLink} from "./state.js";
 import {show} from "./app.js";
 
@@ -112,8 +113,9 @@ function item(i) {
       onclick: () => openViewer([{src: i.picture_url, caption: `Step ${i.step}: ${i.intent}`, sub: i.title}])}) : null,
     i.document_url ? button("Evidence document", {size: "sm", ic: "file", href: i.document_url}) : null) : null;
 
+  const tickets = (i.tickets || []).length ? h("div", {class: "row", style: "gap:8px"}, h("span", {class: "meta"}, "Tickets"), ticketChips(i.tickets)) : null;
   return h("article", {class: "card", "aria-label": `${look.short}: ${i.title}`},
-    h("div", {class: "card-body stack", style: "gap:12px"}, head, body, evidence, facts));
+    h("div", {class: "card-body stack", style: "gap:12px"}, head, body, tickets, evidence, facts));
 }
 
 async function dismiss(keys, what) {
@@ -147,6 +149,10 @@ function actions(i) {
     }}));
   }
   if (i.cause?.sr) out.push(button("Draft SR", {size: "sm", ic: "file", title: "A draft service request for Oracle, to copy into My Oracle Support", onClick: () => openSr(i)}));
+  if (i.test_id && i.step && i.run_id && i.category !== "ui_change" && i.category !== "cleanup") {
+    out.push(button((i.tickets || []).length ? `Ticket (${i.tickets.length})` : "Ticket", {size: "sm", ic: "file", title: "Write a ticket for this failure, and link the ticket number",
+      onClick: () => openTicket(i, () => attentionPage())}));
+  }
   if (i.run_id) out.push(button("See the run", {size: "sm", href: runLink(i.run_id)}));
   if (i.category === "authentication") out.push(button("Settings", {size: "sm", href: "#/settings"}));
   if (i.file && i.category !== "ui_change" && i.category !== "unreadable") {

@@ -105,6 +105,7 @@ from quartermaster.service.schedules import Schedules
 from quartermaster.service.settings import Settings, check_pod
 from quartermaster.service.signin import SignIn, qm_signin_command
 from quartermaster.service.store import Store
+from quartermaster.service.tickets import TicketError, Tickets
 from quartermaster.service.triage import sr_draft
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -212,6 +213,9 @@ class App:
         self.discovery = Discovery(
             data_dir / "discovery", cwd=cwd, audit=lambda what, subject, details: self.audit.add(what, subject, details)
         )
+        self.tickets = Tickets(
+            data_dir / "tickets", audit=lambda what, subject, details: self.audit.add(what, subject, details)
+        )
         self.queue.environ = self.recording.environ = self.signin.environ = self.discovery.environ = self.run_environ
         self.queue.defaults = lambda: {"retries": self._retries(), "parallel": self._parallel()}
 
@@ -259,6 +263,43 @@ class App:
             if method == "POST" and route == ["notifications", "test"]:
                 return _json(self.notifier.send_test(str(data.get("channel") or "")))
         except NotifyError as e:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
+        raise ApiError(HTTPStatus.NOT_FOUND, "not found")
+
+    def _who_name(self) -> str:
+        """Who is signed in; empty when sign-in is off."""
+        return str((self._user or {}).get("full_name") or "")
+
+    def _tickets(self, method: str, route: list[str], query: dict[str, list[str]], data: dict[str, Any]) -> Reply:
+        """Ticket links: which tickets track which failing tests, and a ticket text to paste into the tracker."""
+        try:
+            if method == "GET" and route == ["tickets"]:
+                return _json({"settings": self.tickets.settings(), "links": self.tickets.links()})
+            if method == "GET" and route == ["tickets", "draft"]:
+                run_id, test_id = str((query.get("run") or [""])[0]), str((query.get("test") or [""])[0])
+                item = next(
+                    (
+                        i
+                        for i in self.attention()["items"]
+                        if i.get("run_id") == run_id and i.get("test_id") == test_id and i.get("step")
+                    ),
+                    None,
+                )
+                if item is None:
+                    raise ApiError(HTTPStatus.NOT_FOUND, "no failure of that test in Needs attention")
+                return _json({**self.tickets.draft(item), "tickets": self.tickets.for_test(test_id)})
+            if method == "POST" and route == ["tickets"]:
+                test_id, who = str(data.get("test_id") or ""), self._who_name()
+                if data.get("action") == "add":
+                    links = self.tickets.add(test_id, str(data.get("ref") or ""), str(data.get("run_id") or ""), who)
+                elif data.get("action") == "remove":
+                    links = self.tickets.remove(test_id, str(data.get("ref") or ""), who)
+                else:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "choose add or remove")
+                return _json({"tickets": links})
+            if method == "POST" and route == ["tickets", "settings"]:
+                return _json(self.tickets.update_settings(data))
+        except TicketError as e:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(e)) from e
         raise ApiError(HTTPStatus.NOT_FOUND, "not found")
 
@@ -422,6 +463,8 @@ class App:
                 return _json(self.signin.forget(self._env_key()))
         if route and route[0] == "discovery":
             return self._discovery(method, route, data)
+        if route and route[0] == "tickets":
+            return self._tickets(method, route, query, data)
         if method == "POST" and route == ["check-pod"]:
             self.pod_check = check_pod(self.pod()["url"])
             return _json(self.pod_check)
@@ -443,6 +486,7 @@ class App:
                 self.evidence_root,
                 approval=self.approvals.state(release, self._release_summary(release)),
                 approval_history=self.approvals.history(release),
+                tickets=self.tickets.links(),
             )
             return Reply(HTTPStatus.OK, body, "application/zip", name)
         if method == "GET" and route == ["attention"]:
@@ -969,6 +1013,7 @@ class App:
             if r["status"] in insights.PASSING and r["release"]:
                 validated.setdefault(r["test_id"], r["release"])
         out = []
+        ticket_links = self.tickets.links()
         for f in files_of_tests(self.tests_root):
             rel = f.relative_to(self.tests_root).as_posix()
             item: dict[str, Any] = {
@@ -1000,6 +1045,7 @@ class App:
             item["last_result"] = latest.get(item.get("id", ""))
             item["stability"] = stable.get(item.get("id", ""))
             item["release_validated"] = validated.get(item.get("id", ""))
+            item["tickets"] = ticket_links.get(item.get("id", ""), [])
             out.append(item)
         return out
 
@@ -1097,11 +1143,13 @@ class App:
             self.tests(), self.queue.store.list(limit=500), self.tests_root, self.settings.get()["release"]
         )
         dismissed = self._dismissed()
+        links = self.tickets.links()
         kept = []
         for item in result["items"]:
             item["key"] = attention_key(item)
             if item["key"] in dismissed:
                 continue
+            item["tickets"] = links.get(str(item.get("test_id")), []) if item.get("test_id") else []
             item["picture_url"] = self._url_rel(item.pop("picture", None))
             item["document_url"] = self._url_rel(item.pop("document", None))
             kept.append(item)
