@@ -93,8 +93,15 @@ def run_test(
 
     emit("run_start", title=test.title, steps=len(test.steps))
     driver.open(env, test.persona)
+    setup: list[StepResult] = []
+    cleanup: list[StepResult] = []
     try:
         failed = False
+        if not data_problem:  # setup would use the value that is not there
+            setup = _run_setup(test, driver, runtime, retries, retry_wait_s, emit)
+            bad = next((r for r in setup if r.status is StepStatus.FAILED), None)
+            if bad is not None:
+                data_problem = f"Setup not met: {bad.intent}. {bad.error}"
         for i, step in enumerate(test.steps):
             base: dict[str, Any] = {
                 "index": i,
@@ -217,6 +224,7 @@ def run_test(
         steps=results,
         healing=healing,
         cleanup=cleanup,
+        setup=setup,
         run_id=run_id,
         test_title=test.title,
         persona=test.persona,
@@ -245,6 +253,64 @@ def _missing_data(test: TestCase, env: Environment) -> str | None:
         f"No test data for {', '.join(missing)} on {env.name} ({env.kind.value}). Other pods have a value, this one "
         "does not: add it to the data set (or the test's `pods:`) under this pod's name or kind"
     )
+
+
+def _run_setup(
+    test: TestCase,
+    driver: Driver,
+    runtime: dict[str, str],
+    retries: int,
+    retry_wait_s: float,
+    emit: Callable[..., None],
+) -> list[StepResult]:
+    """Run the test's setup calls in order. The first one that fails stops the setup (the rest are marked skipped):
+    the steps never run on a pod that is not ready. A call that only reads may be tried again, like any step."""
+    out: list[StepResult] = []
+    if not test.setup:
+        return out
+    emit("setup_start", steps=len(test.setup))
+    stopped = False
+    for i, step in enumerate(test.setup):
+        base: dict[str, Any] = {
+            "index": i,
+            "intent": step.intent,
+            "action": step.action.value,
+            "value": display_value(step.value, test.data, runtime),
+            "expected": step.expected,
+        }
+        if stopped:
+            out.append(StepResult(**base, status=StepStatus.SKIPPED, note="An earlier setup step did not pass."))
+            emit("setup_end", index=i, intent=step.intent, status="skipped", error=None)
+            continue
+        emit("setup_start_step", index=i, intent=step.intent)
+        start = time.perf_counter()
+        started = _now()
+        tries = 1 + _retries_for(step, retries)
+        attempt, status, error = 0, StepStatus.PASSED, None
+        while True:
+            attempt += 1
+            status, error = StepStatus.PASSED, None
+            try:
+                _execute(step, test.data, runtime, driver, {})
+            except Exception as e:
+                status, error = StepStatus.FAILED, f"{type(e).__name__}: {e}"
+            if status is not StepStatus.FAILED or attempt >= tries or not _may_retry(step, False):
+                break
+            emit("step_retry", index=i, intent=step.intent, attempt=attempt + 1, of=tries, error=error)
+            time.sleep(retry_wait_s)
+        out.append(
+            StepResult(
+                **base,
+                status=status,
+                duration_ms=round((time.perf_counter() - start) * 1000, 2),
+                error=error,
+                started_at=started,
+                attempts=attempt,
+            )
+        )
+        emit("setup_end", index=i, intent=step.intent, status=status.value, error=error)
+        stopped = status is StepStatus.FAILED
+    return out
 
 
 def _retries_for(step: Step, default: int) -> int:

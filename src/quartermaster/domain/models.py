@@ -214,6 +214,10 @@ class TestCase(_Strict):
     pods: dict[str, dict[str, str]] = Field(default_factory=dict)
     # Values made fresh for every run, used in steps as ${name}.
     generate: dict[str, GenerateRule] = Field(default_factory=dict)
+    # Service calls that run first, after sign-in: check that the pod is ready (a period is open, a supplier exists)
+    # or make what the test needs. A call that fails stops the test with "Setup not met": the pod's data is not ready,
+    # which is not the same as a release that broke the test. Values they save are used by the steps and the cleanup.
+    setup: list[Step] = Field(default_factory=list)
     steps: list[Step] = Field(min_length=1)
     # Steps that remove what the test made on the pod. They run after the steps above, whether those
     # passed or failed. A cleanup that fails is reported but never changes the test's result.
@@ -221,6 +225,16 @@ class TestCase(_Strict):
     # For a test made from a manual scenario: its written steps ({"action", "expected"}), so the
     # evidence follows the script the tester knows rather than the recorded clicks.
     written_steps: list[dict[str, str]] = Field(default_factory=list)
+
+    @field_validator("setup")
+    @classmethod
+    def _setup_is_service_calls(cls, steps: list[Step]) -> list[Step]:
+        for i, step in enumerate(steps, 1):
+            if step.action is not Action.API_CALL:
+                raise ValueError(
+                    f"setup step {i}: only api_call steps can be used in setup (found {step.action.value})"
+                )
+        return steps
 
 
 # --------------------------------------------------------------------------- results
@@ -277,6 +291,7 @@ class RunResult(_Strict):
     steps: list[StepResult]
     healing: list[HealingProposal] = Field(default_factory=list)
     cleanup: list[StepResult] = Field(default_factory=list)  # kept apart from `steps`: never part of the result
+    setup: list[StepResult] = Field(default_factory=list)  # what was checked or made before the steps
     run_id: str = ""
     test_title: str = ""
     persona: str = ""
@@ -300,6 +315,13 @@ class RunResult(_Strict):
     def flaky(self) -> bool:
         """The test passed, but a step needed another attempt: it may fail for no real reason."""
         return any(s.attempts > 1 and s.status in (StepStatus.PASSED, StepStatus.HEALED) for s in self.steps)
+
+    @property
+    def setup_status(self) -> str:
+        """One word: none (no setup in the test), done, or failed (a step did not pass, so the steps never ran)."""
+        if not self.setup:
+            return "none"
+        return "failed" if any(c.status is StepStatus.FAILED for c in self.setup) else "done"
 
     @property
     def cleanup_status(self) -> str:

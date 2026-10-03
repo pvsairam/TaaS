@@ -173,6 +173,8 @@ class _Doc:
             about.append(("Video of the test", "Saved in the videos folder next to this document"))
         add(_kv_table(about, status_row=("Result", status)))
 
+        if run.get("setup"):
+            self._setup(run, add)
         if written:
             self._written_steps(written, add)
         else:
@@ -256,6 +258,39 @@ class _Doc:
         add(_table(sign, sw, row_height=620))
 
         return document_xml(parts)
+
+    def _setup(self, run: dict[str, Any], add: Any) -> None:
+        """What was checked or made on the pod before the steps, so the record shows the pod was ready."""
+        add(_p([_r("Setup before the test")], style="Heading1"))
+        failed = run.get("setup_status") == "failed"
+        said = (
+            "A setup step did not pass, so the test steps were not run. The pod's data was not ready."
+            if failed
+            else "Everything the test needed was checked or made on the pod before the steps began."
+        )
+        add(_p([_r(said)], after=160))
+        widths = [700, 4380, 1800, 3200]
+        rows = [
+            [
+                _cell("Step", widths[0], header=True),
+                _cell("What was checked or made", widths[1], header=True),
+                _cell("Result", widths[2], header=True),
+                _cell("Note", widths[3], header=True),
+            ]
+        ]
+        for c in run["setup"]:
+            st = c.get("status", "")
+            note = plain_error(c["error"]) if c.get("error") else c.get("note") or ""
+            label = "Not run" if st == "skipped" else _status_label(st)
+            rows.append(
+                [
+                    _cell(str(c.get("index", 0) + 1), widths[0]),
+                    _cell(c.get("intent", ""), widths[1]),
+                    _cell(label, widths[2], fill=_STATUS_FILL.get(st), color=_STATUS_COLOR.get(st), bold=True),
+                    _cell(note, widths[3]),
+                ]
+            )
+        add(_table(rows, widths))
 
     def _cleanup(self, run: dict[str, Any], add: Any) -> None:
         """What was removed from the pod after the test, and what could not be."""

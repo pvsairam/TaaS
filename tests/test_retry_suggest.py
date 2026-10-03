@@ -440,9 +440,11 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
         "demo.library-two",
         "demo.test-data",
         "demo.test-data-gap",
+        "demo.setup",
+        "demo.setup-gap",
     }
     for t in tests.values():
-        for step in [*t.steps, *t.cleanup]:
+        for step in [*t.setup, *t.steps, *t.cleanup]:
             # nothing here may change data on the pod: no REST call but GET, and no Save, Submit or Delete
             if step.action is Action.API_CALL:
                 assert (step.value or "").startswith("GET ")
@@ -457,3 +459,6 @@ def test_the_demo_tests_are_valid_and_only_read() -> None:
     data, gap = tests["demo.test-data"], tests["demo.test-data-gap"]  # test data: a data set, a made value, a gap
     assert data.data == {"rows": "2"} and data.pods["TEST"] == {"rows": "1"} and "pick" in data.generate
     assert gap.pods == {"STAGE": {"location_limit": "1"}} and "location_limit" not in gap.data
+    ready, unready = tests["demo.setup"], tests["demo.setup-gap"]  # setup: one that is met, one that is not
+    assert ready.setup[0].options["save"] == {"location_id": "items[0].LocationId"}
+    assert "locationsV9" in (unready.setup[0].value or "") and "locationsV2" in (unready.steps[0].value or "")

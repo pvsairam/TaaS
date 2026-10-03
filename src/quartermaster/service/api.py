@@ -1175,6 +1175,11 @@ class App:
         data: dict[str, Any] = folded["data"] if isinstance(folded.get("data"), dict) else {}
         pods: dict[str, Any] = folded["pods"] if isinstance(folded.get("pods"), dict) else {}
         rules = folded.get("generate") if isinstance(folded.get("generate"), dict) else {}
+        before = [
+            {"number": i + 1, "intent": str(c.get("intent", "")), "value": _fill(str(c.get("value") or ""), data)}
+            for i, c in enumerate(expanded.get("setup") or [])
+            if isinstance(c, dict)
+        ]
         steps = []
         for i, step in enumerate(expanded.get("steps") or []):
             if not isinstance(step, dict):
@@ -1200,6 +1205,7 @@ class App:
         return {
             **item,
             "data": data,
+            "setup": before,
             "data_sets": [str(n) for n in spec.get("data_sets") or []]
             if isinstance(spec.get("data_sets"), list)
             else [],
@@ -1331,6 +1337,26 @@ class App:
         return view
 
     @staticmethod
+    def _setup_view(record: dict[str, Any]) -> dict[str, Any] | None:
+        """What the test checked or made before its steps, for the run page (None when it has no setup)."""
+        if not record.get("setup"):
+            return None
+        return {
+            "status": record.get("setup_status", ""),
+            "steps": [
+                {
+                    "number": c.get("index", 0) + 1,
+                    "intent": c.get("intent", ""),
+                    "status": c.get("status", ""),
+                    "error": plain_error(c.get("error")),
+                    "detail": c.get("error"),
+                    "note": c.get("note"),
+                }
+                for c in record["setup"]
+            ],
+        }
+
+    @staticmethod
     def _cleanup_view(record: dict[str, Any]) -> dict[str, Any] | None:
         """What the test's cleanup did, for the run page (None when the test has no cleanup)."""
         if not record.get("cleanup"):
@@ -1381,6 +1407,7 @@ class App:
                     },
                     "needs_update": any(h.get("source", "fallback") == "fallback" for h in entry.get("healing") or []),
                     "flaky": bool(entry.get("flaky")),
+                    "setup": self._setup_view(record),
                     "cleanup": self._cleanup_view(record),
                     "started_at": record.get("started_at"),
                     "finished_at": record.get("finished_at"),

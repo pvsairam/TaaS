@@ -109,7 +109,8 @@ def render_test(test: TestCase, source: str = "", function: str = "") -> str:
     elif test.data:
         body.append("fusion.data.update(DATA)")
     body.append(f"fusion.login({test.persona!r})")
-    steps = [_step_block(i, s) for i, s in enumerate(test.steps, 1)]
+    steps = [_setup_block(i, s) for i, s in enumerate(test.setup, 1)]
+    steps += [_step_block(i, s) for i, s in enumerate(test.steps, 1)]
     if test.cleanup:
         body.append("try:")
         for block in steps:
@@ -133,6 +134,14 @@ def _step_block(number: int, step: Step) -> list[str]:
     if step.expected:
         out.append(f"# Expected: {_oneline(step.expected)}")
     out.append(f"with fusion.step({number}, {step.intent!r}):")
+    out += ["    " + ln for ln in _call(step).splitlines()]
+    out.append("")
+    return out
+
+
+def _setup_block(number: int, step: Step) -> list[str]:
+    """A setup call: if it fails the test stops saying the pod was not ready (and the cleanup still runs)."""
+    out = [f"with fusion.setup({number}, {step.intent!r}):"]
     out += ["    " + ln for ln in _call(step).splitlines()]
     out.append("")
     return out

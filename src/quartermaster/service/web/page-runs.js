@@ -104,6 +104,7 @@ function phase(run, events, live) {
     case "step_start": return `Executing step ${last.index + 1} of ${t?.total || "?"}: ${last.intent}${of}`;
     case "step_end": return `Step ${last.index + 1} of ${t?.total || "?"} ${last.status === "failed" ? "failed" : "done"}${of}`;
     case "step_retry": return `Step ${last.index + 1} did not work: trying again (attempt ${last.attempt} of ${last.of})${of}`;
+    case "setup_start": case "setup_start_step": case "setup_end": return `Checking that the pod is ready for the test${of}`;
     case "cleanup_start": case "cleanup_start_step": case "cleanup_end": return `Cleaning up the test data on the pod${of}`;
     case "run_end": return `Capturing evidence and writing the Word document${of}`;
     case "test_saved": return n < live.length ? "Starting the next test" : "Writing the run summary";
@@ -192,6 +193,7 @@ export async function runPage(id) {
         r.failed_step ? callout("danger", `Step ${r.failed_step.number} failed: ${r.failed_step.intent}.`, r.failed_step.error) : null,
         r.flaky ? callout("warning", "Passed, but only after a step was tried again.",
           "A test like this may fail for no real reason (a slow page, for example). Open the steps to see which one.") : null,
+        setupNote(r.setup),
         cleanupNote(r.cleanup),
         r.needs_update ? callout("warning", "Needs update.", ["Something on the screen was found in a different way than written. ", h("a", {href: "#/attention"}, "Review it in Needs attention"), "."]) : null),
       evidenceViewer(r, {run}));
@@ -223,6 +225,18 @@ export async function runPage(id) {
         h("pre", {class: "block"}, run.output)))) : null);
 
   if (isActive) schedule(() => runPage(id), 1500);
+}
+
+// What the test checked or made on the pod before its steps. A failure here is the pod's data, not the release.
+function setupNote(c) {
+  if (!c) return null;
+  const bad = c.steps.find((x) => x.status === "failed");
+  if (bad) {
+    return callout("warning", "Setup not met: the pod was not ready, so the test steps did not run.",
+      "This is about the data on the pod, not about the release.",
+      h("ul", {}, h("li", {}, `Setup step ${bad.number} (${bad.intent}): ${bad.error}`)));
+  }
+  return callout("info", "The pod was ready.", `${plural(c.steps.length, "setup step")} passed before the test began: ${c.steps.map((x) => x.intent).join("; ")}.`);
 }
 
 // What the test's cleanup did. It never changes the test's result, but leftovers on the pod matter.

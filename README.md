@@ -404,7 +404,7 @@ own `pods:` (the last one wins). A pod is matched by its name first, then by its
 
 - **No value on this pod.** If a test uses a name that other pods give but the pod being tested does not, the test stops
   at step 1 with "No test data for X on DEV2 (DEV)". Nothing is sent to the pod, and **Needs attention** shows it as
-  "No test data on this pod", so a gap in the data is never mistaken for a broken release.
+  "Test data not ready", so a gap in the data is never mistaken for a broken release.
 - **Test data** (menu) lists every data set as a table of what each of your pods gets (a missing value is marked), which
   tests use it, a warning for a set that does not exist or a file that cannot be read, and the values each test makes
   fresh, shown for a made-up run. A test's **Test data** tab shows the sets, the pod values and the rules it uses.
@@ -413,6 +413,41 @@ own `pods:` (the last one wins). A pod is matched by its name first, then by its
 - Never write a password in a data set. Use `${env:NAME}` for anything secret, as in `data:`.
 - The `_data` folder is not for tests: test lists, runs and impact analysis skip it. Backups include it.
 - Exported Playwright tests keep all of this (see below).
+
+### Setup steps (check or make what the test needs first)
+
+Some tests only make sense when the pod is ready: the accounting period is open, a supplier exists. Add a `setup:` list to
+the test. Its calls run first, after sign-in and before the steps:
+
+```yaml
+setup:
+  - action: api_call
+    intent: The accounting period is open
+    value: GET /fscmRestApi/resources/11.13.18.05/periods?q=Status=Open
+    options:
+      check: {count: "1"}                 # the reply must say so
+  - action: api_call
+    intent: Make a supplier for this run
+    value: POST /fscmRestApi/resources/11.13.18.05/suppliers
+    options:
+      body: {Supplier: "QM-${ref}"}       # ${ref} is a value made fresh for this run (see generate:)
+      save: {supplier_id: SupplierId}     # kept for the steps and the cleanup
+```
+
+- Only service calls (`api_call`) can be setup. They use the same options as a service step: `body`, `check`, `save`.
+- **If a setup call fails, the steps never run.** The test stops at step 1 with "Setup not met: ...", the rest of the setup
+  is marked not run, and the cleanup still runs (so a supplier made by an earlier setup call is removed). Needs attention
+  shows it as **Test data not ready**, with no "probably the update" advice: the pod's data was not ready, which is not a
+  release that broke the test.
+- A call that only reads (GET) is tried again like any step (see retries); a call that writes is never repeated, because a
+  second POST could make a second record.
+- A setup `DELETE` must use a saved value, like a cleanup `DELETE`, so it can only remove what this run made.
+- Names used in setup must be defined: in `data`, a data set, `generate:` or saved by an earlier setup call.
+- The run page says "The pod was ready" with what was checked (or what was not met); the Word evidence document has a
+  **Setup before the test** table, so the record shows the pod was ready when the test ran. A test's **Steps** tab lists
+  its setup. Exported Playwright tests run each setup call in a `with fusion.setup(n, "...")` block before the steps,
+  inside the same `try` as the cleanup.
+- A value that is missing for the pod (see above) stops the test before the setup runs.
 
 ## Reading Oracle's What's New
 

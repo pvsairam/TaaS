@@ -27,7 +27,7 @@ export async function overviewPage() {
 
   const SHORT = {assertion: ["failed check", "failed checks"], missing_element: ["item not found", "items not found"],
     service_call: ["service call failed", "service calls failed"],
-    timeout: ["timeout", "timeouts"], authentication: ["sign-in problem", "sign-in problems"], test_data: ["missing test data", "missing test data"], failure: ["failure", "failures"],
+    timeout: ["timeout", "timeouts"], authentication: ["sign-in problem", "sign-in problems"], test_data: ["test data not ready", "test data not ready"], failure: ["failure", "failures"],
     could_not_run: ["run that could not start", "runs that could not start"], cleanup: ["cleanup not finished", "cleanups not finished"], ui_change: ["screen change", "screen changes"],
     unreadable: ["unreadable file", "unreadable files"]};
   const topCats = Object.entries(att.counts || {}).sort((a, b) => b[1] - a[1]).slice(0, 2)

@@ -161,6 +161,17 @@ def test_the_test_data_page_shows_sets_gaps_and_generated_values(site: Site, pag
     see(page, "6 letters and digits, new each run after 'REF-'")
 
 
+def test_a_test_with_setup_shows_it_and_its_run_says_the_pod_was_ready(site: Site, page: Page) -> None:
+    page.goto(f"{site.url}/#/tests/hcm%2Fwith_setup.yaml")
+    see(page, "Checked or made on the pod first.")
+    see(page, "The pod has a location")
+    page.goto(f"{site.url}/#/runs")
+    page.locator("main a[href^='#/runs/']").first.click()
+    page.locator("main").get_by_text("Title of hcm.view-worker").first.click()
+    see(page, "The pod was ready.")
+    see(page, "The accounting period is open")
+
+
 def test_a_finished_run_shows_its_results(site: Site, page: Page) -> None:
     page.goto(f"{site.url}/#/runs")
     page.locator("main a[href^='#/runs/']").first.click()

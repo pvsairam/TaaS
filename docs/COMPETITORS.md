@@ -39,7 +39,7 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 | Tests from a manual scenario | Yes | No |
 | Shared steps (library) | Yes | No |
 | Test data: unique values per run, dates from today, values that belong to each pod, a clear stop when a pod lacks one | Yes (not tested on a real pod) | No |
-| Setup steps that check or make data first (for example "the period is open") | No | **Yes**, next step of test data |
+| Setup steps that check or make data first (for example "the period is open"); a setup that is not met is told apart from a broken release | Yes (not tested on a real pod) | No |
 | FBDI or HDL file import steps | No | **Yes** |
 | BIP or OTBI report checks | No | **Yes** |
 | Screenshot comparison before and after a release | No | **Yes** (visual tools sell this) |
@@ -54,14 +54,13 @@ Key: **Yes** = built. **Part** = built in a smaller form. **No** = not built.
 Ahead: price model and ownership, open and exportable tests, explainable release ranking, careful AI use, evidence that
 auditors can read, and tests you can keep if you leave.
 
-Behind: no ready-made test library, no setup steps for test data, no import or report checks, no visual comparison, no
+Behind: no ready-made test library, no import or report checks, no visual comparison, no
 two-way tracker link, and nothing has been proved on many real pods. A tool with years of Oracle customers has seen
 far more strange pages than we have.
 
 ## 4. Suggested order if you want to close gaps
 
-1. Setup steps for test data (check "period is open" or create a supplier before the steps, and treat a failed check as missing data, not a broken release). Unique values and per-pod data are done.
-2. Starter library of common read-only and create flows (shows value on day one).
-3. BIP or OTBI report check and FBDI or HDL import steps.
-4. Visual comparison.
-5. Two-way ticket sync, only if a client asks for it.
+1. Starter library of common read-only and create flows (shows value on day one).
+2. BIP or OTBI report check and FBDI or HDL import steps.
+3. Visual comparison.
+4. Two-way ticket sync, only if a client asks for it.

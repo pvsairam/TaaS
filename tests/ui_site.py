@@ -119,6 +119,12 @@ def build_site(tmp: Path) -> Site:
         "data_sets: [pod-names]\ngenerate:\n  ref: {unique: 6, prefix: 'REF-'}\n"
         "steps:\n  - action: api_call\n    intent: Look\n    value: GET /x?bu=${business_unit}&r=${ref}\n"
     )
+    (tests / "hcm" / "with_setup.yaml").write_text(
+        "id: hcm.with-setup\ntitle: A test with setup\nmodule: HCM\nproduct: HR\n"
+        "setup:\n  - action: api_call\n    intent: The pod has a location\n"
+        "    value: GET /hcmRestApi/resources/11.13.18.05/locationsV2?limit=1\n"
+        "steps:\n  - action: api_call\n    intent: Look\n    value: GET /hcmRestApi/resources/11.13.18.05/locationsV2\n"
+    )
     (tests / "hcm" / "shared_user.yaml").write_text(
         "id: hcm.shared-user\ntitle: A test with shared steps\nmodule: HCM\nproduct: HR\n"
         "steps:\n  - use: open-locations\n"
@@ -130,6 +136,15 @@ def build_site(tmp: Path) -> Site:
     passed["cleanup_status"] = "failed"
     passed["cleanup_failed"] = [{"number": 1, "intent": "Remove the location", "error": "The API answered HTTP 403."}]
     path.write_text(json.dumps(suite), encoding="utf-8")
+    # the passed test did a setup first: its run record says so (the run page shows it)
+    record_file = app.evidence_root / passed["run_dir"] / "run.json"
+    record = json.loads(record_file.read_text(encoding="utf-8")) if record_file.is_file() else {}
+    record["setup_status"] = "done"
+    record["setup"] = [
+        {"index": 0, "intent": "The accounting period is open", "status": "passed", "action": "api_call"}
+    ]
+    record_file.parent.mkdir(parents=True, exist_ok=True)
+    record_file.write_text(json.dumps(record), encoding="utf-8")
     return Site("", hub, google, tmp, saved)
 
 

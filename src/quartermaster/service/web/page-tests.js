@@ -120,7 +120,10 @@ export async function testPage(file) {
     remember("testTab", tab);
     panel.setAttribute("aria-labelledby", `tab-${tab}`);
     if (tab === "steps") {
-      panel.replaceChildren(h("ol", {class: "timeline"}, t.steps_detail.map((st) => h("li", {},
+      panel.replaceChildren(...((t.setup || []).length ? [callout("info", "Checked or made on the pod first.",
+        "If one of these fails, the steps below do not run and the pod's data is blamed, not the release.",
+        h("ol", {style: "margin:6px 0 0;padding-left:20px"}, t.setup.map((c) => h("li", {}, c.intent, c.value ? [" ", h("code", {}, c.value)] : null))))] : []),
+        h("ol", {class: "timeline"}, t.steps_detail.map((st) => h("li", {},
         h("span", {class: "node"}, st.number),
         h("div", {style: "min-width:0"},
           h("div", {class: "row", style: "gap:8px"}, h("span", {class: "tag"}, ACTIONS[st.action] || st.action), h("span", {}, st.intent),

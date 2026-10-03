@@ -563,6 +563,15 @@ class Fusion:
             self.screenshot(f"step-{number:02d}")
             raise StepFailure(f"step {number} ({intent}): {type(e).__name__}: {e}") from e
 
+    @contextlib.contextmanager
+    def setup(self, number: int, intent: str) -> Iterator[None]:
+        """A call that checks or makes what the test needs on the pod. When it fails the test stops with "Setup not
+        met": the pod's data was not ready, which is not a sign that the release broke the test."""
+        try:
+            yield
+        except Exception as e:
+            raise StepFailure(f"Setup not met: {intent} (setup step {number}). {type(e).__name__}: {e}") from e
+
     def cleanup(self, intent: str, action: Callable[[], Any], uses: list[str], needs: list[str] | None = None) -> None:
         """Run a cleanup step after the test, whatever happened. A failure is printed and never fails the test, and a
         step that needs something the test never saved (it failed before making it) is skipped."""

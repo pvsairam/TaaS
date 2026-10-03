@@ -1047,7 +1047,7 @@ You should see: both pass. Step 1 shows `.../locationsV2?limit=2` (or 1, if your
 4. Run **Test data gap demo (stops unless STAGE)**.
 
 You should see: it fails at step 1 with "No test data for location_limit on (your pod's name) (its kind)", and the other
-steps are marked not run. Click **Needs attention**: the item is called **No test data on this pod** with a note that it
+steps are marked not run. Click **Needs attention**: the item is called **Test data not ready** with a note that it
 is a gap in the data, not a broken release, and a button **Open test data**. The test never called the pod.
 
 5. In Notepad, open `my_tests\data_gap_demo.yaml`. Under `pods:` add a line for your pod's kind, for example
@@ -1070,6 +1070,47 @@ You should see: a `DATA` and a `PODS` dictionary, a `GENERATE` dictionary, and `
 at the top of the test. Running it with pytest on your pod gives the same values as above.
 
 9. Delete the demo files from `my_tests` when you are done (including the `_data` folder).
+
+### 6.30 Setup steps
+
+Read only, safe on your pod (same as the demos in 6.14).
+
+1. Copy the demos again:
+
+   ```powershell
+   Copy-Item examples\demos\* my_tests\ -Recurse
+   ```
+
+   Press F5 in Quartermaster. Click **Tests**, open **Setup demo (reads only)** and look at its **Steps** tab.
+
+You should see: a blue box **Checked or made on the pod first** listing "The pod has a location to work with" and its
+address, then the one step under it.
+
+2. Run **Setup demo (reads only)**. Open the run and click the test.
+
+You should see: it passes, with a blue box **The pod was ready.** naming the setup step. Open the **Evidence document**:
+it has a table **Setup before the test**, before the Steps.
+
+3. Run **Setup that is not met (stops at step 1)**.
+
+You should see: it fails at step 1 with "Setup not met: The pod has a location to work with." and a note from the pod
+(the address `locationsV9` does not exist). The run page has an orange box **Setup not met: the pod was not ready, so the
+test steps did not run.** The steps after it are marked not run.
+
+4. Click **Needs attention**.
+
+You should see: an item with the label **Test data not ready**, a blue note "The test data was not ready, which is not a
+broken release", a button **Open test data**, and no advice that blames the Oracle update.
+
+5. In Notepad, open `my_tests\setup_gap_demo.yaml`. Change `locationsV9` to `locationsV2` and save. Run it again.
+
+You should see: it passes now, with **The pod was ready.**
+
+6. Download the export (**Tests**, then **Export**), unzip it and open `test_demo_setup.py`.
+
+You should see: `with fusion.setup(1, 'The pod has a location to work with'):` before `with fusion.step(1, ...)`.
+
+7. Delete the demo files from `my_tests` when you are done.
 
 ## Part 7. Stop
 

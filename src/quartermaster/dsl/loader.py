@@ -101,6 +101,20 @@ def _check_placeholders(test: TestCase, path: Path) -> None:
                 raise SpecError(
                     f"{path}: {where} may only reference runtime variables or generated values, not ${{{name}}}"
                 )
+    for i, step in enumerate(test.setup, 1):
+        # Setup runs first and may use what the setup steps before it saved (the id of a supplier it made).
+        texts = [step.value or "", *_option_texts(step.options)]
+        for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):
+            if name not in known and not name.startswith(SECRET):
+                raise SpecError(f"{path}: setup step {i} uses undefined data placeholder ${{{name}}}")
+        if (step.value or "").lstrip().upper().startswith("DELETE") and not _PLACEHOLDER.search(step.value or ""):
+            raise SpecError(
+                f"{path}: setup step {i} deletes a fixed address. A DELETE must use a value an earlier setup "
+                "step saved (for example ${supplier_id}), so it can only remove what this run made"
+            )
+        saved = step.options.get("save")
+        if isinstance(saved, dict):
+            known |= {str(k) for k in saved}
     for i, step in enumerate(test.steps):
         texts = [step.value or ""] + [v for _, v in (step.target.ordered() if step.target else [])]
         for name in (n for t in texts for n in _PLACEHOLDER.findall(t)):
@@ -128,6 +142,25 @@ def _check_placeholders(test: TestCase, path: Path) -> None:
         for name in [needs] if isinstance(needs, str) else needs or []:
             if str(name) not in known:
                 raise SpecError(f"{path}: cleanup step {i + 1} needs '{name}', which no step saves")
+
+
+def _option_texts(options: dict[str, object]) -> list[str]:
+    """The texts in a service step's options where ${name} may stand: the body and what the reply is checked against."""
+    out: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, str):
+            out.append(node)
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for key in ("body", "check"):
+        walk(options.get(key))
+    return out
 
 
 def _from(step: object) -> str:

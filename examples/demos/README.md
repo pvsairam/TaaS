@@ -1,6 +1,6 @@
 # Demo tests
 
-Seven small tests to try the newer features on your own pod. They only read from the pod (they never
+Nine small tests to try the newer features on your own pod. They only read from the pod (they never
 save, submit or delete), and they are kept out of `examples/tests` so "Run all tests" and new clients do
 not pick them up.
 
@@ -21,3 +21,5 @@ Delete them from `my_tests` when you are done. Steps for each are in TESTING.md 
 | `library_demo_one.yaml`, `library_demo_two.yaml` | Shared steps | Both pass. Shared steps lists `read-locations` used by 2 tests |
 | `data_demo.yaml` | Test data | It passes. Test data lists the data set `pod-sizes`, and the run page shows how many rows each step asked for |
 | `data_gap_demo.yaml` | A gap in the test data | It stops at step 1 with "No test data for location_limit" (unless your pod is a STAGE pod) |
+| `setup_demo.yaml` | Setup steps | It passes. The run page says "The pod was ready" and lists the setup before the steps |
+| `setup_gap_demo.yaml` | A setup that is not met | It stops at step 1 with "Setup not met" (the steps never run). Change `locationsV9` to `locationsV2` and it passes |
